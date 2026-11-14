@@ -10,6 +10,20 @@ nada de ningún proyecto concreto.
 empresa. Entre paréntesis va el número de cada hallazgo, el mismo que citan los commits; el informe de la auditoría no
 está en este repositorio. «Desarrollo y CI» es para quien mantiene el repositorio: no cambia nada en la app instalada.
 
+### Descargar desde Releases, con su sha256 (14/11/2026)
+
+- **Nuevo: cada versión se publica como Release** de GitHub, con `Tenca-instalador.zip` y su sha256 en la página. El
+  README y el LEEME mandan al último Release (<https://github.com/bastegman/tenca/releases/latest>) y dicen cómo
+  comprobar el sha256 en Windows (`certutil -hashfile Tenca-instalador.zip SHA256`). Es el zip público: nunca lleva
+  listas de vocabulario.
+- Desarrollo y CI: `scripts/publicar_release.py` prepara la versión de `origin/main` con `git archive` y su
+  `build_zip.py` sin `--vocab`, comprueba que el zip no lleva carpetas `Vocabulario`, ni `.txt` que no sean de la app,
+  ni nada que no esté en git, y con `--publicar` crea el Release y comprueba el sha256 de lo publicado
+  (`tests/test_publicar_release.py`).
+- Desarrollo y CI: `main` protegida con una regla del repositorio (sin force-push, sin borrarla y con los 10 checks de
+  `tests.yml` en verde en el commit que se sube); Dependabot semanal para las acciones y pip
+  (`.github/dependabot.yml`), con las alertas y los arreglos de seguridad activados.
+
 ### Hoy, con un mes de agenda de Outlook (09/11/2026)
 
 Bernardo, msg 1380: el calendario «conecta bien al parecer, pero no veo las siguientes reuniones»; msg 1390: «que se
