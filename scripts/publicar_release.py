@@ -121,11 +121,12 @@ def problemas_zip(nombres, versionados):
     versionados = set(versionados)
     plantillas = {p.split("/")[-1] for p in versionados if p.startswith("_app/export/") and p.count("/") == 2}
     for n in nombres:
-        if n.casefold() in vistos:
+        partes = n.replace("\\", "/").split("/")
+        clave = "/".join(partes).casefold()
+        if clave in vistos:
             out.append(f"{n}: repetido")
             continue
-        vistos.add(n.casefold())
-        partes = n.replace("\\", "/").split("/")
+        vistos.add(clave)
         if n.startswith(("/", "\\")) or ".." in partes or re.match(r"^[A-Za-z]:", n):
             out.append(f"{n}: ruta absoluta o con «..»")
             continue
@@ -284,6 +285,17 @@ def no_antecesores(sha, tags, cwd=REPO):
     return [n for n, c in tags if c != sha and not git_ok("merge-base", "--is-ancestor", c, sha, cwd=cwd)]
 
 
+def comprobar_publicable(sha, version, tags, cwd=REPO):
+    """Para (Fallo) si `sha` ya está publicado con cualquier tag, o si hay un Release posterior o de otra línea."""
+    ya = [n for n, c in tags if c == sha]
+    if ya:
+        raise Fallo(f"{sha[:12]} ya está publicado como {ya[0]}")
+    posteriores = no_antecesores(sha, tags, cwd=cwd)
+    if posteriores:
+        raise Fallo(f"ya hay un Release posterior o de otra línea ({', '.join(posteriores)}): {version} no se publica, "
+                    "porque saldría como el último")
+
+
 # ----------------------------------------------------------------------------- publicar
 
 def gh(*args, timeout=600):
@@ -316,10 +328,7 @@ def main(argv):
         if git("ls-remote", "--tags", "origin", f"refs/tags/{tag}"):
             raise Fallo(f"el tag {tag} ya existe en origin: esa versión ya está publicada")
         tags = tags_release()
-        nuevos_tags = no_antecesores(sha, tags)
-        if nuevos_tags:
-            raise Fallo(f"ya hay un Release posterior o de otra línea ({', '.join(nuevos_tags)}): {version} no se "
-                        "publica, porque saldría como el último")
+        comprobar_publicable(sha, version, tags)
         os.makedirs(a.salida, exist_ok=True)
         zip_path = os.path.join(a.salida, ASSET)
         with tempfile.TemporaryDirectory(prefix="tenca-release-") as tmp:

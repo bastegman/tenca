@@ -320,12 +320,12 @@ en un sitio público. `server.log` y `voces.log` sí llevan nombres de reuniones
 
 `main` está protegida con una regla del repositorio (Settings → Rules → Rulesets, «main»), sin excepciones: no admite
 force-push ni borrarla, y solo acepta un commit que ya tenga en verde los 10 checks de `tests.yml` (los 8 de la suite,
-`lint` y `agnosticismo`), o con el mismo contenido que uno que los tiene. No exige pull request: un commit se sube
-primero a su rama, su CI pasa ahí y luego ese mismo commit se lleva a `main` (`git push origin <sha>:main`). Si un
-check de `tests.yml` cambia de nombre o sale de la matriz, hay que cambiarlo también en la regla: si no, `main` no
-acepta nada. Dependabot (`.github/dependabot.yml`) propone cada semana, en un pull request, las versiones nuevas de las
-acciones y de `requirements*.txt` (las de pip salen en rojo hasta que se cambie también la lista de
-`_app/instalar.ps1`, que `test_package` exige igual), y las alertas de seguridad están activadas.
+`lint` y `agnosticismo`). No exige pull request: un commit se sube primero a su rama, su CI pasa ahí y luego ese mismo
+commit se lleva a `main` (`git push origin <sha>:main`). Si un check de `tests.yml` cambia de nombre o sale de la
+matriz, hay que cambiarlo también en la regla: si no, `main` no acepta nada. Dependabot (`.github/dependabot.yml`)
+propone cada semana, en un pull request, las versiones nuevas de las acciones y de `requirements*.txt` (las de pip salen
+en rojo hasta que se cambie también la lista de `_app/instalar.ps1`, que `test_package` exige igual), y las alertas de
+seguridad están activadas.
 
 - `tests.yml`, con cada push y pull request: la suite en Ubuntu y Windows × Python 3.10–3.13, el parseo de
   `_app/*.ps1` con Windows PowerShell 5.1, flake8 y el job `agnosticismo`.
