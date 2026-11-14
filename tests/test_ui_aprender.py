@@ -263,8 +263,8 @@ class AprenderEnLaInterfazTests(unittest.TestCase):
         self.abrir(pg, rel)
         pg.wait_for_timeout(500)
         self.assertEqual(pg.locator(".apr-card").count(), 0)
-        # Ajustes › Proyectos: el diccionario personal, para ver, cambiar y quitar
-        pg.evaluate("() => openSettings({sec: 'proyectos'})")
+        # Ajustes › Vocabulario (antes en Proyectos): el diccionario personal, para ver, cambiar y quitar
+        pg.evaluate("() => openSettings({sec: 'vocabulario'})")
         pg.wait_for_selector("#sAprendido table", timeout=10000)
         self.assertIn("Tu diccionario personal", pg.locator("#sAprendido > label").text_content())
         fila = pg.locator("#sAprendido tr", has_text="«orbalia» → Orvalia")

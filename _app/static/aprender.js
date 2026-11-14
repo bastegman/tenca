@@ -288,7 +288,7 @@ main.addEventListener('change', e => {
   aprPintar();
 });
 
-/* ---------------------------------------------------------------- Ajustes › Proyectos */
+/* ---------------------------------------------------------------- Ajustes › Vocabulario */
 async function aprAjustes(d) {
   const box = $('#sAprendido', d);
   if (!box) return;

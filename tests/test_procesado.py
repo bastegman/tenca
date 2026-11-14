@@ -510,47 +510,50 @@ class ApiProcesadoTests(TempTree):
 # ----------------------------------------------------------------------------- la interfaz
 
 class InterfazProcesadoTests(unittest.TestCase):
-    def test_ajustes_ofrece_las_tres_opciones_con_sus_avisos(self):
-        app = static("app.js")
-        self.assertIn("function procesadoFieldsetHtml()", app)
-        self.assertIn("${procesadoFieldsetHtml()}", app)
-        self.assertIn('name="proc" value="${v}"', app)
+    def test_las_tres_opciones_viven_en_el_asistente(self):
+        """Punto 37 del review (14/11/2026): las tres opciones, con sus avisos, solo en el asistente («Cambiar…»).
+        Ajustes › Procesado es la tarjeta de estado y lo que se ajusta de la opción que tienes."""
+        app, wz = static("app.js"), static("configurar.js")
         for v in ("local", "agente", "api"):
-            self.assertIn(f"${{opt('{v}', ", app)
-        self.assertIn("Solo en este PC", app)
-        self.assertIn("Nada sale de él", app)
-        self.assertIn("se envía a Anthropic con esa cuenta", app)
-        self.assertIn("salen del PC hacia el proveedor", app)
-        self.assertIn("En algunas reuniones puede ser un bloqueante", app)
-        self.assertLess(app.index("${procesadoFieldsetHtml()}"), app.index("Transcripción en la nube</legend>"))
+            self.assertIn(f"${{wzOpcion('{v}', ", wz)
+        self.assertIn("Solo en este PC", wz)
+        self.assertIn("nada sale del PC", wz)
+        self.assertIn("se envía a Anthropic con esa cuenta", wz)
+        self.assertIn("salen del PC hacia el proveedor", wz)
+        self.assertIn("En algunas reuniones puede ser un bloqueante", wz)
+        self.assertNotIn('name="proc"', app)
+        self.assertNotIn("procesadoFieldsetHtml", app)
+        self.assertIn("${ajProcesadoHtml(pedido)}", app)
+        self.assertIn("cfgEstadoHtml()", app)
 
-    def test_paso_a_paso_de_claude_code_y_comprobar(self):
-        app = static("app.js")
-        self.assertIn("irm https://claude.ai/install.ps1 | iex", app)
-        self.assertIn("winget install Anthropic.ClaudeCode", app)
-        self.assertIn("escribe <code>claude</code>", app)
+    def test_paso_a_paso_de_claude_code_en_el_asistente(self):
+        app, wz = static("app.js"), static("configurar.js")
+        self.assertIn("irm https://claude.ai/install.ps1 | iex", wz)
+        self.assertIn("winget install Anthropic.ClaudeCode", wz)
+        self.assertIn("escribe <code>claude</code>", wz)
+        self.assertIn("Pro, Max, Ultra, Team, Enterprise o de Console", wz)
+        self.assertIn("Login successful", wz)  # el inicio de sesión en el navegador (claude-empresa, msg 1261)
+        self.assertIn('data-wz="powershell">Abrir PowerShell', wz)
+        self.assertIn("localStorage.setItem('procElegido', '1')", wz)
+        # en Ajustes, con la opción de Claude: el modelo y «Resumir solo al terminar», que se guardan al cambiarlos
+        self.assertIn('id="agModelo"', app)
+        self.assertIn("sw('sAutoAg', ", app)
+        self.assertIn("agModelo: el => ({ agente: { tipo: S.config.agente?.tipo || 'claude', modelo: el.value } })",
+                      app)
+        self.assertIn("sAutoAg: el => ({ summary: { auto: el.checked } })", app)
+        # «Comprobar» sigue junto al modelo: dice si esta cuenta responde con él
         self.assertIn('id="agCheck"', app)
         self.assertIn("api('/api/agente/comprobar', { tipo: S.config.agente?.tipo || 'claude', "
                       "modelo: $('#agModelo', d)?.value })", app)
-        self.assertIn('id="sAutoAg"', app)  # el resumen automatico se puede apagar tambien con el agente
-        self.assertIn("se resumen solas; se desactiva aquí debajo", app)
-        self.assertIn("? $('#sAutoAg', d) : $('#sAuto', d)).checked", app)
-        self.assertIn("Pro, Max, Ultra, Team, Enterprise o Console", app)
-        self.assertIn("Login successful", app)  # el inicio de sesión en el navegador (claude-empresa, msg 1261)
-        self.assertIn('id="agPs"', app)  # «Abrir PowerShell» también aquí: el paso 1 lo nombra
-        self.assertIn("localStorage.setItem('procElegido', '1')", app)
-        self.assertIn('id="agModelo"', app)
-        self.assertIn("procesado: $('input[name=\"proc\"]:checked', d)?.value", app)
-        self.assertIn("agente: { tipo: S.config.agente?.tipo || 'claude', modelo: $('#agModelo', d)?.value }", app)
-        self.assertIn('$(\'#procApi\', d).hidden = v !== \'api\';', app)
-        self.assertIn('$(\'#procAgente\', d).hidden = v !== \'agente\';', app)
 
     def test_la_nube_y_el_resumen_con_api_solo_se_ven_con_api(self):
         app = static("app.js")
-        i = app.index('<div id="procApi"')
-        self.assertLess(i, app.index("Transcripción en la nube</legend>"))
-        self.assertLess(app.index("Transcripción en la nube</legend>"), app.index("Resumen con IA</legend>"))
-        self.assertIn("S.config.procesado === 'api' ? '' : ' hidden'", app)
+        i = app.index("function ajProcesadoHtml(pedido)")
+        bloque = app[i:app.index("\n}\n", i)]
+        self.assertIn("} else if (modo === 'api') {", bloque)
+        self.assertIn('id="sModel"', bloque)
+        self.assertIn("'sAutoLocal'", bloque)
+        self.assertIn("${enApi ? `<div id=\"procApiAv\">", app)
 
     def test_textos_segun_el_modo(self):
         app, notas = static("app.js"), static("notas.js")

@@ -88,13 +88,6 @@ function bindReunionSettings(d) {
   pedir('/api/calendario/estado').then(pintar).catch(err => { est.innerHTML = fallo(err); });
 }
 
-function reunionCollect(d) {
-  const o = $('#rnOutlook', d), a = $('#rnAviso', d);
-  return o && a ? { outlook_on: o.checked, rec_aviso: a.checked } : {};
-}
-
-
-
 /* Página de la reunión: participantes sugeridos por Outlook/Teams al grabar (props.participantes_origen). Hasta
    que se confirman o se editan, el servidor no los manda al resumen con IA ni a los destinos de salida. notas.js
    pinta esta fila debajo de «Participantes» y avisa al guardarlos (reunionParticipantesGuardados). */

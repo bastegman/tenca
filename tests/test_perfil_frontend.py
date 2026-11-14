@@ -14,10 +14,10 @@ from test_frontend import js_defs, read
 # grabar, en ajustes.js)
 HOOKS_APP = ("perfilLiveHtml(a)", "perfilMotoresHtml()", "perfilResumenHtml()", "perfilSalidasHtml()",
              "bindPerfilSettings(d)",
-             "collectPerfilSettings(d)", "perfilLangOf(list[0])", "perfilImportar('', drawVocab)",
+             "perfilLangOf(list[0])", "perfilImportar('', drawVocab)",
              "perfilVocabEmptyHtml()")
 GUARDED = ("perfilLiveHtml", "perfilMotoresHtml", "perfilResumenHtml", "perfilSalidasHtml", "bindPerfilSettings",
-           "collectPerfilSettings", "perfilLangOf",
+           "perfilLangOf",
            "perfilImportar", "perfilVocabEmptyHtml", "perfilPropsHtml", "perfilSavedText")
 
 
@@ -39,8 +39,9 @@ class PerfilCargaTests(unittest.TestCase):
             self.assertRegex(src, rf"typeof {fn} === 'function'", fn)
         # el motor del directo, el idioma del resumen y las instrucciones extra viven en el perfil (con fallback)
         self.assertNotIn('<label>Motor para el directo</label>', app)
-        self.assertIn("$('#lPreset', d)?.value", app)
-        self.assertIn("$('#sSumLang', d)?.value", app)
+        # (14/11/2026, punto 12 del review) y se guardan al cambiarlos, cada uno con lo suyo
+        self.assertIn("lPreset: el => ({ live_preset: el.value })", app)
+        self.assertIn("sSumLang: el => ({ summary: { lang: el.value } })", app)
         # mezclas nuevas en la lista de idiomas y el toast de Ctrl+Alt+R con «clic para ajustar»
         self.assertIn("['es-pt', 'Español + portugués (mezcla)'], ['en-pt', 'Inglés + portugués (mezcla)']", app)
         self.assertIn("clic para verla y cambiar el idioma o el contexto", app)
@@ -66,7 +67,7 @@ class PerfilCargaTests(unittest.TestCase):
         for fn in ("perfilLangLabel", "perfilLangOptions", "perfilLangOf", "perfilGroups", "perfilImportar",
                    "perfilImportText", "perfilPropsHtml", "perfilLiveHtml", "perfilSavedText", "perfilReglasHtml",
                    "perfilMotoresHtml", "perfilResumenHtml", "perfilSalidasHtml",
-                   "perfilOutsHtml", "bindPerfilOuts", "bindPerfilSettings", "collectPerfilSettings",
+                   "perfilOutsHtml", "bindPerfilOuts", "bindPerfilSettings",
                    "perfilVocabEmptyHtml", "vocabConectar", "vocabConectadaText", "vocabDesconectar", "vocabAvisoText",
                    "vocabCarpetasHtml"):
             self.assertRegex(js, re.compile(rf"^(async )?function {fn}\(", re.M), fn)
@@ -140,7 +141,7 @@ console.log((h.match(/<tr>/g) || []).length, h.includes('data-vunlink=":vabc123"
 console.log(vocabCarpetasHtml([]).includes('Ninguna'));""")
         lines = out.splitlines()
         self.assertEqual(lines[0], "[C]Conectada «Listas &lt;W&gt;» · 3 listas · se leen al grabar, sin copiarlas")
-        self.assertEqual(lines[1], "«L» ya estaba conectada · 1 lista · 1 se salta: lo ves en Ajustes › Proyectos")
+        self.assertEqual(lines[1], "«L» ya estaba conectada · 1 lista · 1 se salta: lo ves en Ajustes › Vocabulario")
         self.assertIn("«Sub\\Infra.txt» está solo en OneDrive", lines[2])
         self.assertIn("Mantener siempre en este dispositivo", lines[2])
         self.assertEqual(lines[3], "«Glosario.txt» pesa 120 KB: no parece una lista (se leen hasta 64 KB)")

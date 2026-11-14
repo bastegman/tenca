@@ -295,23 +295,28 @@ class TresModosE2E(unittest.TestCase):
         self.pg.wait_for_selector("#modal:not(.hidden) h3:has-text('Ajustes')", timeout=10000)
         # Ajustes abre en «Al grabar» desde el rediseño B2 (07/11/2026): lo de aquí está en Procesado
         self.pg.click(".aj-nav [data-sec='procesado']")
-        self.pg.wait_for_selector("#modal input[name='proc'][value='local']", state="visible", timeout=10000)
+        self.pg.wait_for_selector("#modal [data-cfg='cambiar']", state="visible", timeout=10000)
 
     def elegir(self, modo):
-        """Elige el modo en «Dónde se procesan tus reuniones»: elegirlo solo no cambia nada (se dice que falta
-        aplicarlo) y «Aplicar ahora» lo aplica sin bajar hasta «Guardar»."""
+        """Elige el modo con «Cambiar…» de Ajustes › Procesado: las tres opciones viven en el asistente (punto 37 del
+        review, 14/11/2026). Elegirla no cambia nada hasta «Guardar sin probar» (o «Terminar» tras «Probar»); con la
+        API, el proveedor y la clave van en el paso 2. Al guardar, vuelve a Ajustes › Procesado."""
+        pg = self.pg
         antes = self.api("/api/config")["procesado"]
-        self.pg.check(f"#modal input[name='proc'][value='{modo}']")
-        if modo == "api" and not self.pg.input_value("#cProv"):
-            # en una instalación nueva no hay proveedor elegido, y sin él «Aplicar ahora» no aplica (msg 1386)
-            self.pg.select_option("#cProv", "groq")
-        if antes != modo:
-            self.pg.wait_for_selector("#procAplicar", timeout=10000)
-            self.assertIn("aún no está aplicado", self.pg.inner_text("#procGuardado"))
-            self.assertEqual(self.api("/api/config")["procesado"], antes)  # un clic de prueba no cambia nada
-            self.pg.click("#procAplicar")
-            self.pg.wait_for_function("document.querySelector('#procGuardado').innerText.includes('Aplicado')",
-                                      timeout=20000)
+        pg.click("#modal [data-cfg='cambiar']")
+        pg.wait_for_selector(f".dialog.wz input[name='wzModo'][value='{modo}']", timeout=10000)
+        pg.check(f".dialog.wz input[name='wzModo'][value='{modo}']")
+        pg.click(".wz-foot [data-wz='sig']")
+        if modo == "api":
+            if pg.locator("#wzProv").is_visible():  # en una instalación nueva no hay proveedor elegido (msg 1386)
+                pg.select_option("#wzProv", "groq")
+                pg.wait_for_selector("#wzKey", timeout=5000)
+            pg.fill("#wzKey", CLAVE)
+        self.assertEqual(self.api("/api/config")["procesado"], antes)  # elegir no cambia nada
+        pg.click(".wz-foot [data-wz='sig']")
+        pg.wait_for_selector(".wz-foot [data-wz='guardar']", timeout=10000)
+        pg.click(".wz-foot [data-wz='guardar']")
+        pg.wait_for_selector("#modal .aj-nav [data-sec='procesado'].on", timeout=20000)
         self.assertEqual(self.api("/api/config")["procesado"], modo)
 
     def abrir(self, rel):
@@ -360,6 +365,9 @@ class TresModosE2E(unittest.TestCase):
         self.ajustes()
         self.elegir("api")    # partir de otro modo: así «Solo en este PC» es un cambio, como al elegirlo
         self.elegir("local")
+        # los modelos de Whisper, plegados en Procesado (abiertos solos mientras falta alguno)
+        if not pg.locator("#modal details.aj-plegado").evaluate("e => e.open"):
+            pg.click("#modal details.aj-plegado > summary")
         pg.wait_for_selector("#procModelos:not([hidden]) [data-model='medium']", timeout=15000)
         visto, pcts, fin = None, set(), time.time() + 900  # medium: 1.531 MB; progreso en MB y % hasta «descargado»
         while time.time() < fin:
@@ -494,13 +502,9 @@ class TresModosE2E(unittest.TestCase):
     def test_3_api_externa_groq(self):
         pg = self.pg
         self.ajustes()
-        self.elegir("api")
-        pg.select_option("#cProv", "groq")
-        pg.fill("#cKey", CLAVE)
-        pg.click("#cTest")
-        pg.wait_for_function("document.querySelector('#cTestRes').innerText.includes('Funciona')", timeout=60000)
+        self.elegir("api")  # con Groq y la clave (el Groq falso de 127.0.0.1)
         self.foto("3-ajustes-groq")
-        pg.click("#modal [data-m='ok']")
+        pg.keyboard.press("Escape")
         pg.wait_for_function("document.querySelector('#modal').classList.contains('hidden')", timeout=10000)
         c = self.api("/api/config")
         self.assertEqual((c["procesado"], c["live_preset"], c["preset"]), ("api", "nube", "nube"))

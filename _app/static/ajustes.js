@@ -1,7 +1,7 @@
 'use strict';
 /* Ajustes por lo que hace el usuario (rediseño B2 y B3, 07/11/2026): «Al grabar» abre con «Así se graba ahora una
    reunión de [proyecto]», el mismo plan del servidor que la tarjeta de grabar y Ctrl+Alt+R (/api/grabar/plan), con lo
-   que esté escrito y sin guardar; debajo, solo las reglas, en una pantalla. «Proyectos» dice la carpeta y el idioma de
+   que se ve (cada cambio se guarda al momento, app.js); debajo, solo las reglas, en una pantalla. «Proyectos» dice la carpeta y el idioma de
    cada proyecto y workstream y si son suyos o heredados. «Calendario y Teams» dice el estado en una frase.
    Se carga después de app.js, notas.js, perfil.js, reunion.js y grabar.js. app.js lo invoca con
    `typeof x === 'function'`. */
@@ -23,13 +23,13 @@ function ajAlGrabarHtml() {
     </div>`;
 }
 /* «Ocultar Tenca al compartir pantalla» (msg 1242; window.py), en Calendario y Teams (las reglas de «Al grabar» ya
-   llenan una pantalla): se aplica al marcarlo, sin «Guardar» (data-se-guarda-solo), como «Arrancar con Windows».
+   llenan una pantalla): se aplica al marcarlo con su propia petición, como «Arrancar con Windows».
    o: /api/config → ocultar_captura ({activado, soportado, motivo, error}). */
 function ajOcultarHtml(o) {
   if (!o) return '';
   const no = o.soportado === false, mal = no || !!o.error;
   return `<fieldset><legend>${I.monitor}Al compartir pantalla</legend>
-      <label style="display:flex;gap:8px;align-items:center;font-weight:500" id="agOcultarSw"><input type="checkbox" id="agOcultar" data-se-guarda-solo${o.activado && !no ? ' checked' : ''}${no ? ' disabled' : ''}> <span>Ocultar ${esc(APP_NAME)} al compartir pantalla <span class="muted" style="font-weight:400">(también su aviso «Grabar»)</span></span></label>
+      <label style="display:flex;gap:8px;align-items:center;font-weight:500" id="agOcultarSw"><input type="checkbox" id="agOcultar"${o.activado && !no ? ' checked' : ''}${no ? ' disabled' : ''}> <span>Ocultar ${esc(APP_NAME)} al compartir pantalla <span class="muted" style="font-weight:400">(también su aviso «Grabar»)</span></span></label>
       <div class="help${mal ? ' warn-txt' : ''}" id="agOcultarNota">${esc(ajOcultarAyuda(o))}</div>
     </fieldset>`;
 }
@@ -44,14 +44,16 @@ function bindAjOcultar(d) {
   x.onchange = async () => {
     const on = x.checked;
     x.disabled = true;
+    d.ajMarca?.(x, 'guardando');
     try {
       const r = await api('/api/ocultar-captura', { activado: on });
       if (S.config) S.config.ocultar_captura = r;
       x.checked = !!r.activado;
       const n = $('#agOcultarNota', d);
       if (n) { n.textContent = ajOcultarAyuda(r); n.classList.toggle('warn-txt', !!r.error || r.soportado === false); }
-      toast(r.error ? esc(`No se ha podido aplicar: ${r.error}`) : r.activado ? `${esc(APP_NAME)} no saldrá al compartir pantalla` : `${esc(APP_NAME)} vuelve a salir al compartir pantalla`, r.error ? 'err' : '');
-    } catch (err) { x.checked = !on; toast(esc(err.message), 'err'); }
+      if (d.ajMarca) d.ajMarca(x, r.error ? 'err' : 'ok', r.error ? `Windows no lo ha aplicado: ${r.error}` : '');
+      else toast(r.error ? esc(`No se ha podido aplicar: ${r.error}`) : r.activado ? `${esc(APP_NAME)} no saldrá al compartir pantalla` : `${esc(APP_NAME)} vuelve a salir al compartir pantalla`, r.error ? 'err' : '');
+    } catch (err) { x.checked = !on; if (d.ajMarca) d.ajMarca(x, 'err', err.message); else toast(esc(err.message), 'err'); }
     finally { x.disabled = false; }
   };
 }
@@ -83,7 +85,7 @@ function ajListas(d) {
 function ajListasFalloHtml(extra = '') {
   return `<div class="notice ag-sin-listas">No se han podido leer las listas de vocabulario${extra}. <button class="btn sm" type="button" data-aj-listas-otra>Probar otra vez</button></div>`;
 }
-/* lo que Al grabar tiene escrito ahora (guardado o no), para enseñar el plan con ello y para «Guardar» */
+/* lo que Al grabar enseña ahora, para el plan de arriba (se pide al cambiar algo, mientras se guarda) */
 function ajAlGrabarValores(d) {
   const v = id => $('#' + id, d);
   const out = { language: v('sLang')?.value ?? '', rec_directo: !!v('agDirecto')?.checked };
@@ -97,20 +99,11 @@ function ajAlGrabarValores(d) {
   // (el de la opción marcada, como al guardar), vocabulario de las reuniones sin proyecto y una carpeta por reunión
   if (v('lPreset')?.value) out.live_preset = v('lPreset').value;
   if (v('pfPreset')?.value) out.preset = v('pfPreset').value;
-  // la opción marcada en «Dónde se procesan», aplicada o no: «Guardar» también la aplica (collect, en app.js)
-  const proc = $('input[name="proc"]:checked', d)?.value;
-  if (proc) out.procesado = proc;
-  const auto = proc === 'agente' ? v('sAutoAg') : v('sAuto');
+  // «Resumir solo al terminar»: la casilla de la opción que tienes (Procesado enseña solo la suya)
+  const auto = v('sAutoAg') || v('sAuto');
   if (auto) out.summary = { auto: auto.checked, local: !!v('sAutoLocal')?.checked };
   if (v('sPrompt')) out.prompt = v('sPrompt').value;
   if (v('agPorReunion')) out.carpeta_por_reunion = v('agPorReunion').checked;
-  return out;
-}
-function ajAlGrabarCollect(d) {
-  const x = ajAlGrabarValores(d), out = { rec_directo: x.rec_directo };
-  if (x.rec_mic) out.rec_mic = x.rec_mic;
-  if (x.rec_sys) out.rec_sys = x.rec_sys;
-  if ($('#agPorReunion', d)) out.carpeta_por_reunion = $('#agPorReunion', d).checked;
   return out;
 }
 function bindAjAlGrabar(d) {
@@ -185,7 +178,6 @@ function bindAjAlGrabar(d) {
     const el = $('#' + id, d);
     if (el) { el.addEventListener('change', luego); el.addEventListener('input', luego); }
   });
-  $$('input[name="proc"]', d).forEach(el => el.addEventListener('change', luego));
   // micrófono y audio del PC: los de Ajustes (lo de una reunión se cambia en su tarjeta). Con la lista de
   // dispositivos, sin cambiar lo elegido (ni lo que ya hayas tocado)
   const c = S.config || {}, mic = $('#agMic', d), sys = $('#agSys', d);
@@ -204,7 +196,7 @@ function bindAjAlGrabar(d) {
     if ([...mic.options].some(x => x.value === vm)) mic.value = vm;
     if ([...sys.options].some(x => x.value === vs)) sys.value = vs;
     titulo(mic); titulo(sys);
-    // si ha cambiado lo que se ve, que lo sepan el plan de arriba y el aviso de «sin guardar»
+    // si ha cambiado lo que se ve, que lo sepan el plan de arriba y el guardado (app.js)
     if (mic.value !== antes[0]) mic.dispatchEvent(new Event('change', { bubbles: true }));
     if (sys.value !== antes[1]) sys.dispatchEvent(new Event('change', { bubbles: true }));
   }).catch(err => {
@@ -238,7 +230,7 @@ function bindAjAlGrabar(d) {
 
 /* ---------------------------------------------------------------- Proyectos: carpeta e idioma de cada uno */
 function ajProyectosHtml() {
-  return `<div class="ag-cab"><h4>Proyectos y workstreams</h4><div class="help" style="margin-top:2px">La carpeta y el idioma con los que se graba cada uno. En negro, lo asignado a ese proyecto o workstream; en gris, lo heredado (el workstream usa lo del proyecto, y el proyecto, su carpeta y el idioma de <a href="#" data-sec-ir="algrabar">Al grabar</a>). Lo que cambies en una fila se guarda al momento.</div></div>
+  return `<div class="ag-cab"><h4>Proyectos y workstreams</h4><div class="help" style="margin-top:2px">La carpeta y el idioma con los que se graba cada uno. En negro, lo asignado a ese proyecto o workstream; en gris, lo heredado (el workstream usa lo del proyecto, y el proyecto, su carpeta y el idioma de <a href="#" data-sec-ir="algrabar">Al grabar</a>).</div></div>
     <div id="pjTabla"><div class="gr-cargando">Cargando…</div></div>`;
 }
 /* la carpeta de un proyecto que no tiene una asignada, en palabras (car: /api/grabar/plan con proyectos) */
@@ -258,7 +250,7 @@ function ajProyectosTabla(car, idioma0) {
   if (!grupos.length && S.vocabError) return ajListasFalloHtml(', así que aquí no salen tus proyectos');
   if (!grupos.length) {
     const conectar = typeof vocabConectar === 'function' ? ' o conecta la carpeta donde ya tienes tus listas' : '';
-    return `<div class="help" style="margin-top:0">Todavía no hay proyectos. Crea uno con «Nuevo proyecto», abajo en Listas de vocabulario${conectar}: cada proyecto tiene sus workstreams, y cada workstream, su lista de nombres y siglas.</div>`;
+    return `<div class="help" style="margin-top:0">Todavía no hay proyectos. Crea uno con «Nuevo proyecto» en <a href="#" data-sec-ir="vocabulario">Vocabulario</a>${conectar}: cada proyecto tiene sus workstreams, y cada workstream, su lista de nombres y siglas.</div>`;
   }
   const lang = code => esc(perfilLangLabel(code));
   const ruta = x => `<code title="${esc(x.ruta)}">${esc(x.ruta)}</code>`;
@@ -278,18 +270,20 @@ function ajProyectosTabla(car, idioma0) {
     return `${id in wf ? perdida : ''}<span class="pj-her">la del proyecto</span>`;
   };
   const filas = grupos.map(([p, vs]) => {
-    const cab = `<tr class="pj-p" data-pj="${esc(p)}"><td><b>${esc(p)}</b></td>
+    const cab = `<tr class="pj-p" data-pj="${esc(p)}"><td title="${esc(p)}"><b>${esc(p)}</b></td>
       <td>${carpeta(p)}</td>
       <td>${p in pl ? lang(pl[p]) : `<span class="pj-her">el de Al grabar · ${lang(idioma0)}</span>`}</td>
       <td><button class="btn ghost sm" type="button" data-pj-editar="${esc(p)}" aria-label="Editar ${esc(p)}">Editar</button></td></tr>`;
-    return cab + vs.map(v => `<tr class="pj-w" data-pjw="${esc(v.id)}"><td>› ${esc(v.name)} <span class="muted">· ${v.terms} ${v.terms === 1 ? 'término' : 'términos'}</span></td>
+    // (14/11/2026) el nombre se recorta con «…» y entero al pasar el ratón: «› Infraestructura · 2 términos» se montaba
+    // sobre la columna de al lado
+    return cab + vs.map(v => `<tr class="pj-w" data-pjw="${esc(v.id)}"><td title="${esc(v.name)} · ${v.terms} ${v.terms === 1 ? 'término' : 'términos'}">› ${esc(v.name)} <span class="muted">· ${v.terms} ${v.terms === 1 ? 'término' : 'términos'}</span></td>
       <td>${carpetaW(v.id)}</td>
       <td>${v.id in wl ? lang(wl[v.id]) : `<span class="pj-her">el del proyecto · ${lang(pl[p] ?? idioma0)}</span>`}</td>
       <td><button class="btn ghost sm" type="button" data-pjw-editar="${esc(v.id)}" aria-label="Editar ${esc(p)} › ${esc(v.name)}">Editar</button></td></tr>`).join('');
   }).join('');
   const aviso = car === false ? `<div class="notice" style="margin-top:10px">No se ha podido calcular la carpeta de cada proyecto. <button class="btn sm" type="button" data-pj-reintentar>Probar otra vez</button></div>` : '';
   // anchos fijos: al editar una fila la tabla no salta y los desplegables no se cortan más de la cuenta
-  return `${aviso}<table class="vtable pj-tabla"><colgroup><col style="width:28%"><col style="width:32%"><col style="width:26%"><col style="width:14%"></colgroup><thead><tr><th>Proyecto › workstream</th><th>Carpeta principal</th><th>Idioma</th><th></th></tr></thead><tbody>${filas}</tbody></table>`;
+  return `${aviso}<div class="pj-scroll"><table class="vtable pj-tabla"><colgroup><col style="width:28%"><col style="width:32%"><col style="width:26%"><col style="width:14%"></colgroup><thead><tr><th>Proyecto › workstream</th><th>Carpeta principal</th><th>Idioma</th><th></th></tr></thead><tbody>${filas}</tbody></table></div>`;
 }
 /* opciones de carpeta de una fila: la heredada primero y la asignada aunque ya no exista (para no perderla en silencio) */
 function ajCarpetaOpts(sel, heredadaTxt) {
@@ -342,7 +336,7 @@ function bindAjProyectos(d) {
     });
     obs.observe(sv, { childList: true });
   }
-  // cada cambio de una fila se guarda al momento (no espera al «Guardar» de abajo, que no lo vería)
+  // cada cambio de una fila se guarda al momento, con su propia petición (la carpeta y el idioma de cada proyecto)
   const guardarCampo = async (tr, sel) => {
     const est = $('.pj-estado', tr), valor = sel.value === PERFIL_AUTO ? null : sel.value, carpeta = sel.matches('[data-pj-f]');
     const cuerpo = { clave: carpeta ? 'carpeta' : 'idioma', alcance: tr.dataset.alcance, vocab: tr.dataset.vocab, valor };
@@ -392,7 +386,7 @@ function bindAjProyectos(d) {
     if (listo) return cerrar(listo.closest('tr'));
     if (e.target.closest('[data-pj-lista]')) {
       const v = (S.vocab || []).find(x => x.id === e.target.closest('[data-pj-lista]').dataset.pjLista);
-      // editar la lista sale de Ajustes: antes, si hay algo sin guardar, se pregunta (app.js)
+      // editar la lista sale de Ajustes: antes, lo que quede por guardar se guarda (app.js)
       if (v && await d.ajAntesDeSalir?.() !== false) openVocabEditor(v, openSettings);
       return;
     }
@@ -431,9 +425,8 @@ function bindAjProyectos(d) {
 
 /* ---------------------------------------------------------------- Calendario y Teams: el estado en una frase (B3) */
 /* Teams y Outlook, una fila cada uno, y Outlook una sola vez (revisión 2 de B2, P1-5). La casilla de reunion.js se
-   queda en el DOM (la guarda reunionCollect) pero no se enseña: «Activar» y «Desactivar» van en la fila. Con la rama
-   fix-calendario, la frase es su #rnEstado (GET /api/calendario/estado), que guarda al momento; sin ella, lo que se sabe
-   sin preguntar a Outlook, y se guarda con «Guardar». */
+   queda en el DOM pero no se enseña: «Activar» y «Desactivar» van en la fila y guardan al momento. La frase es su
+   #rnEstado (GET /api/calendario/estado). */
 function ajCalendarioHtml() {
   return `<div class="ag-cab"><h4>Calendario y Teams</h4><div class="help" style="margin-top:2px">De dónde saca ${esc(APP_NAME)} el nombre de la reunión. Sin calendario también funciona: el nombre sale de Teams o de tus reuniones recientes.</div></div>
     <div class="ct-filas">
@@ -482,9 +475,7 @@ function bindAjCalendario(d) {
   // con su nombre entero para un lector de pantalla: «Activar» a secas no dice qué activa
   const boton = (on, txt, off = false) => `<button class="btn sm" type="button" data-ct-outlook="${on ? '1' : '0'}" aria-label="${txt} el calendario de Outlook"${off ? ' disabled' : ''}>${txt}</button>`;
   if (est) {
-    // fix-calendario: «Activar» y «Desactivar» guardan al momento, así que la casilla no cuenta como «sin guardar» ni
-    // la manda «Guardar» (app.js, collect)
-    casilla.dataset.seGuardaSolo = '';
+    // «Activar» y «Desactivar» guardan al momento (/api/calendario/activar): la casilla no se guarda por su cuenta
     const pintar = () => {
       const on = casilla.checked, activar = $('[data-rn-accion="activar"]', est);
       activar?.classList.add('hidden');  // el suyo, en la columna de la derecha, como «Desactivar»
@@ -523,25 +514,4 @@ function bindAjCalendario(d) {
     });
     return;
   }
-  // sin fix-calendario: lo que se sabe sin preguntar a Outlook, y «Activar» se guarda con «Guardar» (se dice)
-  const pintar = () => {
-    const on = casilla.checked;
-    probar?.classList.toggle('hidden', !on || fueraWin);
-    chip(oe, on && !fueraWin ? 'ok' : fueraWin ? 'aviso' : '', fueraWin ? 'Solo en Windows' : on ? 'Activado' : 'No conectado');
-    const guardado = !!S.config?.outlook_on, pendiente = on !== guardado ? (on ? 'Se activa al pulsar Guardar. ' : 'Se desactiva al pulsar Guardar. ') : '';
-    frase.textContent = pendiente + (fueraWin ? 'El calendario de Outlook solo se lee en Windows.'
-      : on ? 'Al grabar, mira qué cita tienes a esa hora. «Probar» dice si responde ahora.'
-        : `${APP_NAME} solo lee el Outlook clásico de escritorio, abierto. Sin él, el nombre sale de Teams o de tus reuniones recientes.`);
-    // fuera de Windows no se ofrece «Activar» (no serviría); si estaba activado, sí «Desactivar»
-    oa.innerHTML = on ? boton(false, 'Desactivar') : fueraWin ? '' : boton(true, 'Activar');
-  };
-  pintar();
-  casilla.addEventListener('change', pintar);
-  oa.addEventListener('click', e => {
-    const b = e.target.closest('[data-ct-outlook]');
-    if (!b) return;
-    casilla.checked = b.dataset.ctOutlook === '1';
-    casilla.dispatchEvent(new Event('change', { bubbles: true }));
-    $('[data-ct-outlook]', oa)?.focus();  // el botón se ha repintado: el foco, al nuevo (teclado)
-  });
 }

@@ -84,7 +84,7 @@ async function vocabConectar(after) {
 function vocabConectadaText(r) {
   const n = r.listas || 0, s = (r.avisos || []).length;
   const listas = `${n} ${n === 1 ? 'lista' : 'listas'}`;
-  const salta = s ? ` · ${s} ${s === 1 ? 'se salta' : 'se saltan'}: lo ves en Ajustes › Proyectos` : '';
+  const salta = s ? ` · ${s} ${s === 1 ? 'se salta' : 'se saltan'}: lo ves en Ajustes › Vocabulario` : '';
   if (r.ya) return `«${esc(r.name)}» ya estaba conectada · ${listas}${salta}`;
   return `${I.check}Conectada «${esc(r.name)}» · ${listas} · se leen al grabar, sin copiarlas${salta}`;
 }
@@ -106,7 +106,7 @@ function vocabAvisoText(a) {
   if (a.motivo === 'grande') return `«${a.lista}» pesa ${a.kb} KB: no parece una lista (se leen hasta 64 KB)`;
   return `«${a.lista}»: ${a.motivo}`;
 }
-/* Ajustes › Proyectos (Listas de vocabulario): las carpetas conectadas, con cuántas listas dan, lo que se salta, «Abrir» y «quitar». */
+/* Ajustes › Vocabulario (Listas de vocabulario): las carpetas conectadas, con cuántas listas dan, lo que se salta, «Abrir» y «quitar». */
 function vocabCarpetasHtml(carpetas) {
   carpetas = carpetas || [];
   const ayuda = `<div class="help">Cada <code>.txt</code> es un workstream, con los términos separados por comas o uno por línea. Valen tres formas: los <code>.txt</code> sueltos (el proyecto es el nombre de la carpeta), una subcarpeta <code>Vocabulario</code>, o una carpeta por proyecto con su <code>Vocabulario</code> dentro. Lo que cambies en esos archivos se usa en la siguiente grabación. Quitar una carpeta no borra nada.</div>`;
@@ -155,8 +155,8 @@ function perfilIdiomaDirectoText(i) {
 /* ---------------------------------------------------------------- Ajustes (rediseño B2, 07/11/2026)
    El «Perfil de reunión» de antes era un bloque de 466 palabras con grabar, resumir, motores y destinos mezclados.
    Ahora cada pieza va a su sección: las reglas de grabar a «Al grabar» (ajustes.js), los motores a «Procesado», el
-   idioma y las instrucciones del resumen a «Resumen» y los destinos de salida a «Proyectos». Los ids no cambian (los
-   lee collect() de app.js y collectPerfilSettings). */
+   idioma y las instrucciones del resumen a «Resumen» y los destinos de salida a «Proyectos». Cada control se guarda al
+   cambiarlo, por su id (AJ_GUARDA, app.js). */
 const perfilOpt = (v, l, sel) => `<option value="${esc(v)}"${v === sel ? ' selected' : ''}>${esc(l)}</option>`;
 /* Opciones de «Reuniones sin proyecto» y de «Proyecto al grabar», con lo guardado aunque ahora no salga. */
 function perfilFolderOpts(sel) {
@@ -253,12 +253,14 @@ function bindPerfilOuts(d) {
   const box = $('#pfOuts', d), add = $('#pfOutAdd', d);
   if (!box || !add) return;
   perfilOuts = (S.config.perfil?.outputs || []).map(o => ({ path: o.path, format: o.format || 'md', by_project: !!o.by_project }));
-  const draw = () => { box.innerHTML = perfilOutsHtml(perfilOuts); d.ajMarcar?.(); };  // (también tras elegir carpeta)
+  // cada cambio de la lista se guarda entero al momento (app.js, ajOutsCambiadas), también tras elegir carpeta
+  const draw = () => { box.innerHTML = perfilOutsHtml(perfilOuts); d.ajOutsCambiadas?.(); };
   box.addEventListener('click', e => { const b = e.target.closest('[data-out-del]'); if (b) { perfilOuts.splice(+b.dataset.outDel, 1); draw(); } });
   box.addEventListener('change', e => {
     const f = e.target.closest('[data-out-fmt]'), p = e.target.closest('[data-out-proj]');
     if (f) perfilOuts[+f.dataset.outFmt].format = f.value;
     if (p) perfilOuts[+p.dataset.outProj].by_project = p.checked;
+    if (f || p) d.ajOutsCambiadas?.();
   });
   add.onclick = async () => {
     toast('Elige la carpeta en la ventana de Windows que se acaba de abrir…');
@@ -304,16 +306,9 @@ function bindPerfilSettings(d) {
       if (rel && document.body.contains(fsel)) {
         fsel.innerHTML = `<option value="${PERFIL_AUTO}">Automática · la última usada</option>` + folderOpts(rel);
         fsel.dataset.prev = rel;
-        d.ajMarcar?.();  // es un cambio sin guardar como otro (revisión 8: no salía «Hay cambios sin guardar»)
+        d.ajGuardar?.(fsel);  // elegida aquí, sin «change»: se guarda como cualquier otro cambio
         d.ajDibujarEnlaces?.();  // y ya es una carpeta vinculada: sale en su lista, con «quitar»
       }
     };
   }
-}
-function collectPerfilSettings(d) {
-  const f = $('#pfFolder', d), v = $('#pfVocab', d);
-  if (!f || !v) return {};
-  return { preset: $('#pfPreset', d).value,
-    perfil: { folder: f.value === PERFIL_AUTO ? null : f.value, vocab: v.value === PERFIL_AUTO ? null : v.value,
-      context: $('#pfContext', d).value.trim(), outputs: perfilOuts } };
 }

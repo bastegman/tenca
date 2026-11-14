@@ -272,12 +272,12 @@ v(ajOcultarHtml({activado: false, soportado: true}));
 v(ajOcultarHtml({activado: true, soportado: false, motivo: 'Solo en Windows.'}));
 v(ajOcultarHtml({activado: true, soportado: true, error: 'Windows no lo ha aceptado (error 5).'}));
 v(ajOcultarHtml(undefined));""")]
-        self.assertIn('id="agOcultar" data-se-guarda-solo checked>', out[0])
+        self.assertIn('id="agOcultar" checked>', out[0])
         self.assertIn("Ocultar Tenca al compartir pantalla", out[0])
         self.assertIn("(también su aviso «Grabar»)", out[0])
         self.assertIn("Tú la sigues viendo. Tampoco sale en tus capturas de pantalla: para enseñar Tenca en una demo "
                       "o hacerle una captura, quítalo (vale al momento).", out[0])
-        self.assertIn('id="agOcultar" data-se-guarda-solo>', out[1])
+        self.assertIn('id="agOcultar">', out[1])
         self.assertIn("disabled", out[2])
         self.assertIn('<div class="help warn-txt" id="agOcultarNota">Solo en Windows.</div>', out[2])
         self.assertNotIn("checked", out[2])

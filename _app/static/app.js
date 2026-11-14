@@ -166,7 +166,7 @@ async function api(path, body) {
   const r = await fetch(path, opt);
   let j;
   try { j = await r.json(); } catch { j = { error: r.statusText } }
-  if (!r.ok || j.error) throw new Error(j.error || r.statusText);
+  if (!r.ok || j.error) throw Object.assign(new Error(j.error || r.statusText), { status: r.status });
   return j;
 }
 
@@ -833,7 +833,7 @@ function avisoResumenLocalHtml() {
 function avisoResumenLocalVisto(irAlAjuste) {
   S.config.summary = { ...(S.config.summary || {}), aviso_local: false };
   $('#avisoSumLocal')?.remove();
-  api('/api/settings', { summary: { aviso_visto: true } }).catch(err => toast(esc(err.message), 'err'));
+  api('/api/settings', { summary: { aviso_visto: true } }).then(setConfig).catch(err => toast(esc(err.message), 'err'));
   if (!irAlAjuste) return;
   openSettings({ sec: 'procesado' });
   const c = $('#sAutoLocal');
@@ -2021,69 +2021,124 @@ function openRenameFolder(path) {
 }
 $('#btnNewFolder').onclick = () => openNewFolder(S.route.kind === 'f' ? S.route.path : '');
 
-/* Dónde se procesan las reuniones: solo en este PC, con la cuenta de Claude del usuario (Claude Code) o con una API
-   externa. Las dos últimas avisan de que el contenido de la reunión sale del PC (decisión de producto del 02/11/2026). */
-function procesadoFieldsetHtml() {
-  const mode = S.config.procesado || 'local', ag = S.config.agente || {}, agLabel = esc(ag.label || 'Claude Code');
-  const opt = (v, titulo, texto, aviso) => `<label class="proc${mode === v ? ' on' : ''}"><input type="radio" name="proc" value="${v}"${mode === v ? ' checked' : ''}>
-      <div><b>${titulo}</b><div class="help" style="margin-top:2px">${texto}</div>${aviso ? `<div class="notice proc-aviso">${I.info}${aviso}</div>` : ''}</div></label>`;
-  const cuando = ag.comprobado ? new Date(ag.comprobado * 1000).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : '';
-  const estado = !ag.encontrado ? `Todavía no encuentro ${agLabel} en este PC`
-    : cuando ? `${agLabel} ${esc(ag.version || '')} · comprobado el ${cuando}` : `${agLabel} encontrado · sin comprobar todavía`;
-  return `<fieldset><legend>${I.monitor}${typeof cfgEstadoHtml === 'function' ? 'Cambiar de opción aquí' : 'Dónde se procesan tus reuniones'}</legend>
-    ${typeof cfgEstadoHtml === 'function' ? '<div class="help" style="margin-top:0">Se aplica con «Aplicar ahora». Con «Cambiar…», arriba, el asistente te guía y lo prueba al final.</div>' : ''}
-    <div class="procs">
-      ${opt('local', 'Solo en este PC', 'Whisper transcribe en tu ordenador. Nada sale de él. Sin resumen con IA.')}
-      ${opt('agente', `Con tu cuenta de Claude (${agLabel})`, `Transcribe en tu PC y resume con Claude usando tu suscripción, personal o de empresa, a través de ${agLabel}: ${esc(APP_NAME)} no ve ni guarda tus credenciales.`,
-    'El texto de la reunión (título, fecha, transcripción con quién habla si se sabe, notas, contexto, participantes confirmados e instrucciones; el audio no) se envía a Anthropic con esa cuenta: con la de empresa, bajo el acuerdo de tu empresa; con la personal, bajo sus términos de uso. En algunas reuniones puede ser un bloqueante: compruébalo antes. Al terminar de transcribir, las reuniones de los últimos 3 días se resumen solas; se desactiva aquí debajo.')}
-      ${opt('api', 'API externa', 'Transcripción rápida en la nube y resumen con el proveedor que elijas (o la API de tu empresa), con su API key.',
-    'El audio (para transcribir) y el texto (para resumir) salen del PC hacia el proveedor. Comprueba la política de tu empresa y el acuerdo con tu cliente, si lo hay.')}
-    </div>
-    <div class="help" id="procGuardado" aria-live="polite"></div>
-    ${typeof modelosHtml === 'function' ? modelosHtml() : ''}
-    <div id="procAgente"${mode === 'agente' ? '' : ' hidden'}>
-      <ol class="pasos">
-        <li><b>Instala ${agLabel}</b> (una vez): pulsa «Abrir PowerShell», pega <code>irm https://claude.ai/install.ps1 | iex</code> y pulsa Intro (o <code>winget install Anthropic.ClaudeCode</code>). Tarda menos de un minuto y no hace falta ser administrador.</li>
-        <li><b>Entra con tu cuenta</b>: en esa misma ventana escribe <code>claude</code> y pulsa Intro. Se abre el navegador con el inicio de sesión de Claude: entra con tu cuenta (Pro, Max, Ultra, Team, Enterprise o Console); si es la de tu empresa, con su inicio de sesión de siempre. Cuando ponga «Login successful», pulsa Intro y cierra la ventana.</li>
-        <li><b>Comprueba</b>: ${esc(APP_NAME)} busca ${agLabel} en este PC, lee su versión y le hace una petición mínima con tu cuenta.</li>
-      </ol>
-      <div class="help">¿Usas Claude Code en VS Code? ${esc(APP_NAME)} también encuentra esa copia y su sesión. La app de escritorio de Claude no basta: su sesión es solo suya.</div>
-      <div class="grid2">
-        <div><label>Modelo</label><select id="agModelo">${(ag.modelos || []).map(([v, l]) => `<option value="${esc(v)}"${v === ag.modelo ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
-        <div><label>Estado</label><div class="help" style="margin-top:8px" id="agEstado">${estado}</div></div>
-      </div>
-      <div class="row" style="margin-top:10px"><button class="btn sm" type="button" id="agPs">Abrir PowerShell</button><button class="btn sm" type="button" id="agCheck">Comprobar</button><span id="agRes" class="muted" style="font-size:12.5px"></span></div>
-      <label style="display:flex;gap:8px;align-items:center;font-weight:500;margin-top:12px"><input type="checkbox" id="sAutoAg" ${S.config.summary?.auto !== false ? 'checked' : ''}> Resumir solo al terminar de transcribir (reuniones de los últimos 3 días)</label>
-      <div class="help">Desmarcado, solo se resume a mano con «Resumir esta reunión». Cada resumen gasta cupo de tu suscripción.</div>
-    </div>
-  </fieldset>`;
+/* Ajustes › Procesado (punto 37 del review, 14/11/2026): la tarjeta con lo que hay ahora, «Probar» y «Cambiar…». Las
+   tres opciones, con sus avisos largos, viven en el asistente: un solo camino para cambiar de opción (antes también
+   había «Cambiar de opción aquí», con su «Aplicar ahora»). Debajo, solo lo que se ajusta de la opción que tienes, y se
+   guarda al cambiarlo como el resto de Ajustes. pedido: la opción que pide el asistente («Revisar en Ajustes» con
+   «Con tu cuenta de Claude» elegida y sin aplicar), para enseñar su selector de modelo. */
+function ajProcesadoHtml(pedido) {
+  const c = S.config, aplicado = c.procesado || 'local', modo = pedido || aplicado, ag = c.agente || {};
+  const sw = (id, on, txt) => `<label class="ag-sw"><input type="checkbox" id="${id}"${on ? ' checked' : ''}>${txt}</label>`;
+  const nombre = { local: '«Solo en este PC»', agente: '«Con tu cuenta de Claude»', api: '«Con una API externa»' };
+  let det = '';
+  if (modo === 'agente') {
+    // «Comprobar»: si esta cuenta responde con el modelo elegido (y qué copia de Claude Code lo hace)
+    const agLabel = esc(ag.label || 'Claude Code');
+    const cuando = ag.comprobado ? new Date(ag.comprobado * 1000).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : '';
+    const estado = !ag.encontrado ? `Todavía no encuentro ${agLabel} en este PC: «Cambiar…» te guía para instalarlo`
+      : cuando ? `${agLabel} ${esc(ag.version || '')} · comprobado el ${cuando}` : `${agLabel} encontrado · sin comprobar todavía`;
+    det = `<fieldset><legend>${I.spark}Resumen con Claude</legend>
+      <label for="agModelo">Modelo</label><select id="agModelo">${(ag.modelos || []).map(([v, l]) => `<option value="${esc(v)}"${v === ag.modelo ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>
+      <div class="row" style="margin-top:8px"><button class="btn sm" type="button" id="agCheck">Comprobar</button><span id="agRes" class="muted" style="font-size:12.5px"></span></div>
+      <div class="help" id="agEstado">${estado}</div>
+      <div class="aj-chk">${sw('sAutoAg', c.summary?.auto !== false, 'Resumir solo al terminar de transcribir (reuniones de los últimos 3 días)')}</div>
+      <div class="help">Sin marcar, se resume a mano con «Resumir esta reunión». Cada resumen gasta cupo de tu suscripción.</div>
+    </fieldset>`;
+  } else if (modo === 'api') {
+    const p = c.cloud?.provider, info = c.providers?.[p], prov = esc(provName());
+    const modelo = p === 'azure' || !provElegido() ? ''
+      : p === 'custom' ? `<label for="cModel">Modelo de transcripción</label><input class="input" id="cModel" list="cModels" value="${esc(c.cloud.model || 'whisper-large-v3')}">
+          <datalist id="cModels">${['whisper-large-v3', 'whisper-large-v3-turbo', 'whisper-1'].map(m => `<option value="${m}">`).join('')}</datalist>`
+        : info ? `<label for="cModel">Modelo de transcripción</label><select id="cModel">${info.models.map(m => `<option${m === c.cloud.model ? ' selected' : ''}>${esc(m)}</option>`).join('')}</select>` : '';
+    det = `<fieldset><legend>${I.nube}${prov}</legend>${modelo}
+      <label for="sModel">Modelo del resumen</label><input class="input" id="sModel" list="sModels" value="${esc(c.summary?.model || '')}">
+      <datalist id="sModels">${(c.summary?.models || []).map(m => `<option value="${esc(m)}">`).join('')}</datalist>
+      <div class="aj-chk">${sw('sAuto', c.summary?.auto !== false, 'Resumir solo al terminar de transcribir en la nube (reuniones de los últimos 3 días)')}</div>
+      <div class="aj-chk"><label class="ag-sw"><input type="checkbox" id="sAutoLocal"${c.summary?.local ? ' checked' : ''}>Resumir también las reuniones transcritas en local (las envía a ${esc(provName())})</label></div>
+      <div class="help" id="sAutoLocalQue">De cada reunión se envía a <b>${esc(provName())}</b>: el título (o el nombre del archivo), la fecha y la duración, la transcripción (con quién habla, si se sabe), tus notas, el contexto, los participantes confirmados y tus instrucciones para el resumen. El audio no.</div>
+      <div class="notice" id="sAutoLocalAviso"${c.summary?.local ? '' : ' hidden'}>Si son reuniones de trabajo, asegúrate de que lo permiten la política de tu empresa y el acuerdo con tu cliente, si lo hay.</div>
+      <div class="help">El proveedor y la clave se cambian con «Cambiar…». El modelo del directo, otras claves y los trozos están en <a href="#" data-sec-ir="avanzado">Avanzado</a>.</div>
+    </fieldset>`;
+  }
+  const sinAplicar = pedido && pedido !== aplicado
+    ? `<div class="notice" id="ajProcPedido">${nombre[pedido]} aún no está aplicada: sigue ${nombre[aplicado]}. Para aplicarla, «Cambiar…».</div>` : '';
+  // los modelos de Whisper, plegados; abiertos mientras falta alguno de los que usa esta opción (la descarga se ve)
+  const falta = typeof cfgDescargaTotal === 'function' && typeof cfgModelosNecesarios === 'function'
+    ? cfgDescargaTotal(cfgModelosNecesarios(), S.modelos) : null;
+  const modelos = modo !== 'api' && typeof modelosHtml === 'function'
+    ? `<details class="aj-plegado"${falta && !falta.listo ? ' open' : ''}><summary>Modelos de Whisper de este PC</summary>${modelosHtml()}</details>` : '';
+  return `${typeof cfgEstadoHtml === 'function' ? cfgEstadoHtml() : ''}${sinAplicar}${det}${typeof perfilMotoresHtml === 'function' ? perfilMotoresHtml() : ''}${modelos}`;
 }
 
 /* la ayuda del directo en Ajustes › Avanzado (OBS): con la API, la nube y su cupo; sin ella, solo el PC */
 const lAyuda = api => 'El motor con el que empieza cada directo se elige en Procesado › Motores y se puede cambiar en mitad de la grabación desde la propia pantalla. '
   + (api ? 'En la nube el texto va unos 5–10 s por detrás; en local, unos 20–40 s. El repaso final tarda 1–2 min por hora de reunión (mientras tanto ves el texto del directo), gasta el doble de cupo del proveedor y no se hace si has corregido el texto a mano.'
     : 'En este PC el texto va unos 20–40 s por detrás de lo que se dice.');
-/* Ajustes por secciones (07/11/2026, configurar.js): antes, un diálogo de 6 a 7,5 pantallas con «Guardar» al final.
-   Todas las secciones están en el DOM (collect() lee de todas); solo se ve la elegida. opts.sec: la que se abre (si
-   no, la última vista). Se llama también como manejador de clic: un Event no trae .sec. */
-// (rediseño B2, 07/11/2026) por lo que se hace: «Al grabar» primero; Vocabulario y Carpetas pasan a Proyectos; el
-// idioma y las instrucciones del resumen, a Resumen; Outlook y Teams, a Calendario y Teams; OBS, a Avanzado
-const AJ_SECS = [['algrabar', 'Al grabar'], ['proyectos', 'Proyectos'], ['procesado', 'Procesado'], ['resumen', 'Resumen'],
-  ['calendario', 'Calendario y Teams'], ['voces', 'Voces'], ['avanzado', 'Avanzado'], ['ayuda', 'Ayuda']];
+/* Ajustes por secciones (07/11/2026, configurar.js). Todas las secciones están en el DOM; solo se ve la elegida.
+   opts.sec: la que se abre (si no, la última vista). Se llama también como manejador de clic: un Event no trae .sec. */
+// (rediseño B2, 07/11/2026) por lo que se hace: «Al grabar» primero; las carpetas, en Proyectos; el idioma y las
+// instrucciones del resumen, en Resumen; Outlook y Teams, en Calendario y Teams; OBS, en Avanzado. (14/11/2026, punto 37)
+// las listas de vocabulario, en su sección: Proyectos ocupaba 2,5 pantallas
+const AJ_SECS = [['algrabar', 'Al grabar'], ['proyectos', 'Proyectos'], ['vocabulario', 'Vocabulario'], ['procesado', 'Procesado'],
+  ['resumen', 'Resumen'], ['calendario', 'Calendario y Teams'], ['voces', 'Voces'], ['avanzado', 'Avanzado'], ['ayuda', 'Ayuda']];
+/* Ajustes guarda cada control al cambiarlo (punto 12 del review, 14/11/2026: «no me queda claro si lo que se configura
+   es lo que realmente queda», msg 1196). Antes convivían cuatro formas: «Guardar» abajo, las filas de Proyectos y
+   Outlook al momento, y «Aplicar ahora» en Procesado; y el borrador de lo escrito sin guardar dio fallos en tres
+   revisiones seguidas. Ahora no hay borrador: lo que se ve es lo guardado, con «Guardado ✓» junto a cada control. La
+   única excepción es cambiar de opción en Procesado (descarga modelos o manda datos fuera): se hace en el asistente.
+   AJ_GUARDA: el id de cada control y lo que manda a /api/settings (solo esa parte: el servidor guarda lo que llega).
+   null = no se guarda (y vuelve a lo guardado). */
+const AJ_GUARDA = {
+  sLang: el => ({ language: el.value }),
+  pfFolder: el => el.value === '__pick' ? null : { perfil: { folder: el.value === PERFIL_AUTO ? null : el.value } },
+  pfVocab: el => ({ perfil: { vocab: el.value === PERFIL_AUTO ? null : el.value } }),
+  pfContext: el => ({ perfil: { context: el.value.trim() } }),
+  agPorReunion: el => ({ carpeta_por_reunion: el.checked }),
+  agMic: el => ({ rec_mic: el.value }),
+  agSys: el => ({ rec_sys: el.value }),
+  agDirecto: el => ({ rec_directo: el.checked }),
+  lMeet: el => ({ meeting_detect: el.checked }),
+  sPrompt: el => ({ prompt: el.value.trim() }),
+  agModelo: el => ({ agente: { tipo: S.config.agente?.tipo || 'claude', modelo: el.value } }),
+  sAutoAg: el => ({ summary: { auto: el.checked } }),
+  sAuto: el => ({ summary: { auto: el.checked } }),
+  sAutoLocal: el => ({ summary: { local: el.checked } }),
+  sModel: el => el.value.trim() ? { summary: { model: el.value.trim() } } : null,  // vacío: el servidor no lo guarda
+  cModel: el => el.value.trim() ? { cloud: { model: el.value.trim() } } : null,
+  lPreset: el => ({ live_preset: el.value }),
+  pfPreset: el => ({ preset: el.value }),
+  sSumLang: el => ({ summary: { lang: el.value } }),
+  sExtra: el => ({ summary: { extra: el.value.trim() } }),
+  rnAviso: el => ({ rec_aviso: el.checked }),
+  lAuto: el => ({ live_auto: el.checked }),
+  lFinal: el => ({ live_final_pass: el.checked }),
+  sThreads: el => +el.value >= 1 ? { threads: +el.value } : null,
+  cLiveModel: el => ({ cloud: { live_model: el.value } }),
+  cLiveModelCustom: el => ({ cloud: { live_model_custom: el.value.trim() } }),
+  cChunk: el => +el.value >= 1 ? { cloud: { chunk_minutes: +el.value } } : null,
+  cPar: el => +el.value >= 1 ? { cloud: { parallel: +el.value } } : null,
+};
+/* lo que el servidor deja tras guardar (recorta o ajusta a sus límites): se enseña eso, no lo escrito */
+const AJ_VALOR = {
+  pfContext: c => c.perfil?.context ?? '', sPrompt: c => c.prompt ?? '', sExtra: c => c.summary?.extra ?? '',
+  sThreads: c => String(c.threads), cChunk: c => String(c.cloud?.chunk_minutes), cPar: c => String(c.cloud?.parallel),
+};
+const ajMezclar = (a, b) => {
+  for (const [k, v] of Object.entries(b)) {
+    if (v && typeof v === 'object' && !Array.isArray(v) && a[k] && typeof a[k] === 'object') ajMezclar(a[k], v);
+    else a[k] = v;
+  }
+  return a;
+};
 function openSettings(opts) {
   if (!S.config) return toast('La app aún está arrancando: espera unos segundos y vuelve a probar.', 'err');
-  // lo escrito y sin guardar no sale de Ajustes: las confirmaciones van encima (ask) y, antes de abrir un subdiálogo
-  // (una lista, el asistente), «Tienes cambios sin guardar» (d.ajAntesDeSalir). Así, cada vez que se abre, Ajustes
-  // pinta lo guardado (revisión 10 de B2: el borrador que se reponía al volver traía un fallo nuevo en cada revisión)
   const sec = (opts && typeof opts === 'object' && AJ_SECS.some(x => x[0] === opts.sec) && opts.sec)
     || (AJ_SECS.some(x => x[0] === S.ajSec) && S.ajSec) || 'algrabar';
   S.ajSec = sec;
+  const pedido = opts && typeof opts === 'object' && ['local', 'agente', 'api'].includes(opts.proc) ? opts.proc : null;
   const enApi = S.config.procesado === 'api';  // (no «api»: taparía la función api() en todo Ajustes)
-  const c = S.config.cloud, P = S.config.providers;
+  const c = S.config.cloud;
   const ac = S.config.acerca || {};
-  const elegido = provElegido();  // en una instalación nueva, «Elige el proveedor…»: ninguno preseleccionado
-  const provOpts = (elegido ? '' : '<option value="" selected>Elige el proveedor…</option>')
-    + provOrden(P).map(([k, v]) => `<option value="${k}"${elegido && k === c.provider ? ' selected' : ''}>${esc(v.label)}</option>`).join('');
   openModal(`<h3>${I.gear}Ajustes</h3>
     <div class="aj-grid">
     <div class="aj-side"><nav class="aj-nav" aria-label="Secciones de Ajustes">${AJ_SECS.map(([id, l]) => `<button type="button" data-sec="${id}" class="${id === sec ? 'on' : ''}" aria-current="${id === sec ? 'true' : 'false'}"${id === sec ? ' autofocus' : ''}>${l}</button>`).join('')}</nav>
@@ -2095,13 +2150,6 @@ function openSettings(opts) {
     </section>
     <section data-secc="proyectos"${sec === 'proyectos' ? '' : ' hidden'}>
     ${typeof ajProyectosHtml === 'function' ? ajProyectosHtml() : ''}
-    <fieldset><legend>${I.book}Listas de vocabulario</legend>
-      <div id="sVocab" class="help" style="margin-top:0">Cargando…</div>
-      <label for="sPrompt">Vocabulario de las reuniones sin proyecto</label>
-      <textarea id="sPrompt" placeholder="Nombres propios, empresas, siglas, productos…">${esc(S.config.prompt)}</textarea>
-      <div class="help">Se le pasa a Whisper como contexto para que escriba bien nombres propios y siglas. Opcional: si notas frases raras o repetidas, déjalo vacío.</div>
-      <div id="sAprendido"></div>
-    </fieldset>
     <fieldset><legend>${I.folder}Carpetas fuera de ${esc(APP_NAME)}</legend>
       <div id="sLinks"></div>
       <div class="row" style="margin-top:8px"><button class="btn sm" type="button" id="lnAdd">${I.plus}Añadir una carpeta…</button></div>
@@ -2109,28 +2157,17 @@ function openSettings(opts) {
     </fieldset>
     ${typeof perfilSalidasHtml === 'function' ? perfilSalidasHtml() : ''}
     </section>
+    <section data-secc="vocabulario"${sec === 'vocabulario' ? '' : ' hidden'}>
+    <fieldset><legend>${I.book}Listas de vocabulario</legend>
+      <div id="sVocab" class="help" style="margin-top:0">Cargando…</div>
+      <label for="sPrompt">Vocabulario de las reuniones sin proyecto</label>
+      <textarea id="sPrompt" placeholder="Nombres propios, empresas, siglas, productos…">${esc(S.config.prompt)}</textarea>
+      <div class="help">Se le pasa a Whisper como contexto para que escriba bien nombres propios y siglas. Opcional: si notas frases raras o repetidas, déjalo vacío.</div>
+      <div id="sAprendido"></div>
+    </fieldset>
+    </section>
     <section data-secc="procesado"${sec === 'procesado' ? '' : ' hidden'}>
-    ${typeof cfgEstadoHtml === 'function' ? cfgEstadoHtml() : ''}
-    ${procesadoFieldsetHtml()}
-    <div id="procApi"${S.config.procesado === 'api' ? '' : ' hidden'}>
-    <fieldset><legend>${I.nube}Transcripción en la nube</legend>
-      <div class="notice">Las grabaciones de reuniones pueden ser información confidencial. Antes de mandar audio a un servicio externo, confirma que lo permiten la política de tu empresa y el acuerdo con tu cliente, si lo hay. Si tu empresa tiene una pasarela propia (Azure OpenAI u otra compatible con OpenAI), configúrala aquí.</div>
-      <label>Proveedor</label><select id="cProv">${provOpts}</select>
-      <div id="cFields"></div>
-      <div class="row" style="margin-top:14px"><button class="btn sm" id="cTest">Probar conexión</button><span id="cTestRes" class="muted" style="font-size:12.5px"></span></div>
-      <div class="help">El modelo del directo, otras claves, los trozos y el paralelismo están en <a href="#" data-sec-ir="avanzado">Avanzado</a>.</div>
-    </fieldset>
-    <fieldset><legend>${I.spark}Resumen con IA</legend>
-      <label style="display:flex;gap:8px;align-items:center;font-weight:500"><input type="checkbox" id="sAuto" ${S.config.summary?.auto !== false ? 'checked' : ''}> Resumir solo al terminar de transcribir en la nube (reuniones de los últimos 3 días)</label>
-      <label style="display:flex;gap:8px;align-items:center;font-weight:500"><input type="checkbox" id="sAutoLocal" ${S.config.summary?.local ? 'checked' : ''}> Resumir también las reuniones transcritas en local (las envía a ${esc(provName())})</label>
-      <div class="help" id="sAutoLocalQue">De cada reunión se envía a <b>${esc(provName())}</b>: el título (o el nombre del archivo), la fecha y la duración, la transcripción (con quién habla, si se sabe), tus notas, el contexto, los participantes confirmados y tus instrucciones para el resumen. El audio no.</div>
-      <div class="notice" id="sAutoLocalAviso"${S.config.summary?.local ? '' : ' hidden'}>Si son reuniones de trabajo, asegúrate de que lo permiten la política de tu empresa y el acuerdo con tu cliente, si lo hay.</div>
-      <label>Modelo</label><input class="input" id="sModel" list="sModels" value="${esc(S.config.summary?.model || '')}">
-      <datalist id="sModels">${(S.config.summary?.models || []).map(m => `<option value="${esc(m)}">`).join('')}</datalist>
-      <div class="help">El idioma del resumen y las instrucciones extra están en <a href="#" data-sec-ir="resumen">Resumen</a>. Usa el mismo proveedor y API key que la transcripción en la nube, y solo se envía el texto (no el audio). Lo que transcribes en local no sale del PC por el resumen automático salvo que marques la segunda casilla; a mano («Resumir esta reunión») se puede resumir siempre.${elegido && c.provider === 'groq' ? ' Con el plan gratuito de Groq (~8K tokens por minuto) una reunión de 1 h se resume por partes en unos 3 minutos, y caben unas 7 reuniones largas al día.' : ''}</div>
-    </fieldset>
-    </div>
-    ${typeof perfilMotoresHtml === 'function' ? perfilMotoresHtml() : ''}
+    ${ajProcesadoHtml(pedido)}
     </section>
     <section data-secc="resumen"${sec === 'resumen' ? '' : ' hidden'}>
     ${typeof perfilResumenHtml === 'function' ? perfilResumenHtml() : ''}
@@ -2144,22 +2181,20 @@ function openSettings(opts) {
     <section data-secc="avanzado"${sec === 'avanzado' ? '' : ' hidden'}>
     <fieldset><legend><i class="recdot"></i>Grabaciones de OBS</legend>
       <label style="display:flex;gap:8px;align-items:center;font-weight:500"><input type="checkbox" id="lAuto" ${S.config.live_auto ? 'checked' : ''}> Empezar a transcribir en cuanto OBS empiece a grabar</label>
-      <label id="lNube" style="display:flex;gap:8px;align-items:center;font-weight:500"${enApi ? '' : ' hidden'}><input type="checkbox" id="lFinal" ${S.config.live_final_pass !== false ? 'checked' : ''}> Al terminar un directo en la nube, repasar la grabación entera para mejorar el texto</label>
+      ${enApi ? `<label id="lNube" style="display:flex;gap:8px;align-items:center;font-weight:500"><input type="checkbox" id="lFinal" ${S.config.live_final_pass !== false ? 'checked' : ''}> Al terminar un directo en la nube, repasar la grabación entera para mejorar el texto</label>` : ''}
       <div class="help" id="lAyuda">${esc(lAyuda(enApi))}</div>
     </fieldset>
     <fieldset><legend>${I.monitor}Transcripción local</legend>
       <label for="sThreads">Hilos de CPU</label><input class="input" id="sThreads" type="number" min="1" max="${S.config.cpu_count}" value="${S.config.threads}">
       <div class="help">Tu procesador tiene ${S.config.cpu_count} hilos. Con más hilos va más rápido, pero el portátil irá más justo mientras transcribe.</div>
     </fieldset>
-    <div id="procApiAv"${enApi ? '' : ' hidden'}>
-    <fieldset><legend>${I.nube}La nube, en detalle</legend>
+    ${enApi ? `<div id="procApiAv"><fieldset><legend>${I.nube}La nube, en detalle</legend>
       ${typeof directoSettingsHtml === 'function' ? directoSettingsHtml(c) : ''}
       <div class="grid2">
-        <div><label>Minutos por trozo</label><input class="input" id="cChunk" type="number" min="2" max="20" value="${c.chunk_minutes}"></div>
-        <div><label>Trozos en paralelo</label><input class="input" id="cPar" type="number" min="1" max="8" value="${c.parallel}"></div>
+        <div><label for="cChunk">Minutos por trozo</label><input class="input" id="cChunk" type="number" min="2" max="20" value="${c.chunk_minutes}"></div>
+        <div><label for="cPar">Trozos en paralelo</label><input class="input" id="cPar" type="number" min="1" max="8" value="${c.parallel}"></div>
       </div>
-    </fieldset>
-    </div>
+    </fieldset></div>` : ''}
     </section>
     <section data-secc="ayuda"${sec === 'ayuda' ? '' : ' hidden'}>
     <fieldset><legend>${I.package}Compartir ${esc(APP_NAME)}</legend>
@@ -2179,14 +2214,14 @@ function openSettings(opts) {
       <div class="help">Solo lleva datos técnicos: la versión, el sistema, el motor y el modelo, cuántas carpetas vinculadas y copias en otras carpetas hay y, de las últimas líneas del registro, el texto fijo de cada mensaje con sus cifras y códigos de error. Los nombres de reuniones, carpetas, proyectos, temas y personas, las rutas y cualquier otro texto van como &lt;texto&gt;, y las claves no van. El registro completo (<code>server.log</code>) sí lleva nombres y rutas: no lo compartas tal cual. Aun así, revisa el diagnóstico antes de pegarlo y no lo publiques en un sitio público.</div>
       ${ac.tenca && /^tenca$/i.test(APP_NAME) ? `<p class="ac-tenca">${I.tenca}<span>El nombre viene de la tenca (<a href="${esc(ac.tenca)}" id="aTenca" title="Museo Nacional de Historia Natural de Chile"><i>Mimus thenca</i></a>), un pájaro de Chile.</span></p>` : ''}
     </fieldset>
-    <label style="display:flex;gap:8px;align-items:center;font-weight:500;margin-top:10px"><input type="checkbox" id="sInicioWin" data-se-guarda-solo disabled> Arrancar ${esc(APP_NAME)} al iniciar Windows <span class="muted" id="sInicioWinNota" style="font-weight:400">· lo mismo que «Arrancar con Windows» en el menú del icono de la bandeja</span></label>
+    <label style="display:flex;gap:8px;align-items:center;font-weight:500;margin-top:10px"><input type="checkbox" id="sInicioWin" disabled> Arrancar ${esc(APP_NAME)} al iniciar Windows <span class="muted" id="sInicioWinNota" style="font-weight:400">· lo mismo que «Arrancar con Windows» en el menú del icono de la bandeja</span></label>
     <div class="row" style="margin-top:10px"><button class="btn ghost sm danger" id="sOff" type="button" title="Cierra la app del todo, también el motor que sigue en segundo plano al cerrar la ventana">${I.power}Apagar ${esc(APP_NAME)}</button>
       <span class="muted" style="font-size:12.5px">Cerrar la ventana no apaga la app: sigue en segundo plano para Ctrl+Alt+R.</span></div>
     </section>
     </div>
     </div>
-    <div class="btns aj-pie"><span class="aj-pend" aria-live="polite"></span><button class="btn" data-m="no">Cancelar</button><button class="btn primary" data-m="ok">Guardar</button></div>`, d => {
-    // secciones: se cambia sin perder lo escrito (todas siguen en el DOM)
+    <div class="btns aj-pie"><span class="aj-pie-txt">Cada cambio se guarda al momento.</span><button class="btn primary" type="button" data-m="cerrar">Cerrar</button></div>`, d => {
+    // secciones: se cambia sin perder nada (todas siguen en el DOM)
     const irSec = id => {
       S.ajSec = id;
       $$('.aj-nav [data-sec]', d).forEach(x => { const on = x.dataset.sec === id; x.classList.toggle('on', on); x.setAttribute('aria-current', on ? 'true' : 'false'); });
@@ -2194,46 +2229,6 @@ function openSettings(opts) {
       $('.aj-main', d).scrollTop = 0;
     };
     d.irSec = irSec;
-    // «Hay cambios sin guardar» de verdad: se compara con cómo se abrió. Lo que se guarda solo (Voces, personas) o no
-    // es de «Guardar» (el vocabulario del instalador) no cuenta.
-    // agProy: solo elige qué plan enseñar; data-se-guarda-solo: lo que guarda al momento (Outlook con su estado)
-    const NO_CUENTA = new Set(['vzOn', 'xVocab', 'agProy']);
-    const campos = () => $$('.aj-main input[id], .aj-main select[id], .aj-main textarea[id]', d)
-      .filter(x => x.name !== 'proc' && !NO_CUENTA.has(x.id) && !('seGuardaSolo' in x.dataset) && x.type !== 'file'
-        && x.type !== 'button');
-    // y lo que no es un campo con id: los destinos de «Copias en otras carpetas» (perfil.js) y las claves adicionales
-    // del directo (directo.js) (revisión 11: quitar un destino no decía «Hay cambios sin guardar» ni preguntaba)
-    const otros = () => {
-      d.directoKeys?.stash();
-      // las claves, como las manda «Guardar» (collectDirectoSettings): una fila vacía no es un cambio
-      const claves = d.directoKeys && Object.fromEntries(Object.entries(d.directoKeys.state)
-        .map(([p, rs]) => [p, (rs || []).map(r => String(r.value || '').trim() || r.mask || '').filter(Boolean)]));
-      return { __destinos: typeof perfilOuts === 'undefined' ? '' : JSON.stringify(perfilOuts),
-        __claves: JSON.stringify(claves ?? null) };
-    };
-    const foto = () => ({ ...Object.fromEntries(campos().map(x => [x.id, x.type === 'checkbox' || x.type === 'radio' ? x.checked : x.value])), ...otros() });
-    const inicial = foto();  // como viene de los ajustes guardados
-    // «Dónde se procesan» marcado y sin aplicar también lo es: «Guardar» lo aplica (revisión 2 de B2, P1-2)
-    const procSinAplicar = () => {
-      const v = $('input[name="proc"]:checked', d)?.value;
-      return !!v && v !== (S.config.procesado || 'local');
-    };
-    // solo lo que está en las dos fotos: un campo que deja de contar (pasa a guardarse solo, como Outlook al activarlo)
-    // no es un cambio, y uno que aparece después ya tiene su valor de partida («tarde»). (En la fusión con el
-    // calendario, Outlook activado daba «Hay cambios sin guardar» sin haber cambiado nada.)
-    const hayCambios = () => { const ahora = foto(); return Object.keys(inicial).some(k => k in ahora && ahora[k] !== inicial[k]) || procSinAplicar(); };
-    const marcar = () => { $('.aj-pend', d).textContent = hayCambios() ? 'Hay cambios sin guardar' : ''; };
-    d.ajMarcar = marcar;
-    // antes de salir de Ajustes a un subdiálogo (una lista, el asistente) con cambios sin guardar: encima, «Guardar y
-    // seguir», «Descartar» o «Volver» (Escape y un clic fuera también vuelven). true: se puede seguir
-    d.ajAntesDeSalir = async () => {
-      if (!hayCambios()) return true;
-      const r = await abrirSobre(`<h3>Tienes cambios sin guardar</h3><div><p>Si sigues sin guardarlos, se pierden.</p></div>
-        <div class="btns"><button class="btn" data-m="volver">Volver</button><button class="btn" data-m="descartar">Descartar</button><button class="btn primary" data-m="guardar">Guardar y seguir</button></div>`,
-      x => x.addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (b) cerrarSobre(b.dataset.m); }));
-      if (r === 'descartar') return true;
-      return r === 'guardar' ? guardar(false) : false;
-    };
     document.body.classList.add('aj-abierto');
     setTimeout(() => $('.aj-nav [data-sec].on', d)?.focus(), 0);  // el foco, dentro del diálogo (no en ⚙)
     d.addEventListener('click', e => {
@@ -2245,21 +2240,143 @@ function openSettings(opts) {
       // no, con el teclado caía en el cuerpo de la página, fuera del diálogo (revisión 2 de B2)
       if (x.dataset.secIr) $(`.aj-nav [data-sec="${x.dataset.secIr}"]`, d)?.focus();
     });
-    const pendiente = e => { if (e.target.closest('.aj-main') && !NO_CUENTA.has(e.target.id)) marcar(); };
-    d.addEventListener('input', pendiente);
-    d.addEventListener('change', pendiente);
-    d.addEventListener('click', e => {  // la tarjeta de estado (configurar.js): «Probar» y «Cambiar…» abren el asistente
+
+    /* ---- guardar al cambiar: una petición a la vez, con lo que haya pendiente de todos los controles. Así dos cambios
+       seguidos no se pisan (el segundo va con el config_rev que deja el primero) y los de otra ventana se ven */
+    const ESP = {};  // listas que no son un control: {patch, valor, volver, marca}, por el id de su contenedor
+    const valorDe = el => ESP[el.id] ? ESP[el.id].valor() : el.type === 'checkbox' ? String(el.checked) : el.value;
+    const patchDe = el => (ESP[el.id] ? ESP[el.id].patch : AJ_GUARDA[el.id])(el);
+    const volver = el => {
+      if (ESP[el.id]) return ESP[el.id].volver();
+      if (el.type === 'checkbox') el.checked = el.dataset.guardado === 'true';
+      else el.value = el.dataset.guardado;
+    };
+    const marcaDe = el => {
+      if (ESP[el.id]) return ESP[el.id].marca();
+      const lab = el.type === 'checkbox' && el.closest('label');
+      if (lab) return $(':scope > .aj-ok', lab) || lab.appendChild(Object.assign(document.createElement('span'), { className: 'aj-ok' }));
+      const n = el.nextElementSibling;
+      if (n && n.classList.contains('aj-ok')) return n;
+      const s = Object.assign(document.createElement('span'), { className: 'aj-ok' });
+      s.setAttribute('aria-live', 'polite');
+      el.after(s);
+      return s;
+    };
+    const marcar = (el, estado, txt = '') => {
+      if (!document.body.contains(el)) return;
+      const m = marcaDe(el);
+      clearTimeout(m.t);
+      m.className = 'aj-ok ' + estado;
+      m.textContent = { ok: 'Guardado ✓', err: `No se ha guardado: ${txt}`, guardando: 'Guardando…' }[estado] || '';
+      if (estado === 'ok') m.t = setTimeout(() => { m.textContent = ''; m.className = 'aj-ok'; }, 4000);
+    };
+    const pend = new Set(), textos = new Map();  // textos: el temporizador de lo que se está escribiendo
+    let enVuelo = null, guardados = 0, refrescar = '';  // refrescar: repintar al terminar (con su aviso, si es un texto)
+    const ajeno = () => !document.body.contains(d);
+    const mandar = () => enVuelo || (enVuelo = (async () => {
+      while (pend.size) {
+        const els = [...pend];
+        pend.clear();
+        const cuerpo = {}, van = [];
+        for (const el of els) {
+          if (!ajeno() && !document.body.contains(el)) continue;
+          const v = valorDe(el);
+          if (v === el.dataset.guardado) { marcar(el, 'nada'); continue; }  // vuelto a lo guardado, o nada que mandar
+          const p = patchDe(el);
+          if (!p) { volver(el); continue; }
+          ajMezclar(cuerpo, p);
+          van.push([el, v]);
+        }
+        if (!van.length) continue;
+        van.forEach(([el]) => marcar(el, 'guardando'));
+        try {
+          const r = await api('/api/settings', { ...cuerpo, rev: S.config.config_rev });
+          setConfig(r);
+          guardados++;
+          if ('language' in cuerpo) S.selLang = cuerpo.language;
+          van.forEach(([el, v]) => {
+            const norm = AJ_VALOR[el.id]?.(r);
+            el.dataset.guardado = norm != null && !pend.has(el) ? norm : v;
+            if (norm != null && !pend.has(el) && document.activeElement !== el) el.value = norm;
+            if (!pend.has(el)) marcar(el, 'ok');
+          });
+          if (r.otro_cambio) refrescar = 'Los ajustes habían cambiado en otra ventana: ya ves lo guardado.';
+          d.ajTrasGuardar?.(cuerpo);
+        } catch (err) {
+          van.forEach(([el]) => { if (!pend.has(el)) { volver(el); marcar(el, 'err', err.message); } });
+          d.ajPlanPedir?.();  // el plan de Al grabar, con lo que se ve otra vez
+          if (ajeno()) toast(`No se ha guardado un ajuste: ${esc(err.message)}`, 'err');
+          if (err.status === 409) {
+            try { setConfig(await api('/api/config')); } catch { /* el siguiente intento lo dirá */ }
+            refrescar = esc(err.message);
+          }
+        }
+      }
+    })().finally(() => {
+      enVuelo = null;
+      const m = refrescar;
+      refrescar = '';
+      if (!m || ajeno()) return;
+      // lo que se esté escribiendo en otra casilla se guarda antes de repintar (si no, se repintaría sin ello)
+      if (textos.size || pend.size) { refrescar = m; guardarYa(); } else ajRepintar(typeof m === 'string' ? m : '');
+    }));
+    // ya, sin esperar a la pausa al escribir: antes de un subdiálogo (una lista, el asistente) y al cerrar
+    const guardarYa = () => {
+      textos.forEach((t, el) => { clearTimeout(t); pend.add(el); });
+      textos.clear();
+      return pend.size ? mandar() : enVuelo || Promise.resolve();
+    };
+    const pedirGuardar = (el, escribiendo = false) => {
+      clearTimeout(textos.get(el));
+      textos.delete(el);
+      if (escribiendo) { textos.set(el, setTimeout(() => { textos.delete(el); pend.add(el); mandar(); }, 700)); return; }
+      pend.add(el);
+      mandar();
+    };
+    d.ajGuardar = el => pedirGuardar(el);  // lo que cambia un control sin «change» (perfil.js: una carpeta elegida)
+    d.ajAntesDeSalir = async () => { await guardarYa(); return true; };
+    // lo que había al abrir es lo guardado (cada control lo recuerda para volver a ello si no se puede guardar)
+    const vigilados = () => $$('.aj-main input[id], .aj-main select[id], .aj-main textarea[id]', d).filter(x => x.id in AJ_GUARDA);
+    const esTexto = el => el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' && !['checkbox', 'radio'].includes(el.type);
+    d.addEventListener('input', e => { const el = e.target; if (el.id in AJ_GUARDA && esTexto(el)) pedirGuardar(el, true); });
+    d.addEventListener('change', e => { const el = e.target; if (el.id in AJ_GUARDA && $('.aj-main', d).contains(el)) pedirGuardar(el); });
+    // con otra ventana (o el asistente en otra pestaña) cambiando ajustes: al volver a esta, se repinta con lo guardado
+    const mirarOtroCambio = async () => {
+      if (ajeno()) { window.removeEventListener('focus', mirarOtroCambio); return; }  // otro diálogo ocupó su sitio
+      if (enVuelo || pend.size || textos.size) return;
+      const n = guardados;
+      try {
+        const r = await api('/api/config');
+        if (ajeno() || n !== guardados || enVuelo || pend.size || textos.size || r.config_rev === S.config.config_rev) return;
+        setConfig(r);
+        ajRepintar('Ajustes se ha puesto al día con un cambio hecho en otra ventana.');
+      } catch { /* sin servidor: ya lo dirá otra cosa */ }
+    };
+    window.addEventListener('focus', mirarOtroCambio);
+    const ajRepintar = msg => {
+      window.removeEventListener('focus', mirarOtroCambio);
+      const top = $('.aj-main', d).scrollTop, foco = document.activeElement?.id;
+      openSettings({ sec: S.ajSec });
+      const nd = $('#modal .dialog.aj');
+      if (nd) { $('.aj-main', nd).scrollTop = top; if (foco) $('#' + CSS.escape(foco), nd)?.focus(); }
+      if (msg) toast(msg);
+    };
+    // ⚠ ESC, «Cerrar» o un clic fuera: lo que quede por guardar se manda igual (si falla, se dice con un aviso)
+    S.modalCleanup = () => {
+      document.body.classList.remove('aj-abierto');
+      window.removeEventListener('focus', mirarOtroCambio);
+      const antes = guardados;
+      guardarYa().then(() => { if (guardados !== antes || antes) refreshView(); });
+    };
+
+    // la tarjeta de estado (configurar.js): «Probar» y «Cambiar…» abren el asistente (antes, lo pendiente se guarda)
+    d.addEventListener('click', e => {
       const x = e.target.closest('[data-cfg]');
       if (!x || typeof abrirConfigurar !== 'function') return;
       e.preventDefault();
-      const volver = () => openSettings({ sec: 'procesado' });
-      d.ajAntesDeSalir().then(ok => {
-        if (ok) abrirConfigurar(x.dataset.cfg === 'probar' ? { paso: 3, volver, empezar: true } : { volver });  // «Probar»: ya
-      });
+      const volverA = () => openSettings({ sec: 'procesado' });
+      d.ajAntesDeSalir().then(() => abrirConfigurar(x.dataset.cfg === 'probar' ? { paso: 3, volver: volverA, empezar: true } : { volver: volverA, ...(pedido ? { modo: pedido } : {}) }));
     });
-    // la tarjeta, al día tras «Aplicar ahora» o «Probar conexión»
-    function ajTarjeta() { const t = $('.cfg-estado', d); if (t && typeof cfgEstadoHtml === 'function') t.outerHTML = cfgEstadoHtml(); }
-    // la confirmación va encima de Ajustes: con «Cancelar», Ajustes sigue ahí, con lo escrito
     $('#sOff', d).onclick = () => confirmShutdown();
     // «Arrancar con Windows» (la bandeja deja /api/inicio-windows): se aplica al marcarla, como en el menú del icono;
     // null = no se puede (fuera de Windows o una copia sin instalar)
@@ -2272,73 +2389,16 @@ function openSettings(opts) {
       }).catch(() => { });
       ini.onchange = async () => {
         ini.disabled = true;
+        marcar(ini, 'guardando');
         try {
           const r = await api('/api/inicio-windows', { activado: ini.checked });
           ini.checked = !!r.activado;
-          toast(r.activado ? `${esc(APP_NAME)} arrancará al iniciar Windows` : `${esc(APP_NAME)} ya no arrancará al iniciar Windows`);
-        } catch (err) { ini.checked = !ini.checked; toast(esc(err.message), 'err'); }
+          marcar(ini, 'ok');
+        } catch (err) { ini.checked = !ini.checked; marcar(ini, 'err', err.message); }
         finally { ini.disabled = false; }
       };
     }
-    // «Dónde se procesan» (07/11/2026): elegirla y cerrar sin «Guardar», abajo del todo, dejaba el modo anterior sin
-    // decirlo (al grabar seguía usando Groq). Ahora el cambio pendiente se dice junto a las opciones, con «Aplicar ahora»
-    // (y su aviso si hay trabajo en la nube, que pasaría a este PC), y al cerrar sin aplicarlo se avisa. Un clic de
-    // prueba no cambia nada por sí solo.
-    const procNombre = { local: '«Solo en este PC»', agente: `«Con tu cuenta de Claude»`, api: '«API externa»' };
-    const procElegido = () => $('input[name="proc"]:checked', d)?.value;
-    const procPendiente = () => { const v = procElegido(); return v && v !== S.config.procesado ? v : null; };
-    const procPintar = () => {
-      const v = procPendiente(), res = $('#procGuardado', d);
-      if (!v) { if (!res.querySelector('.ok-aplicado')) res.innerHTML = ''; return; }
-      const enNube = S.config.procesado === 'api' && v !== 'api'
-        && S.jobs.some(j => isActive(j) && j.kind !== 'summary' && (j.engine === 'cloud' || j.preset === 'nube'));
-      res.innerHTML = `<span class="motor-err">Has elegido ${procNombre[v]}, pero aún no está aplicado: sigue ${procNombre[S.config.procesado] || ''}.</span>`
-        + (enNube ? ' <b>Hay transcripciones en la nube en marcha:</b> al aplicar, el directo sigue en este PC con Whisper y lo que espera en la nube se cancela.' : '')
-        + ` <button class="btn sm primary" type="button" id="procAplicar">Aplicar ahora</button>`;
-    };
-    $$('input[name="proc"]', d).forEach(r => r.addEventListener('change', () => {
-      const v = procElegido();
-      $$('.proc', d).forEach(l => l.classList.toggle('on', l.querySelector('input').value === v));
-      $('#procApi', d).hidden = v !== 'api';
-      $('#procAgente', d).hidden = v !== 'agente';
-      if ($('#procModelos', d)) $('#procModelos', d).hidden = v === 'api';
-      if ($('#procApiAv', d)) $('#procApiAv', d).hidden = v !== 'api';
-      if ($('#lNube', d)) $('#lNube', d).hidden = v !== 'api';
-      if ($('#lAyuda', d)) $('#lAyuda', d).textContent = lAyuda(v === 'api');
-      procPintar();
-    }));
-    $('#procGuardado', d).addEventListener('click', async e => {
-      if (!e.target.closest('#procAplicar')) return;
-      const v = procPendiente(), res = $('#procGuardado', d);
-      if (!v) return procPintar();
-      // «API externa» sin proveedor: como «Guardar», no se aplica (se quedaría con el de por defecto; msg 1386). Con
-      // uno elegido, va con lo que hay en pantalla (proveedor y clave): si no, se aplicaba el guardado antes
-      if (v === 'api' && !$('#cProv', d).value) {
-        res.innerHTML = '<span style="color:var(--err)">Elige antes el proveedor y pega su clave.</span>';
-        $('#cProv', d).focus();
-        return;
-      }
-      res.textContent = 'Aplicando…';
-      try {
-        const c = await api('/api/settings', v === 'api' ? { procesado: v, cloud: collect().cloud } : { procesado: v });
-        setConfig(c);
-        localStorage.setItem('procElegido', '1');
-        res.innerHTML = `<span class="ok-aplicado" style="color:var(--ok)">✓ Aplicado: ${esc({ local: 'transcribe Whisper en este PC; sin resumen con IA', agente: `transcribe Whisper en este PC y resume ${S.config.agente?.label || 'Claude Code'} con tu cuenta`, api: `transcribe y resume ${provName()} con tu API key` }[v] || v)}.</span>`;
-        if (c.descarga) toast(`Descargando el modelo ${esc(c.descarga)} de Whisper para transcribir en este PC: el progreso, en Ajustes`);
-        d.modelosPoll?.();
-        if (typeof motoresRefrescar === 'function') motoresRefrescar(d);
-        ajTarjeta();
-        ponerAlDia(['lPreset', 'pfPreset']);  // el servidor ha puesto los motores del modo
-        marcar();  // el modo ya está aplicado: deja de ser «sin guardar»
-      } catch (err) { res.innerHTML = `<span style="color:var(--err)">✖ No se ha podido aplicar: ${esc(err.message)}</span>`; }
-    });
-    S.modalCleanup = () => {  // al cerrar Ajustes (Cancelar, Esc, fuera) con el cambio sin aplicar: que se sepa
-      document.body.classList.remove('aj-abierto');
-      if (!document.body.contains(d)) return;  // otro diálogo ocupó el hueco
-      const v = procPendiente();
-      if (v) toast(`No se ha aplicado ${procNombre[v]}: sigue ${procNombre[S.config.procesado] || 'la opción de antes'}. Para cambiarlo, ⚙ Ajustes → «Aplicar ahora».`, 'err');
-    };
-    $('#agCheck', d).onclick = async () => {  // no guarda el formulario: solo comprueba con el modelo elegido
+    if ($('#agCheck', d)) $('#agCheck', d).onclick = async () => {  // no guarda nada: solo comprueba con el modelo elegido
       // con los segundos a la vista (07/11/2026: en su PC tardó minutos con un «Comprobando…» quieto)
       const res = $('#agRes', d), btn = $('#agCheck', d), t0 = Date.now();
       const seg = () => Math.round((Date.now() - t0) / 1000);
@@ -2357,7 +2417,6 @@ function openSettings(opts) {
       } catch (err) { res.innerHTML = `<span style="color:var(--err)">✖ ${esc(err.message)}</span> <span class="muted">(tras ${seg()} s)</span>`; }
       finally { clearInterval(timer); btn.disabled = false; }
     };
-    $('#agPs', d).onclick = () => api('/api/abrir-powershell', {}).catch(err => toast(esc(err.message), 'err'));
     $('#aDatos', d).onclick = () => api('/api/acerca/abrir', { que: 'datos' }).catch(e => toast(e.message, 'err'));
     $('#aRepo', d).onclick = e => { e.preventDefault(); api('/api/acerca/abrir', { que: 'repo' }).catch(() => window.open(ac.repo, '_blank')); };
     $('#aDonar', d).onclick = e => { e.preventDefault(); if (ac.donar) api('/api/acerca/abrir', { que: 'donar' }).catch(() => window.open(ac.donar, '_blank')); };
@@ -2368,32 +2427,8 @@ function openSettings(opts) {
     $('#aDiag', d).onclick = async () => {
       try { const r = await api('/api/diagnostico'); await copy(r.texto, 'Diagnóstico copiado: revísalo antes de pegarlo donde pidas ayuda'); } catch (e) { toast(e.message, 'err'); }
     };
-    const fields = () => {
-      // con la nube de ahora, no la de cuando se abrió Ajustes: tras «Probar conexión», ir a otro proveedor y volver
-      // repintaba lo de antes, y «Guardar» lo guardaba (revisión 14)
-      const c = S.config.cloud || {}, P = S.config.providers || {};
-      const p = $('#cProv', d).value, info = P[p];
-      if (!info) { $('#cFields', d).innerHTML = '<div class="help">Elige el proveedor para ver qué pide (la clave y, según cuál, la dirección de la API).</div>'; return; }
-      if (p === 'azure') {
-        $('#cFields', d).innerHTML = `<label>Endpoint</label><input class="input" id="cAzEp" placeholder="https://<recurso>.openai.azure.com" value="${esc(c.azure_endpoint)}">
-          <div class="grid2"><div><label>Deployment (whisper)</label><input class="input" id="cAzDep" value="${esc(c.azure_deployment)}"></div>
-          <div><label>API version</label><input class="input" id="cAzVer" value="${esc(c.azure_api_version)}"></div></div>
-          <label>API key</label><input class="input" id="cKey" type="password" placeholder="${c.has_key ? 'Guardada: ' + esc(c.api_key) + ' (escribe para cambiarla)' : 'Clave del recurso de Azure'}">`;
-      } else if (p === 'custom') {
-        $('#cFields', d).innerHTML = `<label>URL base de la API</label><input class="input" id="cBase" placeholder="https://api.tu-empresa.com/v1" value="${esc(c.base_url || '')}">
-          <div class="help">Cualquier servicio con el formato de OpenAI (pasarela o proxy de la empresa, LiteLLM…). Se usan <code>/audio/transcriptions</code> para transcribir y <code>/chat/completions</code> para el resumen.</div>
-          <label>API key</label><input class="input" id="cKey" type="password" placeholder="${c.has_key ? 'Guardada: ' + esc(c.api_key) + ' (escribe para cambiarla)' : 'Pega aquí tu API key'}">
-          <label>Modelo de transcripción</label><input class="input" id="cModel" list="cModels" value="${esc(c.model || 'whisper-large-v3')}">
-          <datalist id="cModels">${['whisper-large-v3', 'whisper-large-v3-turbo', 'whisper-1'].map(m => `<option value="${m}">`).join('')}</datalist>`;
-      } else {
-        $('#cFields', d).innerHTML = `<label>API key</label><input class="input" id="cKey" type="password" placeholder="${c.has_key ? 'Guardada: ' + esc(c.api_key) + ' (escribe para cambiarla)' : 'Pega aquí tu API key'}">
-          <div class="help">Se guarda solo en este PC (%LOCALAPPDATA%\\AudiosApp), fuera de OneDrive. Consíguela en <a href="${info.keys}" target="_blank" style="color:var(--accent)">${esc(info.keys.replace('https://', ''))}</a>.</div>
-          <label>Modelo</label><select id="cModel">${info.models.map(m => `<option${m === c.model ? ' selected' : ''}>${m}</option>`).join('')}</select>`;
-      }
-    };
-    fields();
-    $('#cProv', d).onchange = fields;
-    $('#sAutoLocal', d).onchange = e => { $('#sAutoLocalAviso', d).hidden = !e.target.checked; if (e.target.checked) localStorage.setItem('sumOk', '1'); };
+    const autoLocal = $('#sAutoLocal', d);
+    if (autoLocal) autoLocal.addEventListener('change', () => { $('#sAutoLocalAviso', d).hidden = !autoLocal.checked; if (autoLocal.checked) localStorage.setItem('sumOk', '1'); });
     bindVocesSettings(d);
     if (typeof bindModelos === 'function') bindModelos(d);
     if (typeof bindDirectoSettings === 'function') bindDirectoSettings(d);
@@ -2402,86 +2437,41 @@ function openSettings(opts) {
     if (typeof bindAjAlGrabar === 'function') bindAjAlGrabar(d);  // ajustes.js: el plan arriba, las reglas debajo
     if (typeof bindAjProyectos === 'function') bindAjProyectos(d);
     if (typeof bindAjCalendario === 'function') bindAjCalendario(d);
-    // los campos que se pintan después de la foto (los de la nube, según el proveedor): su valor de ahora es el de
-    // partida. Antes contaban siempre: deshacer un cambio seguía diciendo «Hay cambios sin guardar» (revisión 2 de B2)
-    const tarde = campos().filter(x => !(x.id in inicial));
-    tarde.forEach(x => { inicial[x.id] = x.type === 'checkbox' || x.type === 'radio' ? x.checked : x.value; });
-    Object.assign(inicial, otros());  // los destinos y las claves, ya pintados por sus bind*
-    // tras guardar una parte desde aquí («Aplicar ahora», «Probar conexión»), lo guardado es el nuevo punto de partida
-    // de esos campos (revisión 12: seguía «Hay cambios sin guardar» con todo guardado, y editar una lista preguntaba).
-    // Los motores, con lo que pinta motoresRefrescar como guardado (dataset.ini): si se habían cambiado aquí, siguen
-    // contando. Lo demás, con lo que se mandó (de, una foto de antes de guardar): lo escrito mientras se guardaba no se
-    // da por guardado (revisión 13)
-    const ponerAlDia = (ids, de = null) => {
-      ids.forEach(id => {
-        const el = $('#' + id, d);
-        if (!el) return;
-        inicial[id] = 'ini' in el.dataset ? el.dataset.ini : de && id in de ? de[id]
-          : el.type === 'checkbox' || el.type === 'radio' ? el.checked : el.value;
-      });
-      if (ids.includes('__claves')) inicial.__claves = de ? de.__claves : otros().__claves;
-    };
-    // quitar o añadir un destino o una clave es un clic, no un «change»: el aviso se mira después de cada clic (de
-    // cualquiera: el de quitar una fila la saca del DOM antes de llegar aquí, revisión 12)
-    d.addEventListener('click', () => setTimeout(marcar, 0));
-    // el modo que pide quien abre, marcado y sin aplicar (con su aviso y sus campos, que pinta su «change»): «Revisar
-    // en Ajustes» del asistente con «Con tu cuenta de Claude» elegido (revisión 6)
-    const pedido = opts && typeof opts === 'object' && opts.proc;
-    const proc = pedido && $(`input[name="proc"][value="${pedido}"]`, d);
-    if (proc && !proc.checked) { proc.checked = true; proc.dispatchEvent(new Event('change', { bubbles: true })); marcar(); }
-    const collect = () => {
-      const p = $('#cProv', d).value;  // '' = sin elegir: no se manda (el servidor tampoco guarda uno vacío)
-      const cloud = { ...(p ? { provider: p } : {}), chunk_minutes: +$('#cChunk', d).value, parallel: +$('#cPar', d).value };
-      const key = $('#cKey', d)?.value.trim();
-      if (key) cloud.api_key = key;
-      if (p === 'azure') Object.assign(cloud, { azure_endpoint: $('#cAzEp', d).value, azure_deployment: $('#cAzDep', d).value, azure_api_version: $('#cAzVer', d).value });
-      else if ($('#cModel', d)) cloud.model = $('#cModel', d).value;
-      if (p === 'custom') cloud.base_url = $('#cBase', d).value;
-      if (typeof collectDirectoSettings === 'function') Object.assign(cloud, collectDirectoSettings(d));
-      S.selLang = $('#sLang', d).value;
-      const out = { procesado: $('input[name="proc"]:checked', d)?.value, agente: { tipo: S.config.agente?.tipo || 'claude', modelo: $('#agModelo', d)?.value },
-        cloud, threads: +$('#sThreads', d).value, prompt: $('#sPrompt', d).value.trim(), language: $('#sLang', d).value,
-        live_auto: $('#lAuto', d).checked, live_preset: $('#lPreset', d)?.value, meeting_detect: $('#lMeet', d).checked,
-        live_final_pass: $('#lFinal', d).checked, ...(window.reunionCollect?.(d) || {}),
-        ...(typeof ajAlGrabarCollect === 'function' ? ajAlGrabarCollect(d) : {}),
-        ...(typeof collectPerfilSettings === 'function' ? collectPerfilSettings(d) : {}),
-        summary: { auto: ($('input[name="proc"]:checked', d)?.value === 'agente' ? $('#sAutoAg', d) : $('#sAuto', d)).checked, local: $('#sAutoLocal', d).checked, model: $('#sModel', d).value, lang: $('#sSumLang', d)?.value, extra: $('#sExtra', d)?.value } };
-      // los motores, solo si se han cambiado aquí: un selector sin tocar, pintado con el modo de antes, devolvía el directo
-      // a Whisper local tras elegir «API externa» y «Probar conexión» (07/11/2026)
-      for (const [id, k] of [['#lPreset', 'live_preset'], ['#pfPreset', 'preset']]) {
-        const el = $(id, d);
-        if (el && el.value === el.dataset.ini) delete out[k];
-      }
-      // lo que se guarda solo (Outlook con su estado: «Activar» guarda al momento y Outlook puede tardar en contestar)
-      // no lo pisa «Guardar» con lo que haya en la casilla (revisión 3 de B2)
-      if ('seGuardaSolo' in ($('#rnOutlook', d)?.dataset || {})) delete out.outlook_on;
-      return out;
-    };
-    // como se pintaron con lo guardado (la foto inicial): «Guardar» manda el motor solo si se ha cambiado aquí
-    for (const id of ['#lPreset', '#pfPreset']) { const el = $(id, d); if (el) el.dataset.ini = String(inicial[el.id] ?? el.value); }
-    $('#cTest', d).onclick = async () => {
-      const res = $('#cTestRes', d);
-      if (!$('#cProv', d).value) { res.innerHTML = '<span style="color:var(--err)">Elige antes el proveedor.</span>'; $('#cProv', d).focus(); return; }
-      res.textContent = 'Probando…';
-      try {
-        // guarda el modo elegido y la nube (para probar con la clave escrita), no el resto del formulario: «Cancelar»
-        // no deshace un guardado, y el resto sigue siendo «cambios sin guardar» (revisión del 07/11/2026)
-        const x = collect(), enviado = foto();  // lo que se manda (si se guarda, el nuevo punto de partida)
-        setConfig(await api('/api/settings', { procesado: x.procesado, cloud: x.cloud }));
-        if (typeof motoresRefrescar === 'function') motoresRefrescar(d);  // la primera clave pone la nube
-        procPintar();  // «Probar conexión» guarda: el modo elegido ya está aplicado
-        ajTarjeta();
-        // la nube que se acaba de guardar ya no es «sin guardar»; la clave, guardada, se enseña como tal
-        const k = $('#cKey', d);
-        if (k && S.config.cloud?.has_key) k.placeholder = `Guardada: ${S.config.cloud.api_key || ''} (escribe para cambiarla)`;
-        if (k && k.value && k.value === enviado.cKey) k.value = '';  // (si se ha vuelto a escribir mientras, se queda)
-        ponerAlDia(['cProv', 'cModel', 'cBase', 'cAzEp', 'cAzDep', 'cAzVer', 'cLiveModel', 'cLiveModelCustom', 'cChunk',
-          'cPar', 'lPreset', 'pfPreset', '__claves'], enviado);
-        marcar();
-        const r = await api('/api/cloud/test', {});
-        res.innerHTML = `<span style="color:var(--ok)">✓ Funciona (respuesta en ${String(r.seconds).replace('.', ',')} s)</span>`;
-      } catch (err) { res.innerHTML = `<span style="color:var(--err)">✖ ${esc(err.message)}</span>`; }
-    };
+    // las dos listas que no son un control: las copias en otras carpetas (perfil.js) y las claves adicionales del
+    // directo (directo.js). Se mandan enteras: el servidor no pisa una que haya cambiado otra ventana (config_rev)
+    const outs = $('#pfOuts', d);
+    if (outs && typeof perfilOuts !== 'undefined') {
+      const guardadas = () => (S.config.perfil?.outputs || []).map(o => ({ path: o.path, format: o.format || 'md', by_project: !!o.by_project }));
+      ESP.pfOuts = {
+        valor: () => JSON.stringify(perfilOuts),
+        patch: () => ({ perfil: { outputs: perfilOuts } }),
+        volver: () => { perfilOuts = guardadas(); outs.innerHTML = perfilOutsHtml(perfilOuts); },
+        marca: () => { const r = $('#pfOutAdd', d).parentElement; return $('.aj-ok', r) || r.appendChild(Object.assign(document.createElement('span'), { className: 'aj-ok' })); },
+      };
+      outs.dataset.guardado = ESP.pfOuts.valor();
+      d.ajOutsCambiadas = () => pedirGuardar(outs);
+    }
+    const dk = $('#dkRows', d);
+    if (dk && d.directoKeys) {
+      const prov = S.config.cloud?.provider || 'groq';
+      const lista = () => (typeof collectDirectoSettings === 'function' ? collectDirectoSettings(d).extra_keys_by?.[prov] : null) || [];
+      ESP.dkRows = {
+        valor: () => JSON.stringify(lista()),
+        patch: () => ({ cloud: { extra_keys_by: { [prov]: lista() } } }),
+        volver: () => { refrescar = refrescar || true; },  // al terminar, las filas se rehacen con lo guardado
+        marca: () => { const r = $('#dkAdd', d).parentElement; return $('.aj-ok', r) || r.appendChild(Object.assign(document.createElement('span'), { className: 'aj-ok' })); },
+      };
+      dk.dataset.guardado = ESP.dkRows.valor();
+      // una clave escrita se guarda al salir de su casilla; quitar una fila, al momento
+      dk.addEventListener('change', () => pedirGuardar(dk));
+      dk.addEventListener('click', e => { if (e.target.closest('[data-xkey-del]')) setTimeout(() => pedirGuardar(dk), 0); });
+      // tras guardar, las claves nuevas vuelven enmascaradas: las filas se rehacen con lo guardado
+      d.ajTrasGuardar = cuerpo => { if (cuerpo.cloud?.extra_keys_by) refrescar = refrescar || true; };
+    }
+    vigilados().forEach(el => { el.dataset.guardado = valorDe(el); });
+    d.ajMarca = marcar;  // para lo que se guarda con su propia petición (ocultar al compartir pantalla, ajustes.js)
+    mirarOtroCambio();
+
     const drawLinks = () => {
       const box = $('#sLinks', d), ls = S.config.links || [];
       box.innerHTML = ls.length ? `<table class="vtable">${ls.map(l => `<tr><td>${I.link}${esc(nfc(l.name))}</td><td><code>${esc(l.path)}</code></td>
@@ -2492,7 +2482,7 @@ function openSettings(opts) {
     d.ajDibujarEnlaces = drawLinks;  // también tras «Otra carpeta (fuera de Tenca)…» (perfil.js)
     $('#lnAdd', d).onclick = async () => { if (await linkFolder()) drawLinks(); };
     // «quitar»: la confirmación va encima y, si se quita, la lista y «Reuniones sin proyecto», al día aquí mismo (si
-    // era la elegida sin guardar, vuelve a lo guardado: ya no se puede elegir)
+    // era la elegida, el servidor vuelve a la automática: se enseña así)
     d.addEventListener('click', async e => {
       const u = e.target.closest('[data-unlink]');
       if (!u || !await unlinkFolder(u.dataset.unlink)) return;
@@ -2500,10 +2490,9 @@ function openSettings(opts) {
       $('#lnAdd', d)?.focus();  // su «quitar» ya no existe: el foco, en «Añadir» (no en el cuerpo de la página)
       const f = $('#pfFolder', d);
       if (f && typeof perfilFolderOpts === 'function') {
-        const v = f.value, sigue = v === PERFIL_AUTO || flatFolders().some(x => x.path === v);
-        f.innerHTML = perfilFolderOpts(sigue ? v : (S.config.perfil?.folder ?? PERFIL_AUTO));
-        f.dataset.prev = f.value;
-        marcar();
+        const g = S.config.perfil?.folder ?? PERFIL_AUTO;
+        f.innerHTML = perfilFolderOpts(g);
+        f.dataset.prev = f.dataset.guardado = f.value;
         d.ajPlanPedir?.();
       }
     });
@@ -2539,16 +2528,14 @@ function openSettings(opts) {
           redrawVocab();
           if (typeof perfilVocabRedraw !== 'function') return;
           perfilVocabRedraw(d);
-          // lo guardado ha cambiado en el servidor (el tema, a automático): el punto de partida también, o «Hay
-          // cambios sin guardar» (y la pregunta antes de un subdiálogo) lo darían por cambiado sin serlo
-          const g = S.config?.perfil?.vocab;
-          inicial.pfVocab = g == null ? PERFIL_AUTO : g;
-          marcar();
+          // lo guardado ha cambiado en el servidor (el tema, a automático): es lo que se enseña
+          const pv = $('#pfVocab', d);
+          if (pv) pv.dataset.guardado = pv.value;
         });
       }
-      // editar o crear una lista sale de Ajustes: antes, si hay algo sin guardar, se pregunta
-      if (ed) d.ajAntesDeSalir().then(ok => ok && openVocabEditor(S.vocab.find(v => v.id === ed.dataset.vedit)));
-      if (nw) d.ajAntesDeSalir().then(ok => ok && openVocabEditor(null, openSettings, nw.dataset.vnew));
+      // editar o crear una lista sale de Ajustes: antes, lo que quede por guardar se guarda
+      if (ed) d.ajAntesDeSalir().then(() => openVocabEditor(S.vocab.find(v => v.id === ed.dataset.vedit)));
+      if (nw) d.ajAntesDeSalir().then(() => openVocabEditor(null, openSettings, nw.dataset.vnew));
       const rev = r ? r.dataset.vdir : vo ? vo.dataset.vopen : null;
       if (rev != null) api('/api/reveal', { path: rev }).catch(err => toast(esc(err.message), 'err'));
     });
@@ -2560,32 +2547,7 @@ function openSettings(opts) {
         res.innerHTML = `<span style="color:var(--ok)">✓ Creado en el escritorio (${(r.size / 1e6).toFixed(1).replace('.', ',')} MB${r.vocab ? ` · con ${r.vocab} listas de vocabulario` : ''})</span>`;
       } catch (err) { res.innerHTML = `<span style="color:var(--err)">✖ ${esc(err.message)}</span>`; }
     };
-    // «Guardar» (cierra Ajustes) y «Guardar y seguir» (no lo cierra: lo que sigue ocupa su hueco). true si se guardó
-    const guardar = async (cerrar = true) => {
-      // «API externa» sin proveedor: no se guarda (se quedaría con el de por defecto, que nadie ha elegido; msg 1386)
-      if ($('input[name="proc"]:checked', d)?.value === 'api' && !$('#cProv', d).value) {
-        d.irSec?.('procesado');
-        const res = $('#cTestRes', d);
-        if (res) res.innerHTML = '<span style="color:var(--err)">Elige antes el proveedor.</span>';
-        toast('Elige el proveedor de «API externa» antes de guardar.', 'err');
-        $('#cProv', d).focus();
-        return false;
-      }
-      try {
-        const c = await api('/api/settings', collect());
-        setConfig(c); localStorage.setItem('procElegido', '1');
-        if (cerrar) closeModal(true);
-        toast('Ajustes guardados'); refreshView();
-        if (c.descarga) toast(`Descargando el modelo ${esc(c.descarga)} de Whisper para transcribir en este PC: el progreso, en Ajustes`);
-        return true;
-      } catch (err) { toast(esc(err.message), 'err'); return false; }
-    };
-    d.addEventListener('click', e => {
-      const b = e.target.closest('[data-m]');
-      if (!b) return;
-      if (b.dataset.m === 'no') return closeModal(false);
-      guardar();
-    });
+    $('[data-m="cerrar"]', d).onclick = () => closeModal(true);
   }, 'aj');
 }
 // ⚙ abre siempre en «Al grabar» (rediseño B2): lo que se usará al grabar, arriba. Volver de un subdiálogo (editar una

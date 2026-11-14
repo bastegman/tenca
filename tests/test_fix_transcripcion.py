@@ -811,16 +811,14 @@ class InterfazModelosTests(unittest.TestCase):
         # (motorNotaHtml era la reserva del diálogo Grabar de antes; la tarjeta de grabar.js no la usa: 07/11/2026)
         for fn in ("modelosHtml", "bindModelos", "motorHtml"):
             self.assertRegex(app, rf"typeof {fn} === 'function'", fn)
-        # «Dónde se procesan»: elegir no aplica (un clic de prueba no pasa un directo de la nube al PC); el cambio
-        # pendiente se dice, con «Aplicar ahora», y al cerrar Ajustes sin aplicarlo se avisa
-        # (con «API externa», también el proveedor y la clave de la pantalla: sin proveedor no se aplica; msg 1386)
-        self.assertIn("api('/api/settings', v === 'api' ? { procesado: v, cloud: collect().cloud } "
-                      ": { procesado: v })", app)
-        self.assertIn('id="procGuardado"', app)
-        self.assertIn('id="procAplicar"', app)
-        self.assertIn("pero aún no está aplicado", app)
-        self.assertIn("No se ha aplicado ${procNombre[v]}", app)
-        self.assertIn("if (c.descarga) toast(", app)
+        # «Dónde se procesan» (punto 37 del review, 14/11/2026): solo se cambia en el asistente, que lo aplica al
+        # terminar (o con «Guardar sin probar») y, si toca, empieza a bajar el modelo; Ajustes ya no tiene su «Aplicar
+        # ahora» ni el aviso al cerrar sin aplicar
+        wz = open(os.path.join(APP, "static", "configurar.js"), encoding="utf-8").read()
+        self.assertIn("api('/api/settings', Object.assign(wzCandidata(), ", wz)
+        self.assertIn("if (c.descarga) modelosRefrescar(4000);", wz)
+        self.assertNotIn('id="procAplicar"', app)
+        self.assertNotIn("No se ha aplicado ${procNombre[v]}", app)
         # el directo dice dónde transcribe y, si falló, por qué
         self.assertIn("motorHtml(sel)", app)
         self.assertIn("No se ha podido transcribir en directo.", app)

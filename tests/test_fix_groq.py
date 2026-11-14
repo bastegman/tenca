@@ -179,15 +179,18 @@ class ArrancarYGuardarTests(unittest.TestCase):
         pg.goto(f"{s.base}/?t={s.token}", wait_until="load")
         pg.wait_for_selector("#main h1", timeout=15000)
         pg.evaluate("() => openSettings({sec: 'procesado'})")
-        pg.wait_for_selector("#cProv", state="visible", timeout=10000)
-        self.assertEqual(pg.input_value("#cProv"), "groq")
+        pg.wait_for_selector("#modal .cfg-estado", timeout=10000)
+        self.assertIn("Groq", pg.locator("#modal .cfg-estado").text_content())
         antes = os.path.getmtime(archivo)
-        pg.click(".aj-pie [data-m='ok']")  # «Guardar», sin haber tocado nada
-        pg.wait_for_function("document.querySelector('#modal').classList.contains('hidden')", timeout=10000)
+        # (punto 12 del review) cada cambio se guarda al momento: uno que no tiene nada que ver con la nube
+        pg.click(".aj-nav [data-sec='resumen']")
+        pg.select_option("#sSumLang", "same" if pg.input_value("#sSumLang") != "same" else "es")
+        pg.wait_for_function("document.querySelector('#sSumLang').nextElementSibling?.textContent.includes('Guardado')",
+                             timeout=10000)
         fin = time.time() + 10
         while time.time() < fin and os.path.getmtime(archivo) == antes:
             time.sleep(0.1)
-        self.assertNotEqual(os.path.getmtime(archivo), antes, "«Guardar» no ha escrito settings.json")
+        self.assertNotEqual(os.path.getmtime(archivo), antes, "no se ha escrito settings.json")
         self.assertEqual(leer(), ("groq", GSK))
         self.assertEqual(s.get("/api/config")["cloud"]["provider"], "groq")
         self.assertEqual(errores, [])

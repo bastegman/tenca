@@ -170,29 +170,22 @@ class InstalacionNuevaTests(unittest.TestCase):
         self.assertIn("OpenAI", pg.locator(".wz-body h2").text_content())
         pg.click(".wz-foot [data-wz='atras']")
         pg.click(".wz-foot [data-wz='cerrar']")
-        # Ajustes › Procesado: «API externa» sin nombres y sin proveedor elegido; probar pide elegirlo antes
+        # Ajustes › Procesado (punto 37 del review): la tarjeta y, con «API externa» pedida desde el asistente y sin
+        # aplicar, sus ajustes sin nombres de proveedor; el proveedor y la clave solo se eligen en el asistente
         pg.evaluate("() => openSettings({sec: 'procesado'})")
-        pg.wait_for_selector("#cProv", state="attached", timeout=10000)
+        pg.wait_for_selector("#modal .cfg-estado", timeout=10000)
         self.sin_groq(pg, "Ajustes › Procesado")
-        pg.check("input[name='proc'][value='api']")
-        pg.wait_for_selector("#cProv", state="visible", timeout=5000)
-        self.assertEqual(pg.input_value("#cProv"), "")
+        self.assertEqual(pg.locator("#modal input[name='proc']").count(), 0)
+        self.assertEqual(pg.locator("#cProv").count(), 0)
+        pg.evaluate("() => openSettings({sec: 'procesado', proc: 'api'})")
+        pg.wait_for_selector("#ajProcPedido", timeout=10000)
+        self.assertIn("aún no está aplicada", pg.inner_text("#ajProcPedido"))
         self.sin_groq(pg, "Ajustes › Procesado con API")
         self.captura(pg, "03_ajustes_api")
-        pg.click("#cTest")
-        self.assertEqual(pg.locator("#cTestRes").text_content(), "Elige antes el proveedor.")
+        self.assertEqual(pg.locator("#cModel").count(), 0)  # sin proveedor elegido no hay de quién elegir modelo
         pg.click(".aj-nav [data-sec='avanzado']")  # lo de la nube en Avanzado (claves adicionales), tampoco
         self.sin_groq(pg, "Ajustes › Avanzado con API")
-        self.assertTrue(pg.locator("#dkAdd").is_disabled())  # sin proveedor, no hay de quién añadir claves
-        # «Guardar» con «API externa» y sin proveedor: no se guarda (se quedaría con Groq, el de por defecto)
-        pg.click(".aj-pie [data-m='ok']")
-        self.assertEqual(pg.locator("#cTestRes").text_content(), "Elige antes el proveedor.")
-        self.assertFalse(pg.locator("#modal").is_hidden())
-        self.assertEqual(pg.evaluate("document.activeElement.id"), "cProv")
-        # «Aplicar ahora» (sin cerrar Ajustes), lo mismo
-        pg.click("#procAplicar")
-        self.assertIn("Elige antes el proveedor", pg.locator("#procGuardado").text_content())
-        self.assertEqual(pg.evaluate("document.activeElement.id"), "cProv")
+        self.assertEqual(pg.locator("#dkAdd").count(), 0)  # sin la API aplicada, no hay claves que añadir
         # nada se ha guardado por mirar
         self.assertFalse(self.nueva.get("/api/config")["cloud"]["elegido"])
         self.assertNotEqual(self.nueva.get("/api/config").get("procesado"), "api")
@@ -211,9 +204,9 @@ class InstalacionNuevaTests(unittest.TestCase):
         self.assertEqual((cfg["procesado"], cfg["cloud"]["provider"]), ("api", "groq"))
         pg = self.pagina(self.groq)
         pg.evaluate("() => openSettings({sec: 'procesado'})")
-        pg.wait_for_selector("#cProv", state="visible", timeout=10000)
-        self.assertEqual(pg.input_value("#cProv"), "groq")
-        self.assertIn("console.groq.com", pg.locator("#cFields").text_content())  # su clave, como siempre
+        pg.wait_for_selector("#modal .cfg-estado", timeout=10000)
+        self.assertIn("Groq", pg.locator("#modal .cfg-estado").text_content())  # su proveedor, como siempre
+        self.assertIn("whisper-large-v3", pg.locator("#cModel").inner_text())  # y los modelos de Groq
         pg.keyboard.press("Escape")
         pg.evaluate("() => abrirConfigurar({paso: 2, modo: 'api'})")
         pg.wait_for_selector(".wz-body h2", timeout=5000)
@@ -292,17 +285,19 @@ class ActualizarConGroqTests(unittest.TestCase):
         pg.goto(f"{self.s.base}/?t={self.s.token}", wait_until="load")
         pg.wait_for_selector("#main h1", timeout=15000)
         pg.evaluate("() => openSettings({sec: 'procesado'})")
-        pg.wait_for_selector("#cProv", state="visible", timeout=10000)
-        self.assertEqual(pg.input_value("#cProv"), "groq")
-        self.assertTrue(pg.locator("input[name='proc'][value='api']").is_checked())
+        pg.wait_for_selector("#modal .cfg-estado", timeout=10000)
+        self.assertIn("Groq", pg.locator("#modal .cfg-estado").text_content())
         antes = os.path.getmtime(os.path.join(self.s.datos, "settings.json"))
-        pg.click(".aj-pie [data-m='ok']")  # «Guardar», sin haber tocado nada
-        pg.wait_for_function("document.querySelector('#modal').classList.contains('hidden')", timeout=10000)
+        # (punto 12 del review) cada cambio se guarda al momento: uno que no tiene nada que ver con la nube
+        pg.click(".aj-nav [data-sec='resumen']")
+        pg.select_option("#sSumLang", "same" if pg.input_value("#sSumLang") != "same" else "es")
+        pg.wait_for_function("document.querySelector('#sSumLang').nextElementSibling?.textContent.includes('Guardado')",
+                             timeout=10000)
         fin = time.time() + 10
         while time.time() < fin and os.path.getmtime(os.path.join(self.s.datos, "settings.json")) == antes:
             time.sleep(0.1)
         self.assertNotEqual(os.path.getmtime(os.path.join(self.s.datos, "settings.json")), antes,
-                            "«Guardar» no ha escrito settings.json: la prueba no comprobaría nada")
+                            "no se ha escrito settings.json: la prueba no comprobaría nada")
         self.assertEqual(self.lo_suyo(self.leer()), esperado)
         cfg = self.s.get("/api/config")
         self.assertTrue(cfg["cloud"]["elegido"])

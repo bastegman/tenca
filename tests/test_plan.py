@@ -54,7 +54,7 @@ class CapasTests(unittest.TestCase):
         self.assertEqual((l["valor"], l["origen"]), ("General de Alfa · 41 términos", "workstream"))
         l = lineas(resolver({"prompt": "uno, dos; tres"}, pedido={"vocab": ""}))["vocab"]
         self.assertEqual((l["valor"], l["origen"], l["origen_txt"]),
-                         ("El general · 3 términos", "ajustes", "Ajustes › Proyectos"))
+                         ("El general · 3 términos", "ajustes", "Ajustes › Vocabulario"))
         self.assertEqual(lineas(resolver(pedido={"vocab": ""}))["vocab"]["valor"], "Ninguno")
 
     def test_carpeta_la_decide_rec_folder_for_y_la_reunion_la_cambia(self):

@@ -41,8 +41,8 @@ INSTALAR (una sola vez, unos 5 minutos, sin permisos de administrador)
        - API externa: transcripción rápida en la nube y resumen con el proveedor que elijas (Azure
          OpenAI, Groq, OpenAI o la pasarela de tu empresa: "Otra, compatible con OpenAI", con su URL
          base, la key y el modelo; en "Modelo del directo" puedes poner otro más rápido). La API key te
-         la da el proveedor en su web; de modelo, whisper-large-v3 (el más preciso) si lo tiene. Pulsa
-         "Probar conexión" y Guardar.
+         la da el proveedor en su web; de modelo, whisper-large-v3 (el más preciso) si lo tiene. El
+         asistente lo prueba al final.
      Las dos últimas avisan: el contenido de la reunión sale del PC (el texto, a Anthropic con tu cuenta de
      Claude; el audio y el texto, al proveedor de la API). En algunas reuniones puede ser un bloqueante:
      compruébalo antes (política de tu empresa, acuerdo con tu cliente).
@@ -164,8 +164,11 @@ USO DIARIO
     grabación sigue y, cuando terminan el directo, el repaso y el resumen, la reunión entera se
     mueve sola (hasta entonces se puede deshacer; si cierras Tenca antes, se mueve al volver a
     abrirla). "Una carpeta por reunión" se apaga en Ajustes > Al grabar.
+  - ⚙ Ajustes guarda cada cambio al momento, con "Guardado ✓" junto a lo que cambias: no hay
+    botón "Guardar" (abajo solo está "Cerrar"). Para cambiar dónde se procesan tus reuniones,
+    Ajustes > Procesado > "Cambiar…" abre el asistente, que lo aplica al terminar.
   - ⚙ Ajustes abre en "Al grabar": arriba, "Así se graba ahora una reunión de [proyecto]", lo
-    mismo que usarán ● Grabar y Ctrl+Alt+R (cambia con lo que escribas, antes de guardar); debajo,
+    mismo que usarán ● Grabar y Ctrl+Alt+R (cambia con lo que elijas); debajo,
     las reglas: la carpeta de las reuniones sin proyecto, el idioma por defecto (se detecta solo;
     "Español + inglés", "Español + portugués" e "Inglés + portugués" son para reuniones que
     mezclan dos), el proyecto al grabar, un contexto de una o dos frases (de qué va, quién
@@ -188,9 +191,10 @@ USO DIARIO
     pantalla" (vale al momento). Necesita Windows 10 versión 2004 o posterior.
   - Ajustes > Proyectos: una tabla con la carpeta y el idioma de cada proyecto y workstream, los
     que se usarán al grabar. En negro, lo asignado; en gris, lo heredado: sin carpeta asignada,
-    la del proyecto (la que tiene su carpeta Vocabulario); sin idioma, el de Al grabar. Con "Editar", lo
-    que cambies en la fila se guarda al momento (también la carpeta de cada workstream). Debajo,
-    las listas de vocabulario, las carpetas fuera de Tenca y las copias en otras carpetas.
+    la del proyecto (la que tiene su carpeta Vocabulario); sin idioma, el de Al grabar. Con "Editar",
+    eliges la carpeta y el idioma en la fila (también la carpeta de cada workstream). Debajo,
+    las carpetas fuera de Tenca y las copias en otras carpetas. Las listas de vocabulario están en
+    Ajustes > Vocabulario.
   - Copias en otras carpetas (en Ajustes > Proyectos): carpetas donde cada reunión se guarda además como
     documento (.md con propiedades, resumen, notas y transcripción; .txt; o Word .docx), por
     ejemplo un vault de Obsidian o la carpeta de documentos del proyecto en OneDrive, con
@@ -200,7 +204,7 @@ USO DIARIO
     archivo ajeno ni uno que hayas cambiado allí (lo que no se ha podido escribir sale como aviso
     en ese mismo apartado). Los participantes sin confirmar no van. Al borrar una reunión, sus
     documentos que nadie haya cambiado allí van también a la papelera.
-  - Vocabulario por proyecto y workstream: en Ajustes > Proyectos (o en ● Grabar > Proyecto)
+  - Vocabulario por proyecto y workstream: en Ajustes > Vocabulario (o en ● Grabar > Proyecto)
     creas un proyecto y sus workstreams, cada uno con su lista de nombres, siglas y productos
     separados por comas (los más importantes primero). Al grabar eliges el workstream y Whisper los
     escribe bien. Whisper solo lee unos 45 términos: el propio editor te dice cuáles se quedan
@@ -218,7 +222,7 @@ USO DIARIO
     te dice por qué). Las erratas y los cambios de redacción no cuentan. Lo que confirmas va también
     a tu diccionario personal: en las próximas reuniones de ese proyecto cambia sola lo que escribió
     Whisper, solo en frases que nadie ha tocado, subrayado en el texto y con "Deshacer" en cada
-    reunión (desmarca la casilla si no lo quieres). El diccionario está en Ajustes > Proyectos, con
+    reunión (desmarca la casilla si no lo quieres). El diccionario está en Ajustes > Vocabulario, con
     "cambiar" y "quitar". Nada se aprende sin tu clic, el audio no se toca (lo que escribió Whisper
     se guarda aparte: "Restaurar original") y nada sale del PC.
 

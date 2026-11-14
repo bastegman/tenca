@@ -10,6 +10,28 @@ nada de ningún proyecto concreto.
 empresa. Entre paréntesis va el número de cada hallazgo, el mismo que citan los commits; el informe de la auditoría no
 está en este repositorio. «Desarrollo y CI» es para quien mantiene el repositorio: no cambia nada en la app instalada.
 
+### Ajustes: una sola forma de guardar y secciones más cortas (14/11/2026)
+
+Puntos 12 y 37 del review del 14/11/2026. Rama `ajustes-uno`.
+
+- **Todo se guarda al cambiarlo**, con «Guardado ✓» junto al control (o «No se ha guardado: …», y el control vuelve a
+  lo guardado). El pie de Ajustes solo tiene «Cerrar». Antes convivían cuatro formas: «Guardar» abajo, las filas de
+  Proyectos y Outlook al momento, y «Aplicar ahora» en Procesado. Lo que se está escribiendo se guarda en la pausa, al
+  salir de la casilla, antes de abrir otra ventana (editar una lista, el asistente) y al cerrar Ajustes.
+- Fuera el borrador de Ajustes: «Hay cambios sin guardar», «Tienes cambios sin guardar» y el aviso «No se ha aplicado…».
+- **`config_rev`**: cada guardado de Ajustes lleva el número de la última versión de los ajustes que vio. Si otra
+  ventana ha guardado entretanto, lo suelto se guarda y Ajustes se repinta con lo de allí; una lista entera (las copias
+  en otras carpetas, las claves adicionales) no se guarda (409) para no borrar lo de la otra ventana, y se dice. Los
+  guardados de una misma ventana van de uno en uno, así que dos cambios seguidos no se pisan.
+- **Procesado**: la tarjeta de estado con «Probar» y «Cambiar…», y debajo solo lo que se ajusta de la opción que tienes
+  (modelos, resumen al terminar, motores). Las tres opciones con sus avisos viven en el asistente: un solo camino para
+  cambiar de opción. Los modelos de Whisper de este PC, plegados (abiertos mientras falta alguno).
+- **Proyectos**: las listas de vocabulario pasan a su sección, «Vocabulario». La primera columna de la tabla se recorta
+  con «…» (entera al pasar el ratón): «› Infraestructura · 2 términos» se montaba sobre la columna de al lado.
+- Alto de las secciones a 1500×920: Proyectos de 1.618 a 832 px; Procesado de 1.263 (local) y 1.805 (API) a una pantalla.
+- Quitar una carpeta vinculada que era la de «Reuniones sin proyecto» la deja en automática también en los ajustes
+  guardados (antes solo pasaba con la elegida sin guardar).
+
 ### Hoy, con un mes de agenda de Outlook (09/11/2026)
 
 Bernardo, msg 1380: el calendario «conecta bien al parecer, pero no veo las siguientes reuniones»; msg 1390: «que se

@@ -120,25 +120,5 @@ function bindModelos(d) {
     clearTimeout(timer);
     timer = setTimeout(poll, 400);
   });
-  d.modelosPoll = poll;  // al cambiar «Dónde se procesan» (la descarga del modelo del directo puede haber empezado)
   poll();
-}
-
-/* Ajustes: los selectores de motor del perfil (perfil.js) con las opciones y los valores de ahora. Se pintan al abrir
-   Ajustes; al cambiar «Dónde se procesan» o al guardar la primera clave (que pone la nube), sus opciones y su valor
-   quedaban los de antes. Mismo texto que perfil.js; dataset.ini, para que «Guardar» solo mande lo que se toque. */
-function motoresRefrescar(d) {
-  const c = S.config || {}, presets = c.presets || [];
-  const prov = c.providers?.[c.cloud?.provider]?.label || 'nube';
-  const opt = (v, l, sel) => `<option value="${esc(v)}"${v === sel ? ' selected' : ''}>${esc(l)}</option>`;
-  const l = $('#lPreset', d), p = $('#pfPreset', d);
-  // lo que el usuario ya hubiera cambiado se queda (si sigue siendo una opción) y «Guardar» lo mandará
-  const rehacer = (el, html) => {
-    const tocado = el.value !== el.dataset.ini ? el.value : null;
-    el.innerHTML = html;
-    el.dataset.ini = el.value;
-    if (tocado && [...el.options].some(o => o.value === tocado)) el.value = tocado;
-  };
-  if (l) rehacer(l, presets.map(pr => opt(pr.id, `${pr.live_label} · ~${String(pr.live_speed).replace('.', ',')}× · ${liveFit(pr)[1]}`, c.live_preset || 'medium')).join(''));
-  if (p) rehacer(p, presets.map(pr => opt(pr.id, `${pr.label} · ${pr.engine === 'cloud' ? prov : pr.model}`, c.preset)).join(''));
 }

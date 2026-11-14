@@ -303,7 +303,8 @@ class ResumenAutomaticoTests(TempTree):
     def test_casilla_y_lo_que_se_envia(self):
         app = static("app.js")
         for s in ('id="sAutoLocal"', "Resumir también las reuniones transcritas en local (las envía a "
-                  "${esc(provName())})", "local: $('#sAutoLocal', d).checked", 'id="sAutoLocalAviso"',
+                  "${esc(provName())})", "sAutoLocal: el => ({ summary: { local: el.checked } })",
+                  'id="sAutoLocalAviso"',
                   "la política de tu empresa y el acuerdo con tu cliente", "transcribir en la nube (reuniones",
                   "De cada reunión se envía a <b>${esc(provName())}</b>: el título (o el nombre del archivo), la fecha "
                   "y la duración, la transcripción (con quién habla, si se sabe), tus notas, el contexto, los "

@@ -351,6 +351,9 @@ class Store:
             else:
                 self.data[k] = v
         self.lost = []  # secretos que no se pudieron descifrar (la interfaz pide pegarlos otra vez)
+        # config_rev: sube con cada cambio de Ajustes (update(..., rev=True)). Empieza en la hora de arranque, asi
+        # que tras reiniciar no coincide con la que tuviera una ventana abierta antes
+        self.rev = int(time.time() * 1000)
         for keys in self.SECRETS:
             d = self.data
             for k in keys[:-1]:
@@ -481,9 +484,11 @@ class Store:
         with self.lock:
             return copy.deepcopy(self.data)
 
-    def update(self, fn):
+    def update(self, fn, rev=False):
         with self.lock:
             fn(self.data)
+            if rev:
+                self.rev += 1
             out = copy.deepcopy(self.data)
             for keys in self.SECRETS:
                 d = out
@@ -2410,6 +2415,8 @@ def move_files(moves):
 
 
 SIN_AUDIO = "Sin micrófono y sin el audio del PC no se graba nada: deja al menos uno de los dos."
+AJUSTES_CAMBIADOS = ("Los ajustes han cambiado en otra ventana y esto no se ha guardado, para no borrar lo de allí. "
+                     "Ya ves lo guardado: vuelve a hacer el cambio.")
 
 
 def ajustes_previstos(st, a):
@@ -5796,7 +5803,7 @@ class App:
         cloud["quota"] = (self.jobs.cloud.keys.public(st["cloud"], model=engines.CloudEngine.live_model(st["cloud"]))
                           if cloud["has_key"] and getattr(self.jobs, "cloud", None) is not None else None)
         return {"root": ROOT, "root_name": root_name(), "root_names": root_names(), "version": VERSION,
-                "app_name": APP_NAME, "window": WINDOW is not None,
+                "app_name": APP_NAME, "window": WINDOW is not None, "config_rev": self.settings.rev,
                 "acerca": {"licencia": license_name(), "repo": REPO_URL, "datos": DATA_DIR, "donar": DONAR_URL,
                            "tenca": TENCA_URL},
                 "presets": presets, "providers": engines.PROVIDERS, "cloud": cloud,
@@ -6076,13 +6083,21 @@ class App:
         self._save_links()
         if before:
             self._vocab_ids_moved(before)
-        self.settings.update(lambda d: d.update(
-            favorites=[f for f in d.get("favorites", []) if not f["path"].startswith(LINK + lid)],
-            rec_folder="" if (d.get("rec_folder") or "").startswith(LINK + lid) else d.get("rec_folder", ""),
-            project_folders={k: v for k, v in (d.get("project_folders") or {}).items()
-                             if not v.startswith(LINK + lid)},
-            workstream_folders={k: v for k, v in (d.get("workstream_folders") or {}).items()
-                                if not v.startswith(LINK + lid) and not k.startswith(LINK + lid)}))
+
+        def quitar(d):
+            d.update(
+                favorites=[f for f in d.get("favorites", []) if not f["path"].startswith(LINK + lid)],
+                rec_folder="" if (d.get("rec_folder") or "").startswith(LINK + lid) else d.get("rec_folder", ""),
+                project_folders={k: v for k, v in (d.get("project_folders") or {}).items()
+                                 if not v.startswith(LINK + lid)},
+                workstream_folders={k: v for k, v in (d.get("workstream_folders") or {}).items()
+                                    if not v.startswith(LINK + lid) and not k.startswith(LINK + lid)})
+            # «Reuniones sin proyecto» en esa carpeta: vuelve a la automatica. Ajustes guarda al elegirla (14/11/2026):
+            # antes de quitarla podia no estar guardada; ahora lo esta y se quedaba apuntando a una que ya no existe
+            pf = d.get("perfil")
+            if isinstance(pf, dict) and (pf.get("folder") or "").startswith(LINK + lid):
+                pf["folder"] = None
+        self.settings.update(quitar)
         log(f"🔗 carpeta desvinculada (no se ha tocado nada): {l['path']}")
         return {"ok": True}
 
@@ -8103,7 +8118,18 @@ class App:
         if audio == ["none", "none"]:
             raise ApiError(SIN_AUDIO)
 
+        base = b.get("rev")
+        conflicto = base is not None and base != self.settings.rev
+
         def upd(d):
+            # Ajustes guarda cada control al cambiarlo y manda el config_rev que tenia (rev). Si no coincide, otra
+            # ventana (o el asistente) ha guardado antes: lo que es una lista entera (las copias en otras carpetas, las
+            # claves adicionales) no se pisa; lo demas se guarda y la respuesta lo dice (otro_cambio)
+            pf, cl = b.get("perfil"), b.get("cloud")
+            listas = (isinstance(pf, dict) and "outputs" in pf
+                      or isinstance(cl, dict) and any(k in cl for k in ("extra_keys", "extra_keys_by")))
+            if conflicto and listas:
+                raise ApiError(AJUSTES_CAMBIADOS, 409)
             for k in ("preset", "language", "prompt"):
                 if k in b:
                     d[k] = b[k] or ""
@@ -8204,7 +8230,7 @@ class App:
                 old = {masked(k): k for k in d["cloud"].get(field) or []}
                 new = [old.get(k.strip(), k.strip()) for k in incoming if isinstance(k, str) and k.strip()]
                 d["cloud"][field] = [k for k in new if "…" not in k and "•" not in k][:10]
-        self.settings.update(upd)
+        self.settings.update(upd, rev=True)
         p = (getattr(self, "pruebas", None) or {}).get(b.get("prueba")) if b.get("prueba") else None
         if p is not None and p.terminada and p.firma == self._firma(self.settings.get()):
             res = p.resumen()  # la del asistente: es de lo que se acaba de guardar
@@ -8217,7 +8243,7 @@ class App:
         # recien elegido un modo que transcribe en este PC: el modelo del directo, ya, con su progreso en Ajustes (solo
         # al cambiar de modo: «Guardar» con el mismo no vuelve a empezar una descarga que se cancelo)
         descarga = self._descargar_modelo_del_directo() if ahora != antes and ahora in ("local", "agente") else None
-        return dict(self.config({}), descarga=descarga)
+        return dict(self.config({}), descarga=descarga, otro_cambio=conflicto)
 
     def agente_comprobar(self, b):
         """Ajustes → «Comprobar»: el agente esta instalado, responde a --version y contesta una peticion minima con la

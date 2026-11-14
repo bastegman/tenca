@@ -301,7 +301,7 @@ def resolver(st, listas, sug=None, historial=None, pedido=None, carpeta_de=None,
     else:
         general = [t for t in str(st.get("prompt") or "").replace(";", ",").split(",") if t.strip()]
         lineas.append(_linea("vocab", "Vocabulario", f"El general · {len(general)} términos" if general else "Ninguno",
-                             "ajustes", "Ajustes › Proyectos", id=""))
+                             "ajustes", "Ajustes › Vocabulario", id=""))
 
     # --- contexto: esta reunión › Ajustes
     if "contexto" in cambios:
