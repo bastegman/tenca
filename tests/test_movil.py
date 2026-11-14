@@ -143,8 +143,10 @@ class ServidorWifiTests(unittest.TestCase):
             r, datos = self.p.pedir("GET", self.ruta)
         self.assertEqual(r.status, 200)
         galleta = r.getheader("Set-Cookie")
+        # Max-Age = lo que le queda al código + 60 s: 660 justo si el reloj no avanza entre crearlo y servir la página
+        # (en Windows, con su resolución de ~16 ms, pasaba de vez en cuando: run de tests del 11/11/2026)
         self.assertRegex(galleta, rf"^tenca_movil_{self.rec.puerto}=[^;]+; Path=/m/{re.escape(self.rec.token)}; "
-                                  r"Max-Age=(6[0-5][0-9]); HttpOnly; SameSite=Strict$")
+                                  r"Max-Age=(6[0-5][0-9]|660); HttpOnly; SameSite=Strict$")
         return galleta.split(";")[0], datos.decode("utf-8")
 
     def test_la_pagina_y_un_solo_movil(self):

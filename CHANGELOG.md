@@ -41,6 +41,10 @@ carguen las siguientes (un mes al menos)». Rama `hoy` (rediseño B7).
   ha empezado ninguna. Sin Outlook ni Teams, no sale nada.
 - «Copiar diagnóstico»: las líneas del fin de la llamada («paro en 30 s», «No terminar») y las de la siguiente reunión
   salen con su texto (sin asuntos), no como `<texto>`.
+- En la página de una reunión sin carpeta, «Sin clasificar» lleva a «Reuniones» (donde están las sueltas) y no a Hoy,
+  que ya no las lista.
+- Desarrollo y CI: `test_movil.test_recibir` acepta `Max-Age=660` (los 10 min del código más 60 s cuando el reloj no
+  avanza entre crearlo y servir la página; fallaba de vez en cuando en Windows).
 - Fuera de Inicio: las cuatro cifras, la ruta del disco, el selector de modelos (cada fila de «Para revisar» transcribe
   con el de siempre), las carpetas (siguen a la izquierda) y «Visto recientemente» (sigue en Ctrl+P).
 - Desarrollo y CI: `tests/test_hoy.py` (la agenda con el COM falso, la caché, /api/hoy y hoy.js con node) y
