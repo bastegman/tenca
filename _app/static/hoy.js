@@ -10,6 +10,10 @@
    - La agenda de Outlook del próximo mes (msg 1390: «un mes al menos»), que el servidor lee en segundo plano y guarda
      en memoria: Hoy no espera a Outlook. Sin Outlook, la pantalla es la misma sin agenda, con una línea que dice por qué.
    - Sin reuniones: «Graba tu primera reunión», con las tres formas de grabar y la de subir un audio.
+   - Al parar una grabación, si ya ha empezado otra reunión (msg 1479): «Ya ha empezado «X» · 10:00–11:00 · Grabar ·
+     Ahora no», encima de la tarjeta en Hoy y, en las demás páginas, junto a los avisos (renderSiguiente, desde
+     pollRec con /api/rec/status). La decide el servidor (_siguiente: la reunión de ahora sin la que se grababa) y
+     «Grabar» graba esa con su plan, solo si sigue siendo la propuesta.
    Se carga después de app.js, notas.js y grabar.js y usa sus utilidades ($, $$, api, esc, I, S, main, go, toast,
    allAudios, liveAudios, isLive, jobFor, statusOf, estDuration, fmtDur, fmtClock, aDate, titleOf, nfc, pad, iconOf, MES,
    LANGS, vocabOf, vocabOptions, saveProps, wsPatch, submitTx, openRec, openModal, closeModal, openSettings,
@@ -232,6 +236,75 @@ async function hoyGrabar(b) {
   } catch (err) { S.recLocal = false; toast(esc(err.message), 'err'); b.disabled = false; }
 }
 
+/* ---------------------------------------------------------------- «Ya ha empezado «X»» al parar */
+// la propuesta que viene en /api/rec/status (S.rec.siguiente) mientras no se graba; «Ahora no» la quita aquí al momento
+let hoySigNo = null;
+function hoySiguienteTxt(g) {
+  const horas = g.inicio && g.fin ? ` · ${hoyHora(g.inicio)}–${hoyHora(g.fin)}` : g.teams ? ' en Teams' : '';
+  return `Ya ha empezado «${g.titulo}»${horas}`;
+}
+function hoySiguienteHtml(g) {
+  return `<div class="hoy-siguiente" role="status" data-siguiente="${esc(g.titulo)}"><span class="hs-ico">${I.calendar}</span>`
+    + `<span class="hs-txt">${esc(hoySiguienteTxt(g))}${g.tema ? `<span class="hs-tema">${esc(g.tema)}</span>` : ''}</span>`
+    + `<button class="btn sm primary" type="button" data-sig-act="grabar" title="Empieza a grabar esta reunión con su proyecto y su idioma"><i class="recdot"></i>Grabar</button>`
+    + '<button class="btn sm ghost" type="button" data-sig-act="no" title="No volver a proponerla hasta la próxima grabación">Ahora no</button></div>';
+}
+function renderSiguiente() {
+  const dada = !S.rec?.recording && S.rec?.siguiente || null;
+  if (!dada || dada.titulo !== hoySigNo) hoySigNo = null;  // «Ahora no» vale hasta que el servidor deje de darla
+  const g = dada && dada.titulo !== hoySigNo ? dada : null;
+  const enHoy = S.route?.kind === 'home' && $('#hoySiguiente');
+  const sig = g ? JSON.stringify([g.titulo, g.inicio, g.fin, g.teams, g.tema]) : '';
+  for (const [el, toca] of [[$('#hoySiguiente'), enHoy], [$('#sigToast'), !enHoy]]) {
+    if (!el) continue;
+    const html = toca && g ? hoySiguienteHtml(g) : '';
+    if (el.dataset.sig === (html ? sig : '')) continue;
+    el.dataset.sig = html ? sig : '';
+    el.innerHTML = html;
+  }
+  if (!enHoy && g && !$('#sigToast')) {
+    const el = document.createElement('div');
+    el.id = 'sigToast';
+    el.className = 'toast sig-toast';
+    el.dataset.sig = sig;
+    el.innerHTML = hoySiguienteHtml(g);
+    $('#toasts')?.prepend(el);
+  } else if ((!g || enHoy) && $('#sigToast')) $('#sigToast').remove();
+}
+async function hoySiguienteAccion(b) {
+  const caja = b.closest('[data-siguiente]'), titulo = caja?.dataset.siguiente;
+  if (!titulo) return;
+  if (b.dataset.sigAct === 'no') {
+    hoySigNo = titulo;
+    renderSiguiente();
+    try { await api('/api/rec/siguiente', { descartar: true }); pollRec(); } catch (err) { hoySigNo = null; toast(esc(err.message), 'err'); }
+    return;
+  }
+  if (S.rec?.recording) return toast('Ya hay una grabación en marcha.', 'err');
+  $$('[data-sig-act]').forEach(x => { x.disabled = true; });
+  try {
+    S.recLocal = true;
+    const r = await api('/api/rec/siguiente', { grabar: titulo });
+    toast(`● Grabando · ${esc(r.plan?.resumen || titulo)}${r.aviso ? ` · ${esc(r.aviso)}` : ''}`);
+    HOY.pedido = null; HOY.plan = null; HOY.visto = null; HOY.at = 0;
+    await refreshTree(true);
+    pollRec(); pollJobs(true);
+    if (r.path) go('a', r.path);
+  } catch (err) {
+    S.recLocal = false;
+    toast(esc(err.message), 'err');
+    $$('[data-sig-act]').forEach(x => { x.disabled = false; });
+    pollRec();
+  }
+}
+addEventListener('click', e => {
+  const b = e.target.closest?.('[data-sig-act]');
+  if (!b) return;
+  e.preventDefault();
+  e.stopPropagation();  // dentro de un toast: el clic no lo cierra ni abre otra cosa
+  hoySiguienteAccion(b);
+}, true);
+
 /* ---------------------------------------------------------------- Para revisar y Esta semana */
 function hoyProyTxt(a) {
   const p = a.props || {};
@@ -331,12 +404,14 @@ function viewHoy() {
     ${typeof avisoResumenLocalHtml === 'function' ? avisoResumenLocalHtml() : ''}
     <h1>Hoy <span class="sub">· ${esc(hoyFechaLarga(now))}</span></h1>
     ${typeof welcomeCard === 'function' ? welcomeCard(all) : ''}
+    <div id="hoySiguiente" class="hoy-siguiente-box"></div>
     <div class="hoy-grid">
       <div class="hoy-ahora-box" id="hoyAhora">${hoyAhoraHtml()}</div>
       <section class="hoy-agenda" id="hoyAgenda">${hoyAgendaHtml()}</section>
       <div class="hoy-rev">${all.length ? hoyRevisarHtml(revisar, now) : hoyVacioHtml()}</div>
       <div class="hoy-sem">${all.length ? hoySemanaHtml(hoySemana(all, now, fuera)) : ''}</div>
     </div></div>`;
+  renderSiguiente();  // «Ya ha empezado «X»» encima de la tarjeta, sin esperar al siguiente sondeo
 }
 
 /* ---------------------------------------------------------------- preparar una reunión de la agenda */

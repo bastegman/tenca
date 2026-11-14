@@ -1376,7 +1376,21 @@ def _mismo_asunto(a, b):
     return bool(a and b and (a == b or a in b or b in a))
 
 
-def reunion_de_ahora(lectura, citas, vocab_lists, now=None):
+def excluida(excluir, asunto, inicio=None):
+    """True si la reunión (asunto, inicio ISO) es una de `excluir` ([{asunto, inicio}]: la que se acaba de grabar):
+    el mismo asunto (como lo compara reunion_de_ahora con el título de Teams, ya limpio como el nombre del archivo) y,
+    si las dos tienen hora de inicio, la misma. Sin hora (solo Teams), basta el asunto."""
+    for x in excluir or ():
+        a = x.get("asunto") if isinstance(x, dict) else None
+        if not (a and asunto and _mismo_asunto(nombre_archivo(a), nombre_archivo(asunto))):
+            continue
+        i = str(x.get("inicio") or "")[:16]
+        if not i or not inicio or i == str(inicio)[:16]:
+            return True
+    return False
+
+
+def reunion_de_ahora(lectura, citas, vocab_lists, now=None, excluir=None):
     """La reunión de ahora para el plan de grabar y para Hoy → (sugerencia, info).
 
     `lectura`: la del vigilante o reunion_actual (Teams y, durante una llamada con el calendario encendido, la cita de
@@ -1384,12 +1398,27 @@ def reunion_de_ahora(lectura, citas, vocab_lists, now=None):
     da (solo se leen si hacen falta). Si la lectura da nombre, manda, porque es lo que se ve en pantalla; si no, la
     cita de la agenda que encaja con ahora (cita_ahora), con fuente "outlook" y sin asistentes (la agenda no los lee).
     info: {titulo, fuente, teams (hay ventana de reunión de Teams), inicio, fin (ISO, de la cita si es la misma
-    reunión), en_curso, periodica}, o None si no hay reunión."""
+    reunión), en_curso, periodica}, o None si no hay reunión.
+    `excluir` ([{asunto, inicio}], ver excluida): «la siguiente reunión» al parar una grabación es la misma regla sin
+    la que se acaba de grabar, ni en la ventana de Teams, ni en la cita de la lectura, ni en la agenda."""
     lectura = lectura or {}
     now = now or datetime.now()
     sug = dict(lectura.get("sugerencia") or {})
     teams = (lectura.get("teams") or {}).get("title") or None
-    cita = lectura.get("outlook") or cita_ahora(citas, now, teams)
+    outlook = lectura.get("outlook")
+    if excluir:
+        if teams and excluida(excluir, teams):
+            teams = None
+            if sug.get("source") != "outlook":
+                sug = {}
+        if outlook and excluida(excluir, outlook.get("subject"), outlook.get("start")):
+            outlook = None
+            if sug.get("source") == "outlook":
+                sug = {}
+        if sug.get("name") and excluida(excluir, sug["name"], (outlook or {}).get("start")):
+            sug = {}
+        citas = [c for c in citas or [] if not excluida(excluir, c.get("subject"), c.get("start"))]
+    cita = outlook or cita_ahora(citas, now, teams)
     if not sug.get("name") and cita and (cita.get("subject") or "").strip():
         sug = suggest(cita, vocab_lists() if callable(vocab_lists) else vocab_lists)
         sug["source"] = "outlook"
@@ -1442,6 +1471,7 @@ class Vigia:
 
     def __init__(self):
         self.ultimo, self.ultimo_at, self.proc, self.avisado = None, 0.0, None, None
+        self.tipo = None  # el aviso abierto: "llamada" o "siguiente" («Ya ha empezado «X»» al parar una grabación)
         self.lock = threading.Lock()
         self.historial = []  # [(hora, participantes)] de las ultimas lecturas: participantes_recientes
 
@@ -1491,18 +1521,25 @@ class Vigia:
                 pass
         self.proc = None
 
-    def abrir_aviso(self, puerto, app_dir, python=None, creationflags=0, segundos=20, ocultar=False):
+    def abrir_aviso(self, puerto, app_dir, python=None, creationflags=0, segundos=20, ocultar=False, siguiente=None,
+                    titulo=None, sub=None, tema=None):
         """Lanza aviso.py (proceso aparte, como el selector de carpetas) con lo que se sabe de la reunión. ocultar: el
-        ajuste «Al compartir pantalla» (que el aviso no salga en lo que ven los demás)."""
+        ajuste «Al compartir pantalla» (que el aviso no salga en lo que ven los demás). `siguiente`: el aviso de «Ya
+        ha empezado «X»» al parar una grabación, con sus textos; su «Grabar» graba esa reunión (/api/rec/siguiente)."""
         sug = dict((self.ultimo or {}).get("sugerencia") or {})
-        titulo = ((self.ultimo or {}).get("teams") or {}).get("title") or sug.get("name") or ""
-        cmd = [python or sys.executable, os.path.join(app_dir, "aviso.py"), "--puerto", str(puerto),
-               "--titulo", titulo, "--nombre", sug.get("name") or "", "--vocab", sug.get("vocab") or "",
-               "--tema", sug.get("vocab_label") or "", "--segundos", str(segundos)] + (["--ocultar-captura"]
-                                                                                       if ocultar else [])
+        if siguiente:
+            cmd_reunion = ["--titulo", titulo or siguiente, "--siguiente", siguiente, "--tema", tema or ""] + (
+                ["--sub", sub] if sub else [])
+        else:
+            titulo = ((self.ultimo or {}).get("teams") or {}).get("title") or sug.get("name") or ""
+            cmd_reunion = ["--titulo", titulo, "--nombre", sug.get("name") or "", "--vocab", sug.get("vocab") or "",
+                           "--tema", sug.get("vocab_label") or ""]
+        cmd = [python or sys.executable, os.path.join(app_dir, "aviso.py"), "--puerto", str(puerto), *cmd_reunion,
+               "--segundos", str(segundos)] + (["--ocultar-captura"] if ocultar else [])
         try:
             self.proc = subprocess.Popen(cmd, cwd=app_dir, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                          stderr=subprocess.DEVNULL, creationflags=creationflags)
+            self.tipo = "siguiente" if siguiente else "llamada"
             return True
         except OSError:
             log_exc()
@@ -1521,7 +1558,8 @@ class Vigia:
         if abrir:
             return self.abrir_aviso(puerto, app_dir, creationflags=creationflags,
                                     ocultar=settings.get("ocultar_al_compartir", True) is not False)
-        if (not app or recording) and self.abierto():
+        # sin llamada, el de la llamada sobra; el de «Ya ha empezado «X»» no depende de ella: solo se cierra al grabar
+        if (recording or (not app and self.tipo != "siguiente")) and self.abierto():
             self.cerrar_aviso()
         if not app:
             with self.lock:

@@ -11,7 +11,9 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
+import time
 import types
 import unittest
 from datetime import datetime, timedelta
@@ -624,13 +626,279 @@ const fmtDur = s => `${Math.round(s / 60)} min`;
 """
 
 
+# ----------------------------------------------------------------------------- 6. «Ya ha empezado «X»» al parar
+
+class SiguienteReglaTests(unittest.TestCase):
+    """La siguiente reunión es la reunión de ahora de siempre (reunion_de_ahora) sin la que se acaba de grabar."""
+    A = [{"asunto": "Comité Alfa", "inicio": "2026-11-09T09:30"}]
+
+    def test_excluida(self):
+        f = calendario.excluida
+        self.assertTrue(f(self.A, "Comité Alfa", "2026-11-09T09:30"))
+        self.assertTrue(f(self.A, "comité: alfa", "2026-11-09T09:30:00"))  # como el nombre del archivo y sin segundos
+        self.assertTrue(f(self.A, "Comité Alfa | Microsoft Teams"))  # sin hora (Teams): basta el asunto
+        self.assertFalse(f(self.A, "Comité Alfa", "2026-11-09T10:30"))  # la misma reunión, a otra hora: es otra
+        self.assertFalse(f(self.A, "Revisión", "2026-11-09T09:30"))
+        self.assertFalse(f([{"asunto": "", "inicio": None}, "rara"], "Comité Alfa"))
+        self.assertTrue(f([{"asunto": "Comité Alfa", "inicio": None}], "Comité Alfa", "2026-11-09T10:30"))
+
+    def test_sin_la_grabada_en_teams_en_la_lectura_y_en_la_agenda(self):
+        citas = [publica("Comité Alfa", NOW - timedelta(minutes=60)),  # 9:30-10:30: la grabada
+                 publica("Revisión", NOW - timedelta(minutes=2))]  # 10:28: ya ha empezado
+        # Teams aún enseña la grabada y el vigilante la leyó con su cita: las dos fuera, queda la de la agenda
+        lect = {"teams": {"title": "Comité Alfa"}, "outlook": citas[0],
+                "sugerencia": {"name": "Comité Alfa", "source": "outlook", "participants": ["Ana"]}}
+        sug, info = calendario.reunion_de_ahora(lect, citas, LISTAS, NOW, excluir=self.A)
+        self.assertEqual((sug["name"], sug["source"], sug["participants"]), ("Revisión", "outlook", []))
+        self.assertEqual((info["titulo"], info["teams"], info["inicio"], info["en_curso"]),
+                         ("Revisión", False, "2026-11-09T10:28", True))
+        # sin excluir, la de siempre (no cambia nada para la tarjeta ni Ctrl+Alt+R)
+        self.assertEqual(calendario.reunion_de_ahora(lect, citas, LISTAS, NOW)[1]["titulo"], "Comité Alfa")
+        # la siguiente ya en Teams: manda su ventana, como siempre
+        lect = {"teams": {"title": "Revisión"}, "sugerencia": {"name": "Revisión", "source": "teams"}}
+        _, info = calendario.reunion_de_ahora(lect, citas, LISTAS, NOW, excluir=self.A)
+        self.assertEqual((info["titulo"], info["teams"], info["inicio"]), ("Revisión", True, "2026-11-09T10:28"))
+
+    def test_dos_seguidas_con_el_mismo_asunto(self):
+        a = [{"asunto": "Bloque", "inicio": "2026-11-09T09:30"}]
+        citas = [publica("Bloque", NOW - timedelta(minutes=60)), publica("Bloque", NOW - timedelta(minutes=1))]
+        _, info = calendario.reunion_de_ahora({}, citas, [], NOW, excluir=a)
+        self.assertEqual(info["inicio"], "2026-11-09T10:29")
+        # solo con Teams (sin hora) el mismo asunto no se puede distinguir: no se propone (del lado seguro)
+        lect = {"teams": {"title": "Bloque"}, "sugerencia": {"name": "Bloque", "source": "teams"}}
+        self.assertEqual(calendario.reunion_de_ahora(lect, [], [], NOW, excluir=[{"asunto": "Bloque"}]), ({}, None))
+
+
+class SiguienteServidorTests(TempTree):
+    """Al parar una grabación: la propuesta en /api/rec/status y /api/hoy, «Grabar», «Ahora no», cuándo se va y el aviso
+    flotante. Con la agenda de ServidorTests y el reloj de verdad (las citas se ponen alrededor de ahora)."""
+    app_base = ServidorTests.app
+
+    def setUp(self):
+        super().setUp()
+        self.write("Alfa/Vocabulario/General.txt", "comité, API\n")
+        self.lect = {}
+
+    def app(self, **st):
+        a = self.app_base(**st)
+        now = datetime.now().replace(second=0, microsecond=0)
+        self.citas = [publica("Comité de seguimiento", now - timedelta(minutes=58)),  # la grabada, acaba en 2 min
+                      publica("Revisión de presupuesto", now - timedelta(minutes=3), 45)]
+        a.agenda.refrescar()
+        a.grabada, a.siguiente, a._siguiente_cache = [], None, (0.0, None)
+        a.parada_auto, a.meeting_prev = None, None
+        a.fin_llamada = types.SimpleNamespace(quedan=lambda t: None)
+        self.lect = {"teams": {"title": "Comité de seguimiento"},
+                     "sugerencia": {"name": "Comité de seguimiento", "source": "teams"}}
+        self.logs = []
+        p = mock.patch.object(server, "log", self.logs.append)
+        p.start()
+        self.addCleanup(p.stop)
+        return a
+
+    def grabar_y_parar(self, a):
+        """Lo que hacen rec_start y rec_stop con la grabadora de mentira: se graba «Comité de seguimiento» desde su
+        llamada de Teams (la lectura de ahora vuelve a ser la de antes al parar)."""
+        antes, self.lect = self.lect, {"teams": {"title": "Comité de seguimiento"},
+                                       "sugerencia": {"name": "Comité de seguimiento", "source": "teams"}}
+        a.grabada = a._que_se_graba("Comité de seguimiento")
+        self.lect = antes
+        rec = types.SimpleNamespace(alive=lambda: True, path=os.path.join(self.tmp, "x.wav"), stop=lambda: 60.0,
+                                    timeline=lambda: None)
+        a.rec, a._movs = rec, lambda: {}
+        a.rec_stop({})
+        self.assertIsNone(a.rec)
+
+    def test_propone_la_que_ya_ha_empezado(self):
+        a = self.app(outlook_on=True)
+        self.assertIsNone(a.rec_status({}).get("siguiente"))  # sin parar nada, nada
+        self.grabar_y_parar(a)
+        self.assertEqual(a.grabada[0]["asunto"], "Comité de seguimiento")
+        self.lect = {}  # colgó: ya no hay ventana de Teams
+        g = a.rec_status({})["siguiente"]
+        self.assertEqual((g["titulo"], g["teams"], g["tema"]), ("Revisión de presupuesto", False, ""))
+        self.assertEqual(g["inicio"], self.citas[1]["start"])
+        self.assertEqual(a.hoy({})["siguiente"], g)  # también en Hoy
+        self.assertIn("   siguiente reunión: propuesta (empezó hace 3 min)", self.logs)
+        self.assertEqual(server.diag_line(self.logs[-1]), self.logs[-1])  # en «Copiar diagnóstico», entera
+        # Teams todavía con la ventana de la grabada: no cambia nada
+        self.lect = {"teams": {"title": "Comité de seguimiento"},
+                     "sugerencia": {"name": "Comité de seguimiento", "source": "teams"}}
+        self.assertEqual(a._siguiente_pub(fresco=True)["titulo"], "Revisión de presupuesto")
+
+    def test_nada_si_no_hay_otra_o_sin_outlook(self):
+        a = self.app(outlook_on=True)
+        self.citas.pop()
+        a.agenda.refrescar()
+        self.grabar_y_parar(a)
+        self.assertIsNone(a.rec_status({})["siguiente"])  # solo la grabada
+        a = self.app(outlook_on=False)  # calendario apagado y sin Teams: nada, sin errores ni avisos
+        self.grabar_y_parar(a)
+        self.lect = {}
+        self.assertIsNone(a.rec_status({})["siguiente"])
+        self.assertFalse([x for x in self.logs if "siguiente" in x])
+        # la que empieza dentro de 5 min aún no ha empezado: no se propone
+        a = self.app(outlook_on=True)
+        self.citas[1] = publica("Revisión de presupuesto", datetime.now() + timedelta(minutes=5))
+        a.agenda.refrescar()
+        self.grabar_y_parar(a)
+        self.lect = {}
+        self.assertIsNone(a.rec_status({})["siguiente"])
+
+    def test_teams_sin_outlook(self):
+        a = self.app(outlook_on=False)
+        self.grabar_y_parar(a)
+        self.assertEqual(a.grabada, [{"asunto": "Comité de seguimiento", "inicio": None}])
+        self.assertIsNone(a.rec_status({})["siguiente"])  # Teams sigue en la grabada
+        self.lect = {"teams": {"title": "Revisión"}, "sugerencia": {"name": "Revisión", "source": "teams"}}
+        g = a._siguiente_pub(fresco=True)
+        self.assertEqual((g["titulo"], g["teams"], g["inicio"]), ("Revisión", True, None))
+        self.assertIn("   siguiente reunión: propuesta (en Teams)", self.logs)
+
+    def test_ahora_no_otra_grabacion_y_cuando_acaba(self):
+        a = self.app(outlook_on=True)
+        self.grabar_y_parar(a)
+        self.lect = {}
+        a.vigia.tipo, cerrado = "siguiente", []
+        a.vigia.cerrar_aviso = lambda: cerrado.append(1)
+        self.assertTrue(a.rec_status({})["siguiente"])
+        a.rec_siguiente({"descartar": True})
+        self.assertIsNone(a.rec_status({})["siguiente"])
+        self.assertEqual(cerrado, [1])  # y el flotante de la misma propuesta se cierra
+        self.assertIsNone(a.hoy({})["siguiente"])
+        # otra parada la vuelve a proponer; grabando, no; empezar otra grabación la quita
+        self.grabar_y_parar(a)
+        self.assertTrue(a._siguiente_pub(fresco=True))
+        a.rec = types.SimpleNamespace(alive=lambda: True)
+        self.assertIsNone(a._siguiente_pub(fresco=True))
+        a.rec = None
+        a.siguiente = None  # lo que hace rec_start al empezar
+        self.assertIsNone(a._siguiente_pub(fresco=True))
+        # cuando la cita acaba, se va; y pasados los 10 min sin nada que proponer, ya no se propone nada
+        self.grabar_y_parar(a)
+        fin = datetime.fromisoformat(self.citas[1]["end"])
+        self.assertIsNone(a._siguiente(now=fin + timedelta(minutes=1)))
+        self.grabar_y_parar(a)
+        a.siguiente["hasta"] = time.time() - 1
+        self.assertIsNone(a._siguiente_pub(fresco=True))
+        # en su llamada de Teams pasada la hora de fin de la cita: también se va (la cita ha acabado)
+        self.grabar_y_parar(a)
+        a.siguiente["hasta"] = fin.timestamp() + 3600
+        self.lect = {"teams": {"title": "Revisión de presupuesto"},
+                     "sugerencia": {"name": "Revisión de presupuesto", "source": "teams"}}
+        self.assertTrue(a._siguiente())
+        with mock.patch.object(server.time, "time", lambda: fin.timestamp() + 60):
+            self.assertIsNone(a._siguiente())
+        self.lect = {}
+        # vista una vez, se queda mientras dure la reunión (más allá de los 10 min)
+        self.grabar_y_parar(a)
+        self.assertTrue(a._siguiente_pub(fresco=True))
+        self.assertGreaterEqual(a.siguiente["hasta"], fin.timestamp())
+
+    def test_grabar_usa_el_plan_de_esa_reunion_con_lo_preparado(self):
+        a = self.app(outlook_on=True)
+        c = self.citas[1]
+        a.hoy_preparar({"asunto": c["subject"], "inicio": c["start"], "fin": c["end"], "idioma": "pt",
+                        "contexto": "Presupuesto anual"})
+        self.grabar_y_parar(a)
+        self.lect = {}
+        vistos = []
+        a.rec_start = lambda b: vistos.append(b) or {"path": "y.wav", "workstream": None}
+        with self.assertRaises(server.ApiError):  # lo que se ve tiene que ser lo que se graba
+            a.rec_siguiente({"grabar": "Otra reunión"})
+        self.assertEqual(vistos, [])
+        with mock.patch.object(server, "cue") as cue, mock.patch.object(server, "notify") as notify:
+            r = a.rec_siguiente({"grabar": "Revisión de presupuesto"})
+            self.assertFalse(cue.called or notify.called)  # desde la app no hay pitido ni aviso de Windows
+        self.assertTrue(r["recording"])
+        b = vistos[0]
+        self.assertEqual((b["name"], b["language"], b["contexto"]), ("Revisión de presupuesto", "pt",
+                                                                     "Presupuesto anual"))
+        # el mismo plan que la tarjeta de Hoy daría para esa reunión
+        sug = a._siguiente()[0]
+        self.assertEqual({k: v for k, v in b.items() if k != "resumen"}, a.plan_grabar({}, sug=sug)["rec"])
+        self.assertIn("   siguiente reunión: grabar desde la app", self.logs)
+        # desde el aviso, con su pitido y su aviso; si ya se graba, no se toca
+        with mock.patch.object(server, "cue") as cue, mock.patch.object(server, "notify"):
+            a.rec_siguiente({"grabar": "Revisión de presupuesto", "origen": "aviso"})
+            self.assertEqual(cue.call_args[0], ("start",))
+        a.rec = types.SimpleNamespace(alive=lambda: True, path=os.path.join(self.tmp, "z.wav"))
+        self.assertTrue(a.rec_siguiente({"grabar": "Revisión de presupuesto", "origen": "aviso"})["recording"])
+        with self.assertRaises(server.ApiError):
+            a.rec_siguiente({"grabar": "Revisión de presupuesto"})
+        self.assertEqual(len(vistos), 2)
+
+    def test_aviso_flotante(self):
+        a = self.app(outlook_on=True)
+        abiertos = []
+        a.vigia.abierto = lambda: False
+        a.vigia.abrir_aviso = lambda *x, **k: abiertos.append(k) or True
+        st = a.settings.get()
+        self.assertFalse(a._siguiente_aviso("Teams", st))  # sin parar nada
+        self.grabar_y_parar(a)
+        self.lect = {}
+        self.assertFalse(a._siguiente_aviso("Teams", dict(st, rec_aviso=False)))
+        self.assertFalse(a._siguiente_aviso("Teams", dict(st, meeting_detect=False)))
+        self.assertTrue(a._siguiente_aviso("Teams", st))
+        k = abiertos[0]
+        self.assertEqual((k["siguiente"], k["titulo"]), ("Revisión de presupuesto", "Ya ha empezado «Revisión de "
+                                                                                    "presupuesto»"))
+        self.assertTrue(k["sub"].endswith(" · Pulsa Grabar para tomar notas"), k["sub"])
+        self.assertEqual(a.vigia.avisado, "Teams")  # al cerrarse, no sale además el «● Grabar» de esa llamada
+        self.assertFalse(a._siguiente_aviso("Teams", st))  # una vez por parada
+        self.assertEqual(len(abiertos), 1)
+        self.assertIn("   siguiente reunión: aviso flotante abierto", self.logs)
+
+    def test_vigia_no_cierra_el_aviso_de_la_siguiente_sin_llamada(self):
+        import test_reunion
+        FakeProc = test_reunion.FakeProc
+        FakeProc.spawned = []
+        with mock.patch.object(calendario.subprocess, "Popen", FakeProc):
+            v = calendario.Vigia()
+            self.assertTrue(v.abrir_aviso(8765, "/app", siguiente="Revisión", titulo="Ya ha empezado «Revisión»",
+                                          sub="10:00–11:00 · Pulsa Grabar para tomar notas", tema="Alfa · General"))
+            cmd = FakeProc.spawned[0].cmd
+            self.assertEqual(cmd[cmd.index("--siguiente") + 1], "Revisión")
+            self.assertEqual(cmd[cmd.index("--sub") + 1], "10:00–11:00 · Pulsa Grabar para tomar notas")
+            self.assertNotIn("--nombre", cmd)
+            self.assertFalse(v.tic(None, False, {}, lambda: {}, 8765, "/app"))  # sin llamada: sigue abierto
+            self.assertTrue(FakeProc.spawned[0].alive)
+            self.assertFalse(v.tic(None, True, {}, lambda: {}, 8765, "/app"))  # al grabar, se cierra
+            self.assertFalse(FakeProc.spawned[0].alive)
+            self.assertTrue(v.tic("Teams", False, {}, lambda: {}, 8765, "/app"))  # el de la llamada, como antes
+            self.assertEqual(v.tipo, "llamada")
+            self.assertFalse(v.tic(None, False, {}, lambda: {}, 8765, "/app"))
+            self.assertFalse(FakeProc.spawned[1].alive)
+
+    def test_las_lineas_del_log_salen_en_el_diagnostico(self):
+        """Las de la siguiente reunión y las del fin de la llamada (directo-avisos), con su texto y sin asuntos."""
+        for linea in ("   siguiente reunión: propuesta (empezó hace 3 min)",
+                      "   siguiente reunión: propuesta (en Teams)",
+                      "   siguiente reunión: aviso flotante abierto", "   siguiente reunión: «Ahora no»",
+                      "   siguiente reunión: grabar desde la app", "   siguiente reunión: grabar desde el aviso",
+                      "   siguiente reunión: ya no está en curso",
+                      "   la llamada de Teams ha terminado: se para la grabación en 30 s si no se pide seguir",
+                      "   la llamada sigue (o no se puede saber): no se para la grabación",
+                      "   «No terminar»: la grabación sigue aunque la llamada haya terminado"):
+            self.assertEqual(server.diag_line(linea), linea)
+        self.assertEqual(server.diag_line("■ Clientes Omega/Junta.wav: parada al terminar la llamada de Teams (sin "
+                                          "«No terminar» en 30 s)"),
+                         "■ <texto>: parada al terminar la llamada de Teams (sin «No terminar» en 30 s)")
+
+
 @unittest.skipUnless(shutil.which("node"), "node no instalado")
 class HoyJsTests(unittest.TestCase):
     def node(self, code):
         with open(os.path.join(STATIC, "hoy.js"), encoding="utf-8") as f:
             src = f.read()
-        r = subprocess.run(["node", "-e", JS_STUBS + src + "\n" + code], capture_output=True, text=True,
-                           encoding="utf-8", timeout=30)
+        # en un fichero y no con `node -e`: en Windows la línea de órdenes no pasa de 32 767 caracteres y hoy.js ya no
+        # cabía (WinError 206 en tests de Windows, run 42716635016 del 09/11/2026)
+        d = tempfile.mkdtemp(prefix="tenca-hoyjs-")
+        self.addCleanup(shutil.rmtree, d, True)
+        js = os.path.join(d, "prueba.js")
+        with open(js, "w", encoding="utf-8") as f:
+            f.write(JS_STUBS + src + "\n" + code)
+        r = subprocess.run(["node", js], capture_output=True, text=True, encoding="utf-8", timeout=30)
         self.assertEqual(r.returncode, 0, r.stderr)
         return json.loads(r.stdout)
 
@@ -685,6 +953,14 @@ class HoyJsTests(unittest.TestCase):
         self.assertEqual(out, [[["Hoy", ["mie", "mie2"]], ["Lun 9", ["lun"]]],
                                [["Hoy", ["Ahora*"]], ["Mañana", ["Mañana"]], ["Vie 20 nov", ["Luego"]]]])
 
+    def test_siguiente_texto(self):
+        out = self.node("""console.log(JSON.stringify([
+            hoySiguienteTxt({titulo: 'Revisión', inicio: '2026-11-09T10:00', fin: '2026-11-09T11:00', teams: false}),
+            hoySiguienteTxt({titulo: 'Revisión', inicio: null, fin: null, teams: true}),
+            hoySiguienteTxt({titulo: 'Revisión', inicio: null, fin: null, teams: false})]));""")
+        self.assertEqual(out, ["Ya ha empezado «Revisión» · 10:00–11:00", "Ya ha empezado «Revisión» en Teams",
+                               "Ya ha empezado «Revisión»"])
+
     def test_la_carga_y_los_ganchos(self):
         html = open(os.path.join(STATIC, "index.html"), encoding="utf-8").read()
         app = open(os.path.join(STATIC, "app.js"), encoding="utf-8").read()
@@ -692,6 +968,7 @@ class HoyJsTests(unittest.TestCase):
         self.assertIn('<link rel="stylesheet" href="/hoy.css">', html)
         self.assertIn("if (typeof viewHoy === 'function') return viewHoy();", app)
         self.assertIn("</svg>Hoy</a>", html)
+        self.assertIn("if (typeof renderSiguiente === 'function') renderSiguiente();", app)
 
 
 if __name__ == "__main__":

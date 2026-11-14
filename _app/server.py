@@ -4634,6 +4634,19 @@ DIAG_LINES = (
     "   calendario: agenda · {n} citas⟦ (cortada)⟧ ({n} ms)",
     "   hoy: reunión preparada ({n} cosas)",
     "   hoy: reunión sin preparar ({n} cosas)",
+    # «Ya ha empezado «X»» al parar una grabación (hoy): sin el asunto
+    "   siguiente reunión: propuesta (empezó hace {n} min)",
+    "   siguiente reunión: propuesta (en Teams)",
+    "   siguiente reunión: aviso flotante abierto",
+    "   siguiente reunión: «Ahora no»",
+    "   siguiente reunión: grabar desde la app",
+    "   siguiente reunión: grabar desde el aviso",
+    "   siguiente reunión: ya no está en curso",
+    # fin de la llamada (directo-avisos): «paro en 30 s · No terminar»
+    "   la llamada de Teams ha terminado: se para la grabación en {n} s si no se pide seguir",
+    "   la llamada sigue (o no se puede saber): no se para la grabación",
+    "   «No terminar»: la grabación sigue aunque la llamada haya terminado",
+    "■ {t}: parada al terminar la llamada de Teams (sin «No terminar» en {n} s)",
     "   calendario: agenda · {s} ({n} ms)",
     "   calendario: {s} ({n} ms)",
     "apagar pedido desde la interfaz ({n} trabajos en cola o en marcha)",
@@ -4913,6 +4926,9 @@ class App:
         # «La llamada ha terminado: paro en 30 s · No terminar» (B6); parada: la última parada por eso (la interfaz
         # la avisa al ver que ya no se graba)
         self.fin_llamada, self.parada_auto = directo_avisos.FinDeLlamada(), None
+        # «Ya ha empezado «X» · Grabar · Ahora no» al parar una grabación (msg 1479): lo que se grababa (para no
+        # proponerla otra vez) y hasta cuándo se mira (_siguiente)
+        self.grabada, self.siguiente, self._siguiente_cache = [], None, (0.0, None)
         # lo que ya se sabe de los asistentes de Outlook (si pregunta, no se le vuelve a preguntar solo al arrancar)
         calendario.ASISTENTES["estado"] = self.settings.get().get("outlook_asistentes") or None
         calendario.al_cambiar = lambda v: self.settings.update(lambda d: d.update(outlook_asistentes=v))
@@ -5314,6 +5330,8 @@ class App:
         p = self.parada_auto
         if not out["recording"] and p and time.time() - p["at"] < 120:
             out["parada"] = p  # se paró sola al terminar la llamada: la interfaz lo dice al ver que ya no se graba
+        if not out["recording"]:
+            out["siguiente"] = self._siguiente_pub()
         return out
 
     def rec_monitor(self, b):
@@ -5485,6 +5503,12 @@ class App:
                         except OSError:
                             pass
         self.rec_resumen = " ".join(str(b.get("resumen") or "").split())[:300]  # lo que dice el plan (Inicio, toasts)
+        self.siguiente, self._siguiente_cache = None, (0.0, None)  # empieza otra grabación: lo propuesto, fuera
+        try:  # la reunión que se graba: al parar, «la siguiente» es otra (_siguiente)
+            self.grabada = self._que_se_graba(b.get("name"))
+        except Exception:
+            log_exc()
+            self.grabada = [{"asunto": b["name"], "inicio": None}] if b.get("name") else []
         log(f"● Grabando: {rel}" + (f" [{v['project']} · {v['name']}]" if v else "")
             + ("" if b.get("live") else " (solo grabar, sin transcribir)")
             + (f" · aviso: {'; '.join(avisos)}" if avisos else ""))
@@ -5520,6 +5544,11 @@ class App:
             log_exc()
         self.library.at = 0
         log(f"■ Grabación parada: {rel_of(r.path)} ({secs / 60:.1f} min)")
+        # «Ya ha empezado «X» · Grabar · Ahora no»: durante SIGUIENTE_S, la reunión de ahora que no sea la grabada
+        self.siguiente = {"excluir": list(getattr(self, "grabada", None) or []), "parada": time.time(),
+                          "hasta": time.time() + self.SIGUIENTE_S, "descartada": False, "flotante": False,
+                          "dicha": False}
+        self._siguiente_cache = (0.0, None)
         if self._movs().get(rel_of(r.path)):  # «solo grabar» no deja trabajos: si tenia otra carpeta, se mueve ya
             threading.Thread(target=self._aplicar_movimientos, args=(rel_of(r.path),), daemon=True,
                              name="mover").start()
@@ -6583,6 +6612,12 @@ class App:
         self.meeting = app if detect else None
         if not detect:
             self.vigia.cerrar_aviso()  # si estaba abierto cuando se desmarco
+        if not recording:  # «Ya ha empezado «X»» tras parar: antes que el de la llamada (no se apilan)
+            try:
+                if self._siguiente_aviso(app, st):
+                    notified = app
+            except Exception:
+                log_exc()
         # aviso flotante «Grabar / ✕» (calendario.py + aviso.py): una vez por llamada y nunca si ya se graba;
         # mientras dure la llamada se lee la reunión (Teams y, si está activado, Outlook) para sugerir
         if self.vigia.tic(app, recording, st if detect else dict(st, rec_aviso=False),
@@ -6682,12 +6717,13 @@ class App:
         return r
 
     # --- la pantalla Hoy (B7) y la agenda de Outlook de un mes
-    def _reunion_ahora(self, st=None, recordar=True, citas=None):
+    def _reunion_ahora(self, st=None, recordar=True, citas=None, excluir=None):
         """(sugerencia, info) de la reunión de ahora: la última lectura del vigilante (o la ventana de Teams al momento)
         y, si no da nombre, la cita de la agenda de Outlook ya leída que encaja con ahora (calendario.reunion_de_ahora).
         La usan el plan de grabar (tarjeta, Ctrl+Alt+R, aviso, Hoy) y /api/hoy: una sola reunión de ahora para todos.
         `recordar=False` (Hoy, que pregunta cada 30 s): la lectura al momento no se guarda como la del vigilante, que
-        durante una llamada la quiere con Outlook. `citas`: la agenda que ya se tiene (la misma que se enseña)."""
+        durante una llamada la quiere con Outlook. `citas`: la agenda que ya se tiene (la misma que se enseña).
+        `excluir`: la reunión que se acaba de grabar, para «la siguiente» (_siguiente): la misma regla, sin ella."""
         st = st or self.settings.get()
 
         def leer():
@@ -6699,7 +6735,142 @@ class App:
         if citas is None:
             ag = getattr(self, "agenda", None)
             citas = ag.citas() if ag is not None and st.get("outlook_on") and ag.fresca() else []
-        return calendario.reunion_de_ahora(lect, citas, self._vocab_terms)
+        return calendario.reunion_de_ahora(lect, citas, self._vocab_terms, excluir=excluir)
+
+    # --- «Ya ha empezado «X» · Grabar · Ahora no» al parar una grabación (msg 1479)
+    SIGUIENTE_S = 600  # tras parar, 10 min para ver empezar otra reunión; la que se propone, mientras dure
+    SIGUIENTE_CACHE_S = 5  # /api/rec/status llega cada 1,5 s: la reunión de ahora no se mira más de una vez cada 5 s
+
+    def _que_se_graba(self, nombre):
+        """Lo que se graba, para no proponerlo al parar: la reunión de ahora (su asunto y su hora de inicio) y el nombre
+        de la grabación si es otro (escrito a mano: sin hora, vale el nombre)."""
+        info = self._reunion_ahora()[1]
+        out = []
+        if info:
+            for a in dict.fromkeys(x for x in (info.get("asunto"), info.get("titulo")) if x):
+                out.append({"asunto": a, "inicio": info.get("inicio")})
+        if nombre and not calendario.excluida(out, nombre):
+            out.append({"asunto": nombre, "inicio": None})
+        return out
+
+    def _siguiente(self, st=None, now=None):
+        """(sugerencia, info) de la reunión que ya ha empezado y no es la que se acaba de grabar, o None. Es la reunión
+        de ahora de siempre (_reunion_ahora, con la agenda ya leída) sin la grabada, y solo si está en curso: una
+        ventana de reunión de Teams o una cita que ya ha empezado y no ha acabado. Se mira durante SIGUIENTE_S tras
+        parar y, una vez vista, mientras dure (hasta su hora de fin o mientras siga su ventana de Teams). Nada al
+        grabar, tras «Ahora no» ni con otra grabación."""
+        s = getattr(self, "siguiente", None)
+        if not s or s.get("descartada") or (getattr(self, "rec", None) and self.rec.alive()):
+            return None
+        t = time.time() if now is None else now.timestamp()
+        if t > s["hasta"]:
+            return None
+        sug, info = self._reunion_ahora(st, recordar=False, excluir=s["excluir"])
+        if not info or not info.get("en_curso") or not sug.get("name"):
+            return None
+        try:
+            fin = datetime.fromisoformat(info["fin"]).timestamp() if info.get("fin") else None
+        except (TypeError, ValueError):
+            fin = None
+        if fin is not None and t > fin:
+            return None
+        s["hasta"] = max(s["hasta"], fin if fin is not None else t + 60)
+        return sug, info
+
+    def _siguiente_pub(self, fresco=False):
+        """Lo que ve la interfaz de _siguiente ({titulo, inicio, fin, teams, tema}, o None), mirado como mucho cada
+        SIGUIENTE_CACHE_S. Lo que falle no tumba /api/rec/status ni Hoy: sin propuesta."""
+        if not getattr(self, "siguiente", None):
+            return None
+        at, pub = getattr(self, "_siguiente_cache", (0.0, None))
+        if not fresco and time.monotonic() - at < self.SIGUIENTE_CACHE_S:
+            return pub
+        try:
+            r = self._siguiente()
+        except Exception:
+            log_exc()
+            r = None
+        pub = None
+        if r:
+            sug, info = r
+            pub = {"titulo": info["titulo"], "inicio": info.get("inicio"), "fin": info.get("fin"),
+                   "teams": bool(info.get("teams")), "tema": sug.get("vocab_label") or ""}
+            s = self.siguiente
+            if s and not s.get("dicha"):
+                s["dicha"] = True
+                try:
+                    hace = (datetime.now() - datetime.fromisoformat(info["inicio"])).total_seconds() / 60 \
+                        if info.get("inicio") else None
+                except (TypeError, ValueError):
+                    hace = None
+                log(f"   siguiente reunión: propuesta (empezó hace {max(0, int(hace))} min)" if hace is not None
+                    else "   siguiente reunión: propuesta (en Teams)")
+        self._siguiente_cache = (time.monotonic(), pub)
+        return pub
+
+    def rec_siguiente(self, b):
+        """POST /api/rec/siguiente: «Ya ha empezado «X»». {grabar: X, origen?: "aviso"} graba esa reunión con su plan
+        (plan_grabar, el mismo que la tarjeta de Hoy: con lo preparado, si lo hay), solo si sigue siendo la propuesta
+        (lo que se ve es lo que se graba); {descartar: true} es «Ahora no» (hasta la próxima grabación)."""
+        if b.get("descartar"):
+            if self.siguiente:
+                self.siguiente["descartada"] = True
+                self._siguiente_cache = (0.0, None)
+                if getattr(self.vigia, "tipo", None) == "siguiente":
+                    self.vigia.cerrar_aviso()  # el flotante de la misma propuesta, si sigue a la vista
+                log("   siguiente reunión: «Ahora no»")
+            return {"ok": True}
+        aviso = b.get("origen") == "aviso"
+        with self.toggle_lock:
+            if self.rec and self.rec.alive():
+                if aviso:  # alguien se adelantó (Ctrl+Alt+R, la tarjeta): no se toca
+                    return {"recording": True, "path": rel_of(self.rec.path)}
+                raise ApiError("Ya hay una grabación en marcha.")
+            st = self.settings.get()
+            r = self._siguiente(st)
+            quiere = grabar_plan.norm_titulo(str(b.get("grabar") or ""))
+            if not r or not quiere or grabar_plan.norm_titulo(r[1]["titulo"]) != quiere:
+                self._siguiente_cache = (0.0, None)
+                log("   siguiente reunión: ya no está en curso")
+                raise ApiError("Esa reunión ya no está en curso: graba desde «Grabar» si sigues en ella.")
+            log(f"   siguiente reunión: grabar desde {'el aviso' if aviso else 'la app'}")
+            p = self.plan_grabar({}, st=st, sug=r[0])
+            if aviso:
+                cue("start")  # antes de empezar: así el pitido no queda grabado (como Ctrl+Alt+R)
+            try:
+                res = self.rec_start(dict(p["rec"], resumen=p["resumen"]))
+            except ApiError as e:
+                if aviso:
+                    cue("error")
+                    notify("No se pudo grabar", e.msg)
+                raise
+            if aviso:
+                notify(f"● Grabando en {APP_NAME}", p["resumen"] + " · Ctrl+Alt+R para parar")
+            return dict(res, recording=True, plan=p)
+
+    def _siguiente_aviso(self, app, st):
+        """El aviso flotante con «Ya ha empezado «X»» (vigilante, cada 8 s): una vez por parada, si está activado
+        («Avisarme si estoy en una llamada» y «Aviso flotante») y no hay otro aviso abierto. Esa llamada queda avisada:
+        al cerrarse, no sale además el «● Grabar» de la llamada."""
+        s = getattr(self, "siguiente", None)
+        if (not s or s.get("flotante") or s.get("descartada") or not st.get("meeting_detect", True)
+                or st.get("rec_aviso", True) is False or self.vigia.abierto()):
+            return False
+        pub = self._siguiente_pub()
+        if not pub:
+            return False
+        s["flotante"] = True
+        horas = (f"{pub['inicio'][11:16]}–{pub['fin'][11:16]} · " if pub.get("inicio") and pub.get("fin")
+                 else "En Teams · ")
+        if not self.vigia.abrir_aviso(PORT, APP_DIR, creationflags=engines.NO_WINDOW,
+                                      ocultar=st.get("ocultar_al_compartir", True) is not False,
+                                      siguiente=pub["titulo"], titulo=f"Ya ha empezado «{pub['titulo']}»",
+                                      sub=horas + "Pulsa Grabar para tomar notas", tema=pub.get("tema") or ""):
+            return False
+        if app:
+            self.vigia.avisado = app
+        log("   siguiente reunión: aviso flotante abierto")
+        return True
 
     def _ultima_vez(self, nombre):
         """La última vez que se grabó la reunión que se llama así («La última vez (vie 30 oct): 3 tareas abiertas»): la
@@ -6835,7 +7006,8 @@ class App:
             p = prep.get(self._clave_preparada(c.get("subject"), c.get("start")))
             if p:
                 c["preparada"] = {x: p[x] for x in ("vocab", "idioma", "contexto") if x in p}
-        return {"ahora": info, "plan": plan, "ultima": self._ultima_vez(nombre) if nombre else None, "agenda": agenda}
+        return {"ahora": info, "plan": plan, "ultima": self._ultima_vez(nombre) if nombre else None, "agenda": agenda,
+                "siguiente": self._siguiente_pub()}
 
     def _agenda_watch(self):
         """Hilo de la agenda de Outlook (B7): la lee al poco de arrancar, cada AGENDA_CADA s y cuando Hoy la pide."""
@@ -8989,6 +9161,7 @@ class Handler(BaseHTTPRequestHandler):
                   "/api/abrir-powershell": a.abrir_powershell,
                   "/api/live/traducir": a.live_translate, "/api/live/propuesta": a.live_propuesta,
                   "/api/rec/seguir": a.rec_seguir,
+                  "/api/rec/siguiente": a.rec_siguiente,
                   "/api/rec/monitor": a.rec_monitor, "/api/rec/start": a.rec_start, "/api/rec/stop": a.rec_stop,
                   "/api/rec/toggle": a.rec_toggle, "/api/rec/mic": a.rec_mic, "/api/notes": a.notes_save,
                   "/api/grabar/plan": a.grabar_plan_api, "/api/grabar/recordar": a.grabar_recordar,

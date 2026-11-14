@@ -640,8 +640,8 @@ class RutasPlanTests(unittest.TestCase):
             src = f.read()
         self.assertIn('"/api/grabar/plan": a.grabar_plan_api', src)
         self.assertIn('"/api/grabar/recordar": a.grabar_recordar', src)
-        # la tarjeta (grabar_plan_api), Ctrl+Alt+R y Hoy (B7): las tres con el mismo cálculo
-        self.assertEqual(src.count("self.plan_grabar("), 3)
+        # la tarjeta (grabar_plan_api), Ctrl+Alt+R, Hoy (B7) y «Ya ha empezado «X»» (rec_siguiente): el mismo cálculo
+        self.assertEqual(src.count("self.plan_grabar("), 4)
 
 
 if __name__ == "__main__":

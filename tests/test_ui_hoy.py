@@ -437,5 +437,60 @@ class HoyCambiosTests(Base):
         self.sin_errores()
 
 
+class SiguienteReunionTests(Base):
+    """«Ya ha empezado «X» · Grabar · Ahora no» al parar una grabación (msg 1479), en el navegador: encima de la tarjeta
+    en Hoy y, en las demás páginas, junto a los avisos. La propuesta la decide el servidor (test_hoy.Siguiente*); aquí
+    se inyecta en /api/rec/status como si se acabara de parar, y «Grabar» y «Ahora no» van a /api/rec/siguiente."""
+
+    @classmethod
+    def preparar(cls, root):
+        reunion(root, "", datetime.now() - timedelta(days=1), "Vieja", 3, txt=True)
+
+    def test_se_ve_en_hoy_y_fuera_y_sus_botones(self):
+        pg = self.pagina()
+        ini = datetime.now().replace(second=0, microsecond=0) - timedelta(minutes=3)
+        g = {"titulo": "Revisión de presupuesto", "inicio": ini.isoformat(timespec="minutes"),
+             "fin": (ini + timedelta(minutes=45)).isoformat(timespec="minutes"), "teams": False, "tema": ""}
+
+        def status(route):
+            r = route.fetch()
+            d = r.json()
+            if not d.get("recording"):
+                d["siguiente"] = g
+            route.fulfill(response=r, body=json.dumps(d), content_type="application/json")
+        pg.route("**/api/rec/status*", status)
+        enviado = []
+
+        def siguiente(route):
+            b = json.loads(route.request.post_data)
+            enviado.append(b)
+            if b.get("descartar"):
+                route.fulfill(status=200, content_type="application/json", body='{"ok": true}')
+            else:
+                route.fulfill(status=400, content_type="application/json", body=json.dumps({"error": "Prueba: no"}))
+        pg.route("**/api/rec/siguiente", siguiente)
+        texto = f"Ya ha empezado «Revisión de presupuesto» · {ini:%H:%M}–{ini + timedelta(minutes=45):%H:%M}"
+        pg.wait_for_selector(f"#hoySiguiente .hoy-siguiente:has-text('{texto}')", timeout=10000)
+        self.assertEqual(pg.locator("#sigToast").count(), 0)  # en Hoy, una sola vez: encima de la tarjeta
+        self.captura(pg, "siguiente_ancha")
+        pg.set_viewport_size({"width": 900, "height": 600})
+        self.captura(pg, "siguiente_estrecha")
+        pg.set_viewport_size({"width": 1500, "height": 920})
+        # en otra página, junto a los avisos; «Grabar» manda la que se ve
+        pg.evaluate("location.hash = '#/r/'")
+        pg.wait_for_selector(f"#sigToast .hoy-siguiente:has-text('{texto}')", timeout=10000)
+        pg.click("#sigToast [data-sig-act='grabar']")
+        pg.wait_for_function("document.querySelector('#toasts').textContent.includes('Prueba: no')", timeout=5000)
+        self.assertEqual(enviado, [{"grabar": "Revisión de presupuesto"}])
+        self.assertTrue(pg.is_enabled("#sigToast [data-sig-act='grabar']"))  # tras el error, se puede reintentar
+        # «Ahora no»: se va al momento, aunque el servidor (aquí, el inyectado) la siga dando
+        pg.click("#sigToast [data-sig-act='no']")
+        pg.wait_for_selector("#sigToast", state="detached", timeout=5000)
+        self.assertEqual(enviado[-1], {"descartar": True})
+        pg.wait_for_timeout(2000)  # un sondeo más: no vuelve
+        self.assertEqual(pg.locator("#sigToast").count(), 0)
+        self.sin_errores(permitidas=("/api/rec/siguiente",))
+
+
 if __name__ == "__main__":
     unittest.main()

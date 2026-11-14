@@ -105,3 +105,14 @@
 /* Calendario: las citas de Outlook que vienen, distintas de las reuniones grabadas */
 .cev.outlook { background: transparent; border: 1px dashed var(--accent-line); color: var(--ink-2); cursor: default; }
 .cmore.outlook { color: var(--muted); cursor: default; }
+
+/* «Ya ha empezado «X» · Grabar · Ahora no» al parar una grabación: encima de la tarjeta en Hoy y, fuera, con los avisos */
+.hoy-siguiente-box:empty { display: none; }
+.hoy-siguiente { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; padding: 9px 12px; border-radius: 10px; background: var(--accent-soft); color: var(--ink); font-size: 13.5px; }
+.hoy-siguiente-box .hoy-siguiente { margin-top: 14px; }
+.hoy-siguiente .hs-ico svg { width: 16px; height: 16px; vertical-align: -3px; }
+.hoy-siguiente .hs-txt { flex: 1; min-width: 160px; font-weight: 600; overflow-wrap: anywhere; }
+.hoy-siguiente .hs-tema { display: block; font-weight: 400; color: var(--muted); font-size: 12.5px; }
+.hoy-siguiente .recdot { animation: none; width: 7px; height: 7px; }
+.toast.sig-toast { padding: 0; background: none; box-shadow: var(--shadow); cursor: default; }
+.toast.sig-toast .hoy-siguiente { border: 1px solid var(--accent-line); }

@@ -399,6 +399,7 @@ async function pollRec() {
   if (was !== !!S.rec.recording) onRecChange();
   renderRecBtn(); updateMeters(); renderMeetChip();
   if (typeof renderDirectoAvisos === 'function') renderDirectoAvisos();  // fuente callada y «paro en 30 s» (directo.js)
+  if (typeof renderSiguiente === 'function') renderSiguiente();  // «Ya ha empezado «X»» al parar (hoy.js)
   recTimer = setTimeout(pollRec, S.rec.recording || recDialog ? 300 : 1500);
 }
 /* empezo o paro la grabacion (tambien con Ctrl+Alt+R desde otro programa) */

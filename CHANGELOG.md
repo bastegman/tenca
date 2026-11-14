@@ -31,6 +31,16 @@ carguen las siguientes (un mes al menos)». Rama `hoy` (rediseño B7).
 - Sin Teams, la reunión de ahora (para el nombre y el proyecto al grabar, también con Ctrl+Alt+R y el aviso) sale de
   la agenda ya leída, sin otra consulta a Outlook.
 - Sin reuniones: «Graba tu primera reunión», con el botón, Ctrl+Alt+R, el aviso de Teams y «o arrastra aquí un audio».
+- **Nuevo: «Ya ha empezado «X» · 10:00–11:00 · Grabar · Ahora no»** (msg 1479: «que al terminar le proponga grabar la
+  siguiente reunión si ya ha empezado»). Al parar una grabación (a mano o con «paro en 30 s»), si hay otra reunión en
+  curso que no es la grabada, se propone encima de la tarjeta de Hoy, en las demás páginas junto a los avisos y en el
+  aviso flotante (si está activado). Es la misma regla de «la reunión de ahora» (la ventana de Teams o la cita de
+  Outlook) sin la que se acaba de grabar (mismo asunto y misma hora de inicio; sin hora, el asunto), y solo si ya ha
+  empezado. «Grabar» la graba con el plan de la tarjeta de Hoy, con lo preparado si lo hay, y solo si sigue siendo la
+  que se ve. Nunca graba sola. Se va con «Ahora no», al empezar otra grabación, cuando la cita acaba o si en 10 min no
+  ha empezado ninguna. Sin Outlook ni Teams, no sale nada.
+- «Copiar diagnóstico»: las líneas del fin de la llamada («paro en 30 s», «No terminar») y las de la siguiente reunión
+  salen con su texto (sin asuntos), no como `<texto>`.
 - Fuera de Inicio: las cuatro cifras, la ruta del disco, el selector de modelos (cada fila de «Para revisar» transcribe
   con el de siempre), las carpetas (siguen a la izquierda) y «Visto recientemente» (sigue en Ctrl+P).
 - Desarrollo y CI: `tests/test_hoy.py` (la agenda con el COM falso, la caché, /api/hoy y hoy.js con node) y

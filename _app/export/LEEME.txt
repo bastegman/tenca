@@ -105,6 +105,9 @@ USO DIARIO
     Con el calendario activado (Ajustes > Calendario y Teams), también tu agenda del próximo mes
     (y en "Calendario"), donde puedes "Preparar" una reunión: su proyecto, su idioma y su
     contexto se usarán al grabarla. La agenda se lee en segundo plano y no sale del PC.
+  - Al parar una grabación, si ya ha empezado otra reunión, Tenca la propone: "Ya ha empezado
+    «X» · Grabar · Ahora no" (en Hoy, en las demás páginas y en el aviso flotante). "Grabar" la
+    graba con su proyecto y su idioma (y lo que hayas preparado). Nunca graba sola.
   - ● Grabar abre una tarjeta que dice qué va a pasar: la reunión (el nombre de Teams, de tu
     calendario o el que escribas, con tus reuniones recientes como sugerencia), el proyecto y,
     debajo, "Así se va a grabar": dónde se guarda, idioma, vocabulario, quién transcribe, quién

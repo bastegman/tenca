@@ -39,6 +39,8 @@ grabaciones, transcripciones y notas se guardan en la carpeta de Tenca, `%USERPR
   idioma y «Grabar», que empieza ya; si se repite, lo que quedó abierto la última vez; lo que pide algo de ti, cada
   cosa con su botón; esta semana; y, con el calendario activado, tu agenda del próximo mes, leída en segundo plano,
   con «Preparar» para dejar elegidos el proyecto, el idioma y el contexto de una reunión que aún no ha empezado.
+  Al parar una grabación, si ya ha empezado otra reunión, lo propone con un clic: «Ya ha empezado «X» · Grabar ·
+  Ahora no» (en Hoy, en las demás páginas y en el aviso flotante). Nunca graba sola.
 - **Organizar**: carpetas, carpetas vinculadas (p. ej. de OneDrive), favoritos, tabla, calendario y búsqueda.
 - **Vocabulario** por proyecto y workstream para que Whisper escriba bien nombres y siglas. Las listas se escriben en
   la app o se leen de una carpeta tuya («Usar las listas de una carpeta…»: cada `.txt` es un workstream y se lee en

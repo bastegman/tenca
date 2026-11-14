@@ -94,6 +94,11 @@ class FakeHandler(BaseHTTPRequestHandler):
         with self.server.lock:
             self.server.posts.append({"path": self.path, "host": self.headers.get("Host"),
                                       "x_audios": self.headers.get("X-Audios"), "body": body})
+        if self.path == "/api/rec/siguiente":  # «Ya ha empezado «X»» (hoy): graba esa si sigue siendo la propuesta
+            if body.get("grabar") != "Revisión de presupuesto":
+                return self._json({"error": "Esa reunión ya no está en curso: graba desde «Grabar» si sigues en ella."},
+                                  400)
+            return self._json({"recording": True, "path": "Reuniones/y.wav", "workstream": None})
         if self.path == "/api/rec/toggle":
             if self.server.fail:
                 return self._json({"error": "No se pudo grabar: prueba"}, 400)
@@ -341,6 +346,26 @@ class AvisoTests(unittest.TestCase):
         res = self.resultado(p)
         self.assertEqual(res["resultado"], "grabando", res)
         self.assertEqual(self.srv.posts, [])
+
+    def test_siguiente_reunion_graba_esa(self):
+        """«Ya ha empezado «X»» al parar una grabación (hoy): el mismo aviso, con sus textos, y «Grabar» va a
+        /api/rec/siguiente con la reunión que enseña (no a /api/rec/toggle con la de la llamada)."""
+        extra = ("--siguiente", "Revisión de presupuesto", "--sub", "10:00–10:45 · Pulsa Grabar para tomar notas",
+                 "--auto-grabar-ms", "1500")
+        p, est = self.abrir("siguiente", *extra)
+        self.estado(est)
+        res = self.resultado(p)
+        self.assertEqual(res["resultado"], "grabar", res)
+        posts = self.espera_post()
+        self.assertEqual([x["path"] for x in posts], ["/api/rec/siguiente"])
+        self.assertEqual(posts[0]["body"], {"grabar": "Revisión de presupuesto", "origen": "aviso"})
+        # si ya no es la propuesta, el aviso dice por qué y no graba
+        with self.srv.lock:
+            self.srv.posts.clear()
+        p, est = self.abrir("siguiente-otra", "--siguiente", "Otra", "--auto-grabar-ms", "1500")
+        res = self.resultado(p)
+        self.assertEqual(res["resultado"], "error", res)
+        self.assertIn("ya no está en curso", res.get("error", ""))
 
     def test_auto_grabar_con_grabacion_ya_en_marcha_no_para_nada(self):
         self.srv.recording = True

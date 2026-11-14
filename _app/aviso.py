@@ -6,6 +6,7 @@ tareas), que NO roba el foco (WS_EX_NOACTIVATE: puedes seguir escribiendo en la 
 
     python aviso.py --puerto 8765 [--titulo "Reunión semanal"] [--nombre "Reunión semanal"] [--vocab ID]
                     [--tema "Alfa · General"] [--segundos 20] [--ocultar-captura]
+                    [--siguiente "Reunión semanal" --sub "10:00–11:00 · Pulsa Grabar para tomar notas"]
                     [--estado fichero.json] [--auto-grabar-ms N]        (estos dos, para las pruebas)
 
 «Grabar» hace POST http://127.0.0.1:<puerto>/api/rec/toggle (cabeceras X-Audios: 1 y X-Chuleta-Token con el token de
@@ -15,6 +16,10 @@ estaba grabando no toca nada. Al salir escribe una línea JSON en stdout:
 
 --ocultar-captura: como la ventana de la app (window.py, ajuste «Al compartir pantalla»), el aviso no sale en lo que
 ven los demás al compartir pantalla: aparece justo al empezar una llamada, con el nombre de la reunión y «Grabar».
+
+--siguiente: el aviso de «Ya ha empezado «X»» al parar una grabación (server._siguiente_aviso). «Grabar» hace POST a
+/api/rec/siguiente {"grabar": X, "origen": "aviso"}: el servidor graba esa reunión con su plan solo si sigue siendo la
+que propone. --sub cambia la segunda línea.
 """
 import argparse
 import json
@@ -190,7 +195,9 @@ class Aviso:
         ancho_txt = int((ANCHO - 14 * 2 - 12 - 9 - 92 - 8 - 4 - 28) * s)  # lo que queda para el texto
         titulo, tema = limpiar_texto(args.titulo), limpiar_texto(args.tema)
         self.l_tit.configure(text=self._encajar(f_tit, titulo or "Llamada en curso", ancho_txt))
-        self.sub(self._encajar(f_sub, ("Tema: " + tema) if tema else "Pulsa Grabar para tomar notas", ancho_txt))
+        sub = limpiar_texto(getattr(args, "sub", "")) or (
+            ("Tema: " + tema) if tema else "Pulsa Grabar para tomar notas")
+        self.sub(self._encajar(f_sub, sub, ancho_txt))
         for w in [self.grabar_btn] + partes:
             w.bind("<Button-1>", lambda e: self.grabar())
             w.bind("<Enter>", lambda e: self._hover(True))
@@ -243,8 +250,11 @@ class Aviso:
         try:
             if self._pedir("/api/rec/status").get("recording"):  # alguien se adelantó (Ctrl+Alt+R): no se toca
                 return self.root.after(0, lambda: self.cerrar("grabando"))
-            r = self._pedir("/api/rec/toggle", {"source": "aviso", "start_only": True, "name": self.args.nombre or "",
-                                                "vocab": self.args.vocab or ""})
+            if getattr(self.args, "siguiente", ""):  # «Ya ha empezado «X»»: esa reunión, si sigue siendo la propuesta
+                r = self._pedir("/api/rec/siguiente", {"grabar": self.args.siguiente, "origen": "aviso"})
+            else:
+                r = self._pedir("/api/rec/toggle", {"source": "aviso", "start_only": True,
+                                                    "name": self.args.nombre or "", "vocab": self.args.vocab or ""})
             self.root.after(0, lambda: self._ok(r))
         except urllib.error.HTTPError as e:
             try:
@@ -338,6 +348,8 @@ def main(argv=None):
     p.add_argument("--estado", default="")
     p.add_argument("--auto-grabar-ms", dest="auto_grabar_ms", type=int, default=0)
     p.add_argument("--ocultar-captura", dest="ocultar_captura", action="store_true")
+    p.add_argument("--siguiente", default="")
+    p.add_argument("--sub", default="")
     args = p.parse_args(argv)
     dpi_aware()
     activa = ventana_activa()  # antes de que exista nuestra ventana
