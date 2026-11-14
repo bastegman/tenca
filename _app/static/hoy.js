@@ -180,6 +180,7 @@ function hoyAhoraHtml() {
   const info = d.ahora;
   if ((!info || !p) && !allAudios().length) return '';  // sin reunión ni reuniones: lo dice «Graba tu primera reunión»
   if (!info || !p) {  // sin reunión: «Grabar» abre la tarjeta para ponerle nombre
+    HOY.visto = null;  // un «Grabar» pulsado antes, con un plan en camino, ya no graba la que se veía (hoyGrabar)
     const prox = hoyAgendaDias(d.agenda?.citas, now).flatMap(x => x.citas)[0];
     return `<section class="card hoy-ahora vacio"><div class="ha-ico">${I.mic}</div><div class="ha-txt">
       <div class="ha-kicker">Ahora</div><div class="ha-titulo sin">No estás en ninguna reunión</div>
@@ -214,10 +215,17 @@ function hoyCambio(el) {
   HOY.pedido = pedido;
   const seq = ++HOY.seq;
   HOY.pendiente = api('/api/grabar/plan', pedido).then(plan => {
-    // solo la respuesta a lo último que cambiaste; si entretanto el sondeo trajo otra reunión (HOY.seq), se descarta.
-    // Si el servidor ya estaba en otra antes del sondeo, se pinta la que da (con lo cambiado): lo que se ve es lo que
-    // se graba (revisión 3)
+    // solo la respuesta a lo último que cambiaste; si entretanto el sondeo trajo otra reunión (HOY.seq), se descarta
     if (seq !== HOY.seq || HOY.pedido !== pedido) return;
+    // el servidor ya está en otra reunión (o en ninguna) y el sondeo aún no lo ha traído: lo cambiado era para la que
+    // se veía. Ni se pinta este plan sobre la tarjeta de la anterior (revisiones 3 y 4: título de una con la hora de
+    // otra, o «Grabar» sin nombre) ni se queda el chip cambiado sin aplicarse: se trae la de ahora y se repinta entera.
+    // «Grabar» espera a esto (HOY.pendiente) y, si la reunión ha cambiado, no graba (hoyGrabar).
+    if ((plan.nombre?.valor || '') !== (HOY.datos?.plan?.nombre?.valor || '')) {
+      HOY.pedido = null; HOY.plan = null; HOY.visto = null; HOY.forzarAhora = true; HOY.at = 0;
+      toast('La reunión de ahora ha cambiado: revisa la tarjeta antes de grabar');
+      return hoyCargar(false, true);
+    }
     HOY.plan = plan;
     const ah = $('#hoyAhora');
     if (ah) { ah.innerHTML = hoyAhoraHtml(); $(`[data-hoy="${el.dataset.hoy}"]`, ah)?.focus(); }
@@ -230,8 +238,8 @@ async function hoyGrabar(b) {
     const vista = HOY.visto?.nombre?.valor;  // la reunión que se veía al pulsar
     await HOY.pendiente;  // lo último que has cambiado: se graba con lo que se está viendo
     const p = HOY.visto;
+    if (vista && p?.nombre?.valor !== vista) throw new Error('La reunión de ahora ha cambiado: mírala y vuelve a pulsar «Grabar».');
     if (!p) throw new Error('Aún no se sabe cómo grabar: espera un segundo y vuelve a pulsar.');
-    if (vista && p.nombre?.valor !== vista) throw new Error('La reunión de ahora ha cambiado: mírala y vuelve a pulsar «Grabar».');
     S.recLocal = true;
     const r = await api('/api/rec/start', { ...p.rec, resumen: p.resumen });
     toast(`● Grabando · ${esc(p.resumen)}${r.aviso ? ` · ${esc(r.aviso)}` : ''}`);

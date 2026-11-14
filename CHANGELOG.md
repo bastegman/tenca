@@ -40,8 +40,10 @@ carguen las siguientes (un mes al menos)». Rama `hoy` (rediseño B7).
   preparado si lo hay, y solo si sigue siendo la que se ve. Nunca graba sola. Se va con «Ahora no», al empezar otra
   grabación, cuando la cita acaba o si en 10 min no ha empezado ninguna. Sin Outlook ni Teams, o con «Avisarme si
   estoy en una llamada» apagado, no sale nada.
-- Arreglado (revisión): en Hoy, si cambiabas un chip justo cuando cambiaba la reunión de ahora, la respuesta tardía
-  del plan podía volver a pintar la anterior y «Grabar» grabarla.
+- Arreglado (revisiones): en Hoy, si cambiabas un chip justo cuando cambiaba (o acababa) la reunión de ahora, la
+  tarjeta podía enseñar una reunión y «Grabar» grabar otra, o grabar sin nombre. Ahora, si el servidor ya está en otra,
+  lo dice («La reunión de ahora ha cambiado: revisa la tarjeta antes de grabar»), trae la de ahora y la repinta; y un
+  «Grabar» pulsado con el cambio en camino no graba si la reunión que se veía ya no es la de ahora.
 - «Copiar diagnóstico»: las líneas del fin de la llamada («paro en 30 s», «No terminar») y las de la siguiente reunión
   salen con su texto (sin asuntos), no como `<texto>`.
 - En la página de una reunión sin carpeta, «Sin clasificar» lleva a «Reuniones» (donde están las sueltas) y no a Hoy,
