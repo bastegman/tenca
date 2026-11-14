@@ -552,7 +552,7 @@ class InterfazProcesadoTests(unittest.TestCase):
         bloque = app[i:app.index("\n}\n", i)]
         self.assertIn("} else if (modo === 'api') {", bloque)
         self.assertIn('id="sModel"', bloque)
-        self.assertIn("'sAutoLocal'", bloque)
+        self.assertIn('id="sAutoLocal"', bloque)
         self.assertIn("${enApi ? `<div id=\"procApiAv\">", app)
 
     def test_textos_segun_el_modo(self):

@@ -165,7 +165,8 @@ class AppJsTests(unittest.TestCase):
         with open(os.path.join(APP, "static", "app.js"), encoding="utf-8") as fh:
             m = re.search(r"const AJ_SECS = (\[.*?\]\]);", fh.read(), re.S)
         secs = dict(json.loads(m.group(1).replace("'", '"')))
-        muertas = re.compile(r"Ajustes\s*(?:⚙\s*)?(?:›|→|>|&gt;)\s*(?:<b>)?«?(Grabar|Vocabulario|Carpetas|Reuniones|"
+        # (14/11/2026, punto 37 del review) «Vocabulario» vuelve a ser una sección: las listas salen de Proyectos
+        muertas = re.compile(r"Ajustes\s*(?:⚙\s*)?(?:›|→|>|&gt;)\s*(?:<b>)?«?(Grabar|Carpetas|Reuniones|"
                              r"Perfil de reuni[oó]n|Transcripci[oó]n|Destinos de salida)\b")
         sec = re.compile(r"""data-sec(?:-ir)?=\\?["']([\w-]+)|\bsec: ?["']([\w-]+)["']""")
         malos = []
