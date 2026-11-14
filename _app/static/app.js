@@ -317,6 +317,7 @@ function renderLiveHero(a) {
         : `<button class="btn primary" data-act="live" data-path="${esc(a.path)}">${I.spark}Transcribir en directo</button>`}
     </div>
     ${mine ? `<div class="lh-meters">${meterHtml('mic', I.mic + 'Micro')}${meterHtml('sys', I.volume + 'Ordenador')}</div>` : ''}
+    <div class="lh-avisos" data-lh-avisos></div>
     ${typeof destinoHtml === 'function' ? destinoHtml(a) : crumbs(a.folder)}
     <h1>${iconOf(a) ? iconOf(a) + ' ' : ''}${esc(pageTitle(a))}${!titleOf(a) && a.label ? `<span class="sub"> · ${esc(nfc(a.label))}</span>` : ''}</h1>
     <div class="lh-status" data-lh-status>${liveStatus(a, j)}</div>
@@ -338,6 +339,7 @@ function renderLiveHero(a) {
       <button class="btn sm" data-act="reveal" data-path="${esc(a.path)}">${I.ext}Mostrar en carpeta</button>
     </div></div>`;
   if (typeof renderDirectoBar === 'function') renderDirectoBar(a, j);
+  if (typeof renderDirectoAvisos === 'function') renderDirectoAvisos();
 }
 function updateLiveHero(a) {
   const el = $('#lHero');
@@ -396,6 +398,7 @@ async function pollRec() {
   if (S.config && S.config.meeting_detect === false) S.rec.meeting = null;  // «Avisarme si estoy en una llamada» apagado: sin chip
   if (was !== !!S.rec.recording) onRecChange();
   renderRecBtn(); updateMeters(); renderMeetChip();
+  if (typeof renderDirectoAvisos === 'function') renderDirectoAvisos();  // fuente callada y «paro en 30 s» (directo.js)
   recTimer = setTimeout(pollRec, S.rec.recording || recDialog ? 300 : 1500);
 }
 /* empezo o paro la grabacion (tambien con Ctrl+Alt+R desde otro programa) */
@@ -403,7 +406,7 @@ function onRecChange() {
   refreshTree(true); pollJobs(true);
   if (S.recLocal) { S.recLocal = false; return; }  // lo ha pedido esta misma pagina: ya avisa ella
   if (S.rec.recording) toast(`● Grabando${S.rec.resumen ? ` · ${esc(S.rec.resumen)}` : ''} · <b>Ctrl+Alt+R</b> para parar · clic para verla y cambiar el idioma o el contexto`, '', () => go('a', S.rec.path));
-  else toast('■ Grabación guardada · la transcripción termina sola');
+  else toast((typeof directoParadaTexto === 'function' && directoParadaTexto(S.rec)) || '■ Grabación guardada · la transcripción termina sola');
 }
 async function toggleRec() {
   try { S.recLocal = true; await api('/api/rec/toggle', {}); pollRec(); }
@@ -461,7 +464,10 @@ $('#btnRec').onclick = openRec;
    de archivos y, con lo elegido, la tarjeta de subir (grabar.js); desde una carpeta, sube ahí */
 $('#btnSubir').onclick = () => {
   if (!S.config) return toast('La app aún está arrancando: espera unos segundos y vuelve a probar.', 'err');
-  if (typeof elegirAudios === 'function') return elegirAudios({ carpeta: S.route.kind === 'f' ? S.route.path : null });
+  const carpeta = S.route.kind === 'f' ? S.route.path : null;
+  // «Desde este PC» o «Desde el móvil» (recibir.js); sin él, el selector de archivos como antes
+  if (typeof subirMenu === 'function') return S.sbMenu ? cerrarSubirMenu() : subirMenu($('#btnSubir'), { carpeta });
+  if (typeof elegirAudios === 'function') return elegirAudios({ carpeta });
   toast('No se ha podido cargar «Subir audio»: recarga la página (Ctrl+R).', 'err');
 };
 
@@ -856,7 +862,7 @@ function viewFolder(f) {
       <h1 class="ptitle static">${esc(nfc(f.name))}</h1><button class="pfav${isFav('f', f.path) ? ' on' : ''}" data-act="fav" data-kind="f" data-path="${esc(f.path)}">${isFav('f', f.path) ? I.starOn : I.star}</button></div>
     <div class="meta"><span><b>${f.total}</b> audio${f.total === 1 ? '' : 's'}</span><span><b>${fmtDur(f.secs)}</b> de audio</span><span><b>${f.done}</b> transcritos</span></div>
     <div class="actions">
-      <button class="btn" data-act="subir" data-path="${esc(f.path)}" title="Un audio que ya tengas (del móvil, de WhatsApp…): se guarda en esta carpeta y se transcribe">${I.upload}Subir audio aquí</button>
+      <button class="btn" data-act="subir" data-path="${esc(f.path)}" aria-haspopup="menu" aria-expanded="false" title="Un audio que ya tengas, desde este PC o desde el móvil: se guarda en esta carpeta y se transcribe">${I.upload}Subir audio aquí</button>
       <button class="btn" data-act="new-folder" data-path="${esc(f.path)}">${I.plus}Subcarpeta</button>
       <button class="btn" data-act="rename-folder" data-path="${esc(f.path)}">${I.edit}Renombrar</button>
       <button class="btn" data-act="reveal" data-path="${esc(f.path)}">${I.ext}Abrir en el Explorador</button>

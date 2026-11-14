@@ -37,6 +37,66 @@ carguen las siguientes (un mes al menos)». Rama `hoy` (rediseño B7).
   `tests/test_ui_hoy.py` (en `ui-smoke.yml`: la app de verdad con `CHULETA_PRUEBAS_OUTLOOK=tests/fake_outlook/agenda.json`,
   capturas vacía y llena a 1500×920 y 900×600). `test_calendario_windows` mide la agenda con pywin32 real sin Office.
 
+### Poner nombre a una voz ya no tarda minutos (11/11/2026)
+
+Bernardo (msg 1479): «cuando intento guardar los nombres de las voces […] tarda minutos y no aparece nada». Rama
+`fix-lento`.
+
+- **Arreglado**: «Guardar» con «Recordar» (y «Confirmar», que lo trae marcado) calculaba la huella de voz decodificando
+  la reunión entera, en un proceso en prioridad «en reposo» y sin enseñar nada mientras: 6 s con una reunión de 1 h y
+  40 s con una de 3 h en m4a en un Mac rápido; minutos en un portátil ocupado. Ahora lee solo los tramos de voz de la
+  huella (como mucho 90 s): unos 2 s sea cual sea la reunión, con la misma huella (coseno ≥ 0,9998). En mp3, aac
+  sueltos, amr y otros formatos sin índice, donde saltar a un segundo no es exacto, se sigue leyendo entera; también
+  si los tiempos del archivo no acaban donde su duración (un hueco en los tiempos o un trozo dañado que se pierde sin
+  avisar): ahí, por tramos, la huella habría salido de otro momento de la reunión, con la voz de otro.
+- Ese proceso va ahora por debajo de lo normal (el usuario está esperando); identificar las voces sigue en reposo.
+- **Arreglado**: el cuadro del hablante dice «Guardando…» (o «Guardando la huella de voz…») en cuanto se pulsa y no
+  deja volver a pulsar hasta que acaba; si falla, vuelve como estaba y dice por qué. En Ajustes › Voces, «Guardando el
+  nombre…» si tarda.
+- Con «API externa», la app ya no deja cargado al arrancar el Whisper de la cola en el PC (hasta 1 GB de memoria): se
+  carga cuando haga falta. El del directo, si es en el PC, sí.
+- Si el directo no puede ir por la nube (sin clave, proveedor sin configurar) y pasa a Whisper en el PC, lo dice el
+  registro (y «Copiar diagnóstico»). Hasta ahora pasaba sin decirlo.
+- Desarrollo y CI: `test_fix_lento` (también en ui-smoke, en Ubuntu y Windows) y `voces-memoria` mide además la huella
+  de «Recordar» con la reunión en m4a, contra la de `fe29522`: tiene que tardar menos y salir igual.
+
+### Avisos del directo (10/11/2026)
+
+Rediseño B6, puntos 1-3 (msgs 1378 y 1479). Rama `directo-avisos`. En la cabecera del directo, con lo que la app ya lee:
+
+- **Fuente callada**: «El micro no recibe sonido desde hace 1 min» si el micro da silencio digital (silenciado con la
+  tecla del portátil o en Windows, sin permiso, con el nivel a 0) más de un minuto. Escuchar callado no avisa: un
+  micro de verdad da el ruido de la sala. Un micro con puerta de ruido (ceros entre frases) se reconoce y no avisa.
+  «El ordenador no suena desde hace 1 min» solo en una llamada, después de haber oído algo y sin contar el rato en
+  que hablas tú (en una reunión presencial o en la sala de espera no avisa).
+- **«La llamada ha terminado: paro en 30 s · No terminar»** (msg 1479: «que me sugiera cortar automáticamente la
+  reunión cuando se cierra el teams o la reunión»): cuando Teams suelta el micro (el registro de privacidad apunta el
+  fin) o se cierra, y ninguna ventana de esa reunión sigue abierta, durante 5 s. Solo si esa llamada era la de la
+  grabación: empezó como mucho 2 min después de empezar a grabar, cubre el 60 % de lo grabado y dura 2 min o más (una
+  llamada a mitad de una reunión presencial no para nada). Sin pulsar nada, para como «Parar» y el aviso flotante puede
+  ofrecer grabar la reunión siguiente. Si en la cuenta atrás ya empieza la reunión siguiente (otra ventana), sigue
+  contando: no acaba en la misma grabación. Nunca para si vuelves a entrar en la misma reunión, si no se pueden leer
+  las ventanas o la lista de procesos, ni con «Avisarme si estoy en una llamada» apagado; tras «No terminar», hasta
+  que otra llamada termine.
+- **«Lo último suena a portugués · Cambiar»**: con un idioma fijo, cuando dos trozos seguidos (30 s de voz) suenan a
+  otro idioma de los que se pueden elegir. «Cambiar» es el cambio de idioma de siempre (rehace el último minuto); si ya
+  se habían oído 60 s del fijado y hay mezcla de los dos, propone la mezcla. «No» no lo vuelve a proponer en esa
+  grabación. En el PC, Whisper oye el idioma en lo que ya calculó para transcribir (10 s del primer bloque: 60 ms por
+  trozo con small y 195 ms con medium, medido); en la nube, el campo `language` de la respuesta, sin peticiones de más
+  (si la API devuelve el idioma que se le pidió, no se propone nada).
+
+### Groq vuelve a transcribir con unos ajustes de antes (10/11/2026)
+
+- Con unos ajustes en los que el proveedor de la nube no es ninguno de los que hay (vacío o de una versión anterior),
+  «Sin Groq por defecto» hacía que el motor lo rechazara. El directo pasaba entonces, sin decirlo, a Whisper en el PC
+  y se quedaba descargando o cargando el modelo, y al terminar no salía nada. Hasta el 09/11 eso era Groq, y vuelve a
+  serlo: al arrancar, ese proveedor pasa a Groq (lo dice el log) y el motor también lo trata como Groq. Solo «Probar»
+  del asistente con «API externa» y sin proveedor elegido sigue sin mandar nada a nadie.
+- En ese mismo caso, Ajustes › Procesado enseñaba «Azure OpenAI» (el primero de la lista) y «Guardar» lo dejaba en
+  Azure sin endpoint. Unos ajustes así (Azure sin endpoint ni deployment y con una clave de Groq) vuelven a Groq al
+  arrancar.
+- Una instalación nueva sigue sin sugerir ni preseleccionar Groq.
+
 ### Memoria con audios largos (09/11/2026)
 
 Bernardo subió un audio viejo de 55 min (msg 1378): la transcripción en la nube salió bien, pero «Quién habla» se quedó
@@ -84,6 +144,50 @@ Bernardo, msg 1386: «Lo que no quiero es sugerir Groq a un nuevo instalador». 
   del plan gratuito de Groq, solo «si usas Groq». Tests: `tests/test_sin_groq.py` (servidor y una instalación nueva en
   Chromium, en ui-smoke; y, desde la integración, un settings.json con Groq como lo dejaba la versión anterior, igual
   al arrancar y después de «Guardar» en Ajustes sin tocar nada, con su clave y la adicional).
+
+### Subir audio desde el móvil con un código QR (09/11/2026)
+
+La lámina que validó Bernardo con sus cuatro decisiones por defecto (msg 1390: «1. Si»). Hecho por Steve en la rama
+`qr-movil`.
+
+- «Subir audio» abre un menú: «Desde este PC» (como antes) y «Desde el móvil». Con el móvil, la tarjeta de subir sin
+  archivos: eliges proyecto, carpeta e idioma (decisión 1) y «Mostrar el código» enseña un QR, cuánto le queda, lo que
+  va llegando («Llegando · 46 %», «En la cola») y cómo dejarlo («Dejar de recibir», «Listo»). «Cambiar» vuelve al plan
+  sin perder el código. Cerrar la tarjeta lo cierra; lo que esté llegando se guarda.
+- El móvil, sin instalar nada: una página «Enviar a Tenca» con «Elegir grabaciones», ayuda para iPhone y Android, y
+  cada audio con su progreso. Lleva el nombre y la fecha que propone el archivo, como al subirlo desde el PC
+  (`nombres-audio.js`, ahora compartido).
+- `movil.py`: mientras el código está en pantalla, un servidor aparte escucha solo en la IP de la wifi y solo sabe
+  servir esa página y recibir audios. Código de 128 bits en la ruta, un solo móvil (el primero que lo abre, por
+  cookie), 10 minutos, 2 GB por audio y nada de la API de la app (decisión 2). Lo recibido entra por `App.subir`, con
+  sus comprobaciones. Solo en una red que Windows tiene como privada (`Get-NetConnectionProfile`); en una pública o en
+  la de la empresa, la tarjeta dice por qué y cómo cambiarlo (decisión 3).
+- `_app/qrcodegen.py`: la librería de QR de Project Nayuki (MIT), copiada sin cambios con su licencia.
+- Revisión de contexto fresco (0 P0, 3 P1, 9 P2), arreglada con tests:
+  - «Dejar de recibir» ya no vacía la lista: lo recibido se sigue viendo, y lo que estaba llegando también, al
+    terminar.
+  - Soltar audios en la ventana con el código en pantalla ya no rompe la tarjeta: dice que hay que cerrarla antes.
+  - «Cambiar» › «Nuevo proyecto…» (o «Editar») y de vuelta ya no pierde el código.
+  - Esc mientras se abría el código ya no lo deja escuchando.
+  - Desde que un móvil abre el código, el PC lo dice y ofrece «Mostrar otro código», por si no era el tuyo o lo
+    abriste en otra app. Solo abrir la página ata el código; la cookie dura lo que el código.
+  - La red elegida es la que tiene la ruta a internet: un adaptador de Hyper-V o WSL marcado como privado ya no da un
+    QR al que el móvil no llega. Solo cuentan IPs de red local (RFC 1918).
+  - Cambiar de código es atómico, y uno nuevo empieza su lista desde cero.
+  - El nombre de un archivo largo se corta sin perder la extensión.
+  - El móvil avisa él mismo si un audio pasa de 2 GB.
+  - Nueva nota de ayuda para cuando se pulsó «Cancelar» en el aviso del cortafuegos.
+- Segunda revisión, solo del arreglo (0 P0, 0 P1, 6 P2), arreglada con tests:
+  - una red pública después de una privada ya no reutiliza la privada guardada;
+  - un doble clic en «Mostrar otro código» abre un solo código;
+  - un sondeo en vuelo ya no pinta el código anterior;
+  - cerrar la tarjeta mientras se abría cierra solo ese código;
+  - la métrica de la red es la efectiva de Windows (ruta + interfaz);
+  - el aviso al soltar audios es el correcto con otra ventana encima.
+- PowerShell en frío tardó más de 15 s en la CI windows-real (26 s con el tope nuevo): el tope es de 45 s, la red
+  buena se reutiliza 2 minutos y la tarjeta dice «Mirando la wifi…» mientras tanto.
+- Tests: `tests/test_movil.py` (la red, el QR y el servidor de la wifi) y `tests/test_ui_movil.py` (de punta a punta
+  con un iPhone emulado y un audio de WhatsApp de verdad, en ui-smoke).
 
 ### Idioma y traducción en pleno directo; oculta al compartir pantalla (09/11/2026)
 

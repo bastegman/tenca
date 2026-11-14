@@ -42,9 +42,11 @@ from urllib.parse import parse_qs, urlparse
 
 import aprender
 import calendario
+import directo_avisos
 import engines
 import explicar
 import live
+import movil
 import plan as grabar_plan
 import probar
 import salidas
@@ -53,7 +55,7 @@ from common import (APP_ID, APP_NAME, ApiError, BAD_NAME, LOGGER, SRT_TIME, WIND
                     alert, clean_name, default_threads, fmt_srt, fold, is_protected, log, log_exc, natural_key,
                     parse_srt, protect, read_text, save_text, setup_logging, unprotect, wav_duration, write_bytes)
 from common import TOKEN_FILE, TOKEN_HEADER, local_opener, read_token  # sesion local (P1-02) y loopback sin proxy
-from recording import GlobalHotkey, RecorderProcess, cue, mic_meeting_app, notify
+from recording import GlobalHotkey, RecorderProcess, cue, mic_meeting_app, notify, teams_mic_estado
 from bandeja import Bandeja
 import window as window_mod
 from window import Window, set_app_id
@@ -610,6 +612,28 @@ def proveedor_elegido(st):
     return (procesado_de(st) == "api" or c.get("provider") not in ("groq", "", None)
             or any(str(c.get(k) or "").strip() for k in ("api_key", "base_url", "azure_endpoint"))
             or any(c.get(f) for f in engines.EXTRA_KEYS_FIELDS.values()))
+
+
+def reparar_proveedor(d):
+    """Al arrancar (fix-groq, msgs 1468-1474): unos ajustes con un proveedor de la nube que no existe (vacio o de una
+    version anterior) pasan a Groq, que es lo que hacia el motor hasta fe29522 y otra vez desde fix-groq; asi Ajustes
+    lo ensena elegido y «Guardar» no lo cambia. Con 0d5169b, en ese caso el desplegable no marcaba ninguno, el navegador
+    marcaba el primero (Azure OpenAI) y un «Guardar» lo dejaba en Azure sin endpoint: si quedo asi (Azure sin endpoint
+    ni deployment, y una clave de Groq, «gsk_…»), vuelve a Groq. Una instalacion nueva no cambia (ya lleva "groq" y
+    nada elegido). Devuelve lo que se ha cambiado (una frase para el log) o None."""
+    c = d.get("cloud")
+    if not isinstance(c, dict):
+        return None
+    p = c.get("provider")
+    if p not in engines.PROVIDERS:
+        c["provider"] = "groq"
+        return f"«{p if isinstance(p, str) else type(p).__name__}» no es ninguno de los que hay: pasa a Groq"
+    clave = c.get("api_key") if isinstance(c.get("api_key"), str) else ""
+    if (p == "azure" and not str(c.get("azure_endpoint") or "").strip()
+            and not str(c.get("azure_deployment") or "").strip() and clave.strip().startswith("gsk_")):
+        c["provider"] = "groq"
+        return "Azure OpenAI sin endpoint ni deployment y con una clave de Groq: pasa a Groq"
+    return None
 
 
 def agente_de(st):
@@ -3159,11 +3183,14 @@ def keepalive_s(st):
 
 def preload_model(st, cached=None):
     """(worker, modelo) que conviene dejar cargado al arrancar: el del directo si es local y ya esta descargado; si
-    no, el de la cola. None si worker_preload esta apagado o no hay modelo en cache (descargar no es precargar)."""
+    no, el de la cola. None si worker_preload esta apagado o no hay modelo en cache (descargar no es precargar).
+    Con «API externa» solo el del directo, si es en el PC: la cola en el PC carga su modelo al llegarle un trabajo
+    (2-6 s en uno de minutos) y, mientras tanto, no ocupa memoria que no hace falta (medium ~1 GB; fix-lento)."""
     if not st.get("worker_preload", True):
         return None
     cached = cached or engines.model_cached
-    for which, key in (("live", "live_preset"), ("batch", "preset")):
+    cuales = (("live", "live_preset"),) if procesado_de(st) == "api" else (("live", "live_preset"), ("batch", "preset"))
+    for which, key in cuales:
         p = engines.PRESETS_BY_ID.get(st.get(key) or "")
         if p and p["engine"] == "local" and cached(p["model"]):
             return which, p["model"]
@@ -3386,8 +3413,11 @@ class Jobs:
         if preset == "nube":
             try:
                 engines.CloudEngine.endpoint(st["cloud"])
-            except engines.EngineError:
+            except engines.EngineError as e:
                 preset = "medium"  # sin API key: en local
+                # y se dice: hasta fix-lento caia en silencio a Whisper en el PC (medium, ~1 GB y la CPU ocupada
+                # durante toda la reunion) y se veia como «la nube va lenta» o «cargando» (fix-groq, 10/11/2026)
+                log(f"   directo: la nube no está lista ({e}); se transcribe en este PC con {preset}")
         abs_path = safe(rel, "file")
         if self.active_for(rel):
             raise ApiError("Ese audio ya se está transcribiendo.")
@@ -3576,7 +3606,10 @@ class Jobs:
                 # los ajustes de la nube vigentes en cada trozo (no una copia del arranque): una clave pegada, cambiada
                 # o quitada en Ajustes vale desde el siguiente
                 "cloud_cfg_fn": lambda: live_cloud_cfg(self.settings.get()),
-                "tmp_dir": os.path.join(DATA_DIR, "tmp"), "resume": resume, "summarizer": self.summarizer}
+                "tmp_dir": os.path.join(DATA_DIR, "tmp"), "resume": resume, "summarizer": self.summarizer,
+                # idiomas propuestos que ya rechazaste en esta grabación (B6): no se vuelven a proponer, tampoco si el
+                # directo se para y se reanuda
+                "rechazos": self.__dict__.setdefault("rechazos_idioma", {}).setdefault(job.path, set())}
         job.opts = opts  # live.run los lee en cada trozo: si cambias tema, idioma o contexto, vale desde el siguiente
         job.out = LiveOutputs(abs_path)
         if resume:  # lo que ya estaba escrito no se reescribe: lo nuevo se anade detras
@@ -4081,7 +4114,9 @@ class Jobs:
         return job.id
 
     def _voices_subprocess(self, job, args, idle_timeout=1800):
-        """python voices.py … con prioridad baja; lee su progreso; cancelar = matar el proceso."""
+        """python voices.py … con prioridad baja; lee su progreso; cancelar = matar el proceso. Sin job (la huella de
+        «Recordar», con el usuario esperando a «Guardar»), por debajo de lo normal y no en reposo: en reposo, con el PC
+        ocupado (una llamada, otra identificacion de voces), Windows lo deja sin turno (fix-lento, 10/11/2026)."""
         log_path = os.path.join(DATA_DIR, "voces.log")
         try:  # rotacion sencilla: el stderr de onnxruntime no debe crecer sin tope
             if os.path.getsize(log_path) > 1_000_000:
@@ -4091,7 +4126,8 @@ class Jobs:
         err = open(log_path, "ab")
         p = subprocess.Popen([sys.executable, "-u", os.path.join(APP_DIR, "voices.py"), *args, "--data", DATA_DIR,
                               "--threads", str(voices.hilos())], stdout=subprocess.PIPE, stderr=err, cwd=APP_DIR,
-                             creationflags=engines.NO_WINDOW | (voices.IDLE_PRIORITY or engines.BELOW_NORMAL))
+                             creationflags=engines.NO_WINDOW | ((voices.IDLE_PRIORITY or engines.BELOW_NORMAL)
+                                                                if job is not None else engines.BELOW_NORMAL))
         err.close()
         q = queue.Queue()
 
@@ -4545,6 +4581,12 @@ DIAG_LINES = (
     "✦ aprendido: {t} en {t} ({n} regla⟦s⟧)",
     "✦ regla olvidada: {t}",
     "✦ diccionario: {t}",
+    "   directo: la nube no está lista ({e}); se transcribe en este PC con {m}",
+    "📱 recibiendo del móvil en la wifi ({n}) durante {n} min",
+    "📱 un móvil ha abierto el código",
+    "📱 ya no se reciben audios del móvil",
+    "📱 no se ha guardado un audio del móvil ({t})",
+    "   móvil: no se han podido leer las redes ({e})",
     "🔗 carpeta vinculada: {t}",
     "🔗 carpeta desvinculada (no se ha tocado nada): {t}",
     "🔤 vocabulario guardado: {t} ({n} términos)",
@@ -4820,6 +4862,23 @@ def open_dir(path):
 REC_ARRANQUE_S = 10.0
 
 
+def teams_estado():
+    """(micro de Teams, títulos de las ventanas de reunión de Teams) para directo_avisos.FinDeLlamada: ("uso" |
+    "libre" | "duda", función que devuelve un set de títulos o None si no se pueden leer). Las ventanas solo se leen
+    cuando hace falta. CHULETA_PRUEBAS_TEAMS (solo los E2E): un JSON {"mic": "libre", "ventanas": ["Comité"]} en vez
+    del registro y las ventanas; si no se puede leer, "duda" (nunca se para nada)."""
+    fake = os.environ.get("CHULETA_PRUEBAS_TEAMS")
+    if fake:
+        try:
+            with open(fake, encoding="utf-8") as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            return "duda", lambda: None
+        v = d.get("ventanas")
+        return str(d.get("mic") or "duda"), lambda: None if v is None else set(v)
+    return teams_mic_estado(), calendario.teams_reuniones
+
+
 class App:
     def __init__(self):
         os.makedirs(DATA_DIR, exist_ok=True)
@@ -4828,6 +4887,7 @@ class App:
         self.settings = Store(os.path.join(DATA_DIR, "settings.json"), DEFAULT_SETTINGS)
         if self.settings.get().get("procesado") not in PROCESADOS:  # ajustes de antes: se decide una vez y se guarda
             self.settings.update(lambda d: d.update(procesado=procesado_de(d)))
+        self._reparar_proveedor()
         self._aviso_resumen_local()
         self._load_links()
         if not self.settings.get().get("carpetas_v"):  # la carpeta por reunion (07/11/2026): una vez
@@ -4850,6 +4910,9 @@ class App:
         self.notes_lock, self.meeting, self.meeting_prev = threading.Lock(), None, None
         self.voices_dl = None  # descarga de los modelos de voces en curso (progreso para la interfaz)
         self.vigia = calendario.Vigia()  # reunión en curso (Teams/Outlook): sugerencias y aviso flotante
+        # «La llamada ha terminado: paro en 30 s · No terminar» (B6); parada: la última parada por eso (la interfaz
+        # la avisa al ver que ya no se graba)
+        self.fin_llamada, self.parada_auto = directo_avisos.FinDeLlamada(), None
         # lo que ya se sabe de los asistentes de Outlook (si pregunta, no se le vuelve a preguntar solo al arrancar)
         calendario.ASISTENTES["estado"] = self.settings.get().get("outlook_asistentes") or None
         calendario.al_cambiar = lambda v: self.settings.update(lambda d: d.update(outlook_asistentes=v))
@@ -4908,6 +4971,18 @@ class App:
                 log(f"   no se pudo grabar (Ctrl+Alt+R): {e.msg}")  # el toast se va; el log se queda
                 notify("No se pudo grabar", e.msg)
                 raise
+
+    def _reparar_proveedor(self):
+        """Al arrancar: reparar_proveedor (fix-groq). Se mira sobre una copia y solo se escribe si hay algo que
+        reparar. Devuelve la frase del log o None."""
+        if not reparar_proveedor(self.settings.get()):
+            return None
+        hecho = []
+        self.settings.update(lambda d: hecho.append(reparar_proveedor(d)))
+        if hecho and hecho[0]:
+            log(f"   proveedor de la nube: {hecho[0]}")
+            return hecho[0]
+        return None
 
     def _migrar_nombre_raiz(self):
         """Al arrancar, despues de cargar las vinculadas: los ajustes del proyecto de la raiz pasan al nombre de su
@@ -5230,8 +5305,15 @@ class App:
                "build": BUILD}
         if r and r.alive():
             out.update(path=rel_of(r.path), started=r.started, resumen=getattr(self, "rec_resumen", ""), **r.status)
+            # avisos de la franja del directo (B6): fuente callada y «paro en 30 s»
+            out["callada"] = r.callada.estado(time.monotonic()) if getattr(r, "callada", None) else {}
+            quedan = self.fin_llamada.quedan(time.monotonic())
+            out["fin_llamada"] = {"app": "Teams", "quedan_s": quedan} if quedan is not None else None
         elif m and m.alive():
             out.update(m.status)
+        p = self.parada_auto
+        if not out["recording"] and p and time.time() - p["at"] < 120:
+            out["parada"] = p  # se paró sola al terminar la llamada: la interfaz lo dice al ver que ya no se graba
         return out
 
     def rec_monitor(self, b):
@@ -5306,6 +5388,7 @@ class App:
                 # tras arrancarla aviso «No se pudo grabar» y dejo la grabacion en marcha sin decirlo, hasta que el
                 # vigilante arranco el directo por su cuenta y la segunda pulsacion la paro)
                 started = True
+                self.parada_auto = None  # «se paró al terminar la llamada» era de la grabación anterior
                 avisos = []
                 preset = b.get("preset") or self.settings.get().get("live_preset") or "medium"
                 v = find_vocab(None, None, b["vocab"]) if b.get("vocab") else None
@@ -5467,6 +5550,7 @@ class App:
         with self.jobs.lock:
             activos = sum(1 for j in self.jobs.list if j.status in ("queued", "running"))
         bandeja = b.get("origen") == "bandeja"
+        self._movil_parar()  # deja de escuchar en la wifi (si el código del móvil estaba abierto)
         log(f"apagar pedido desde {'la bandeja' if bandeja else 'la interfaz'} ({activos} trabajos en cola o en "
             "marcha)")
         schedule_shutdown("bandeja > Salir" if bandeja else "Ajustes > Apagar")
@@ -5488,6 +5572,81 @@ class App:
                 return {"ok": True}
         open_ui()
         return {"ok": True, "browser": True}
+
+    # --- «Subir audio › Desde el móvil» (movil.py): un código QR que el móvil abre por la wifi
+    _movil_lock = threading.Lock()
+    _movil_rec = None
+    _movil_ultima = None  # el último código cerrado, para que la tarjeta siga enseñando lo que recibió
+    _movil_red = (0.0, None)  # la última red buena y cuándo: «Mostrar el código» no vuelve a lanzar PowerShell
+
+    def _movil_datos(self, b):
+        """Lo elegido en el PC para lo que mande el móvil (lo que da /api/grabar/plan con subir, como en /api/subir):
+        la carpeta se comprueba ya, para no enseñar un código que luego no puede guardar nada."""
+        folder = safe(b.get("folder", ""), "dir")
+        if in_app_dir(folder):
+            raise ApiError("No se puede guardar ahí")
+        return {k: str(b.get(k) or "") for k in ("folder", "vocab", "language", "contexto", "preset")} | {
+            "folder": rel_of(folder)}
+
+    def _movil_parar(self):
+        with self._movil_lock:
+            rec, App._movil_rec = App._movil_rec, None
+            if rec:
+                App._movil_ultima = rec  # lo recibido se sigue viendo en la tarjeta (y lo que llegaba, al terminar)
+        if rec:
+            rec.parar()
+
+    def movil_red(self, q):
+        """GET /api/movil/red: si se puede recibir del móvil en la red de ahora ({ok, ip, red} o {ok: False, motivo,
+        texto}). Mira los perfiles de red de Windows (PowerShell, ~1 s)."""
+        red = movil.red_para_movil()
+        App._movil_red = (time.time(), red) if red["ok"] else (0.0, None)  # una mala tira la buena de antes
+        return red if red["ok"] else dict(red, texto=movil.motivo_texto(red))
+
+    def movil_abrir(self, b):
+        """POST /api/movil/abrir {folder, vocab, language, contexto, preset}: un código nuevo (el anterior deja de
+        valer). Solo en una red privada de Windows (decisión 3 de la lámina, msg 1390)."""
+        datos = self._movil_datos(b)
+        cuando, red = App._movil_red
+        if not red or time.time() - cuando > 120:  # la de hace un momento (al abrir la tarjeta) vale; una mala, no
+            red = movil.red_para_movil()
+        if not red["ok"]:
+            return dict(red, texto=movil.motivo_texto(red))
+        try:
+            rec = movil.Recepcion(red["ip"], datos, self.subir, STATIC_DIR, AUDIO_EXT)
+        except OSError as e:
+            raise ApiError(f"No se puede recibir en la wifi ({e.strerror or e.__class__.__name__}). Vuelve a probar en "
+                           "un momento.")
+        with self._movil_lock:  # el cambio, de una vez: dos «Mostrar el código» a la vez no dejan uno suelto
+            viejo, App._movil_rec, App._movil_ultima = App._movil_rec, rec, None
+            rec.empezar()
+        if viejo:
+            viejo.parar()
+        return dict(rec.publico(), ok=True, red=red.get("red") or "", qr=movil.qr_svg(rec.url))
+
+    def movil_datos(self, b):
+        """POST /api/movil/datos {…}: «Cambiar» con el código ya en pantalla: lo que llegue desde ahora va con esto."""
+        datos = self._movil_datos(b)
+        rec = App._movil_rec
+        if not rec or not rec.vigente():
+            raise ApiError("El código ya no vale: pide uno nuevo.", 410)
+        rec.datos = datos
+        return rec.publico()
+
+    def movil_estado(self, q):
+        """GET /api/movil/estado: el código abierto y lo que va llegando, para el PC."""
+        rec = App._movil_rec or App._movil_ultima
+        return rec.publico() if rec else {"activa": False, "recibidos": []}
+
+    def movil_cerrar(self, b):
+        """POST /api/movil/cerrar {url?}: «Dejar de recibir», «Listo» o cerrar la ventana. Lo que estaba llegando se
+        guarda. Con `url`, solo si es ese código (uno que se abría al cerrar la tarjeta no cierra el de otra)."""
+        rec = App._movil_rec
+        estado = rec.publico() if rec else {"activa": False, "recibidos": []}
+        if b.get("url") and (not rec or rec.url != b.get("url")):
+            return dict(estado, cerrado=False)
+        self._movil_parar()
+        return dict(estado, activa=False)
 
     def acerca_abrir(self, b):
         """Ajustes > Acerca de: abre la carpeta de datos (DATA_DIR: ajustes, API key cifrada, registros) en el
@@ -6388,11 +6547,17 @@ class App:
         return {"path": rel, "job": job, "carpeta": rel_of(dest), "duracion": dur, "aviso": "; ".join(avisos) or None}
 
     def _meeting_watch(self):
-        notified = None
+        """Cada 8 s, el vigilante de llamadas; mientras se confirma el fin de una llamada o cuentan los 30 s del
+        «paro en 30 s», el fin de la llamada se mira cada segundo (una lectura nueva justo antes de parar)."""
+        notified, siguiente = None, 0.0
         while True:
-            time.sleep(8)
+            time.sleep(1)
             try:
-                notified = self._meeting_step(notified)
+                if time.monotonic() >= siguiente:
+                    siguiente = time.monotonic() + 8
+                    notified = self._meeting_step(notified)
+                elif self.fin_llamada.pendiente():
+                    self._fin_llamada_tic()
             except Exception:
                 pass
 
@@ -6405,6 +6570,14 @@ class App:
         # no abre el aviso flotante, ni manda el toast, ni pinta el chip (02/11/2026: saltaban al arrancar sin reunion)
         app, self.meeting_prev = (leido if leido == self.meeting_prev else None), leido
         recording = bool(self.rec and self.rec.alive())
+        if recording:  # para el aviso del sonido del ordenador callado: solo cuenta en una llamada (directo_avisos)
+            self.rec.en_llamada = bool(leido)
+        fin = getattr(self, "fin_llamada", None)
+        if fin is not None and (recording or fin.pendiente()):  # sin grabar no se lee nada más
+            try:
+                self._fin_llamada_tic()
+            except Exception:
+                log_exc()
         st = self.settings.get()
         detect = st.get("meeting_detect", True)
         self.meeting = app if detect else None
@@ -6424,6 +6597,50 @@ class App:
         if not app:
             notified = None
         return notified
+
+    def _fin_llamada_tic(self):
+        """Una lectura del fin de la llamada de Teams que se graba (directo_avisos.FinDeLlamada) y lo que toque."""
+        r = self.rec
+        grabando = rel_of(r.path) if r and r.alive() and r.path else None
+        # con «Avisarme si estoy en una llamada» apagado no se vigilan las llamadas: tampoco para proponer parar
+        vigila = grabando and self.settings.get().get("meeting_detect", True) is not False
+        mic, ventana_fn = teams_estado() if vigila else ("duda", lambda: None)
+        accion = self.fin_llamada.tic(grabando, time.monotonic(), mic, ventana_fn)
+        if accion == "propone":
+            log(f"   la llamada de Teams ha terminado: se para la grabación en {directo_avisos.PARA_EN_S:.0f} s si no "
+                "se pide seguir")
+            notify("La llamada ha terminado", f"{APP_NAME} para la grabación en {directo_avisos.PARA_EN_S:.0f} s. "
+                   f"Abre {APP_NAME} y pulsa «No terminar» si no ha acabado.")
+        elif accion == "cancela":
+            log("   la llamada sigue (o no se puede saber): no se para la grabación")
+        elif accion == "para":
+            with self.toggle_lock:
+                r = self.rec
+                if not (r and r.alive() and rel_of(r.path) == grabando):
+                    return  # entretanto se paró a mano (o es otra grabación)
+                # antes de parar: el sondeo de la interfaz que vea «ya no se graba» tiene que ver también el porqué (si
+                # no, en Windows, con el sonido de cue, salía «Grabación guardada» a secas: ui-smoke del 10/11/2026)
+                self.parada_auto = {"motivo": "llamada", "path": grabando, "at": time.time()}
+                try:
+                    res = self.rec_stop({})
+                except ApiError:
+                    self.parada_auto = None
+                    return
+            # la reunión siguiente (ya empezada, o la que empiece) puede volver a ofrecer el aviso flotante «● Grabar»
+            self.vigia.avisado = None
+            cue("stop")
+            log(f"■ {res['path']}: parada al terminar la llamada de Teams (sin «No terminar» en "
+                f"{directo_avisos.PARA_EN_S:.0f} s)")
+            notify("■ Grabación parada", "La llamada ha terminado · la transcripción termina sola")
+
+    def rec_seguir(self, b):
+        """«No terminar» del aviso «La llamada ha terminado: paro en 30 s»: no se para (hasta otra llamada)."""
+        habia = self.fin_llamada.seguir_grabando()
+        if habia:
+            log("   «No terminar»: la grabación sigue aunque la llamada haya terminado")
+        # grabando: si el clic llegó tarde (ya se había parado o se está parando), la interfaz lo dice
+        parando = self.fin_llamada.parando
+        return {"ok": True, "seguia": habia, "grabando": bool(self.rec and self.rec.alive()) and not parando}
 
     def _vocab_terms(self):
         """Listas de vocabulario con sus términos: con ellas calendario.suggest elige el tema de la reunión. La que no
@@ -7102,6 +7319,22 @@ class App:
         job.translate = bool(b.get("on"))
         if isinstance(job.directo, dict):  # que la respuesta ya lo refleje (live.py lo vuelve a publicar en <1 s)
             job.directo = dict(job.directo, translate=job.translate, translate_to=live.translate_to(job))
+        return job.public()
+
+    def live_propuesta(self, b):
+        """«Lo último suena a … · No» (B6): {id, rechazar: "pt"}. Ese idioma no se vuelve a proponer en esta grabación.
+        («Cambiar» no pasa por aquí: es el cambio de idioma de siempre, POST /api/notes.)"""
+        job = self.jobs._live_job(b.get("id"))
+        idioma = str(b.get("rechazar") or "")
+        if idioma not in directo_avisos.PROPONIBLES:
+            raise ApiError("Idioma desconocido.")
+        (job.opts or {}).setdefault("rechazos", set()).add(idioma)
+        p = getattr(job, "propuesta", None)
+        if p is not None:
+            p.rechazar(idioma)
+        if isinstance(job.directo, dict):  # que la respuesta ya lo refleje (live.py lo vuelve a publicar en <1 s)
+            job.directo = dict(job.directo, propuesta=None)
+        log(f"   directo {job.name}: no se propone más {idioma} en esta grabación")
         return job.public()
 
     def ocultar_captura(self, b):
@@ -7875,7 +8108,10 @@ class App:
         if key and "…" not in key and "•" not in key:
             st["cloud"]["api_key"] = key
         if st.get("procesado") == "api" and not elegido:
-            st["cloud"]["provider"] = ""  # el motor lo rechaza con «Elige el proveedor…»: nada sale hacia Groq
+            # el motor lo rechaza con «Elige el proveedor…» (por la marca: sin ella, unos ajustes guardados con un
+            # proveedor vacio van a Groq, como siempre): nada sale hacia Groq
+            st["cloud"]["provider"] = ""
+            st["cloud"][engines.SIN_PROVEEDOR] = True
         return st, True
 
     @staticmethod
@@ -8713,6 +8949,7 @@ class Handler(BaseHTTPRequestHandler):
                   "/api/diagnostico": a.diagnostico, "/api/modelos": a.modelos_state, "/api/probar": a.probar_estado,
                   "/api/agente/estado": a.agente_estado,
                   "/api/aprender": a.aprender_get, "/api/aprender/reglas": a.aprender_reglas,
+                  "/api/movil/red": a.movil_red, "/api/movil/estado": a.movil_estado,
                   "/api/inicio-windows": lambda q: {"activado": inicio_windows_leer()},
                   "/api/ocultar-captura": lambda q: captura_estado(a.settings.get())}
         try:
@@ -8750,7 +8987,8 @@ class Handler(BaseHTTPRequestHandler):
                   "/api/modelos/descargar": a.modelos_descargar, "/api/modelos/cancelar": a.modelos_cancelar,
                   "/api/probar": a.probar_empezar, "/api/probar/cancelar": a.probar_cancelar,
                   "/api/abrir-powershell": a.abrir_powershell,
-                  "/api/live/traducir": a.live_translate,
+                  "/api/live/traducir": a.live_translate, "/api/live/propuesta": a.live_propuesta,
+                  "/api/rec/seguir": a.rec_seguir,
                   "/api/rec/monitor": a.rec_monitor, "/api/rec/start": a.rec_start, "/api/rec/stop": a.rec_stop,
                   "/api/rec/toggle": a.rec_toggle, "/api/rec/mic": a.rec_mic, "/api/notes": a.notes_save,
                   "/api/grabar/plan": a.grabar_plan_api, "/api/grabar/recordar": a.grabar_recordar,
@@ -8774,6 +9012,8 @@ class Handler(BaseHTTPRequestHandler):
                   "/api/voces/exportar": a.voices_export,
                   "/api/apagar": a.apagar, "/api/mostrar": a.mostrar, "/api/ocultar": a.ocultar,
                   "/api/acerca/abrir": a.acerca_abrir, "/api/calendario/activar": a.calendario_activar,
+                  "/api/movil/abrir": a.movil_abrir, "/api/movil/datos": a.movil_datos,
+                  "/api/movil/cerrar": a.movil_cerrar,
                   "/api/inicio-windows": lambda b: {"activado": inicio_windows_poner(b.get("activado") is True)},
                   "/api/ocultar-captura": a.ocultar_captura}
         try:
