@@ -57,6 +57,19 @@ class ZipTests(unittest.TestCase):
         for n in ("../fuera.py", "/abs.py", "C:/x.py", "Tenca/../x.py", "Otra/INSTALAR.bat"):
             self.assertTrue(pr.problemas_zip(LIMPIO + [n], VERSIONADOS), n)
 
+    def test_repetidos_y_carpetas(self):
+        self.assertEqual(pr.problemas_zip(LIMPIO + ["Tenca/", "Tenca/_app/", "Tenca/_app/static/"], VERSIONADOS), [])
+        malos = pr.problemas_zip(LIMPIO + ["Tenca/_app/server.py"], VERSIONADOS)
+        self.assertEqual(len(malos), 1, malos)
+        self.assertIn("repetido", malos[0])
+        malos = pr.problemas_zip(LIMPIO + ["Tenca/Proyecto Alfa/"], VERSIONADOS)
+        self.assertEqual(len(malos), 1, malos)
+        self.assertIn("carpeta sin ficheros", malos[0])
+
+    def test_faltan_ficheros_de_la_app(self):
+        malos = pr.problemas_zip([n for n in LIMPIO if not n.endswith("/server.py")], VERSIONADOS)
+        self.assertTrue(any("_app/server.py" in m for m in malos), malos)
+
     def test_sin_instalar_no_es_el_zip(self):
         malos = pr.problemas_zip([n for n in LIMPIO if not n.endswith("/INSTALAR.bat")], VERSIONADOS)
         self.assertTrue(any("INSTALAR.bat" in m for m in malos), malos)
@@ -205,29 +218,56 @@ class NotasTests(unittest.TestCase):
 
 @unittest.skipUnless(hay_git(), "sin git")
 class ReleaseAnteriorTests(unittest.TestCase):
+    """Un repo de prueba: c0 - c1 - c2 en main y d, otra línea desde c0; Releases en c0 (anotado) y c1."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = tmp = self._tmp.name
+        self.addCleanup(self._tmp.cleanup)
+        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid", GIT_COMMITTER_NAME="t",
+                   GIT_COMMITTER_EMAIL="t@example.invalid")
+
+        def run(*a, fecha=None):
+            e = dict(env, GIT_AUTHOR_DATE=fecha, GIT_COMMITTER_DATE=fecha) if fecha else env
+            return subprocess.run(["git", "-C", tmp, *a], capture_output=True, text=True, env=e, timeout=30,
+                                  check=True).stdout.strip()
+
+        run("init", "-q", "-b", "main")
+        self.c = []
+        for i, fecha in enumerate(("2026-11-01T10:00:00", "2026-11-02T10:00:00", "2026-11-03T10:00:00")):
+            run("commit", "-q", "--allow-empty", "-m", f"c{i}", fecha=fecha)
+            self.c.append(run("rev-parse", "HEAD"))
+        run("checkout", "-q", "-b", "otra", self.c[0])
+        run("commit", "-q", "--allow-empty", "-m", "d", fecha="2026-11-04T10:00:00")
+        self.d = run("rev-parse", "HEAD")
+        run("checkout", "-q", "main")
+        self.t0, self.t1 = f"v2026.11.01-{self.c[0][:7]}", f"v2026.11.02-{self.c[1][:7]}"
+        run("tag", "-a", "-m", "anotado", self.t0, self.c[0])
+        run("tag", self.t1, self.c[1])
+        run("tag", "otro-tag", self.c[2])
+        self.tags = pr.tags_release(tmp, cwd=tmp)
+
+    def test_tags_release(self):
+        self.assertEqual(self.tags, [(self.t0, self.c[0]), (self.t1, self.c[1])])  # el anotado, por su commit
+
     def test_ultimo_tag_antecesor(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid", GIT_COMMITTER_NAME="t",
-                       GIT_COMMITTER_EMAIL="t@example.invalid")
+        self.assertEqual(pr.release_anterior(self.c[2], self.tags, cwd=self.tmp), (self.t1, self.c[1]))
+        self.assertEqual(pr.release_anterior(self.c[1], self.tags, cwd=self.tmp), (self.t0, self.c[0]))
+        self.assertIsNone(pr.release_anterior(self.c[0], self.tags, cwd=self.tmp))
 
-            def run(*a, fecha=None):
-                e = dict(env, GIT_AUTHOR_DATE=fecha, GIT_COMMITTER_DATE=fecha) if fecha else env
-                return subprocess.run(["git", "-C", tmp, *a], capture_output=True, text=True, env=e, timeout=30,
-                                      check=True).stdout.strip()
+    def test_no_se_publica_una_version_anterior_a_la_ultima(self):
+        """Publicar c0 o d con un Release en c1 los pondría como «Latest» y el README daría una versión vieja."""
+        self.assertEqual(pr.no_antecesores(self.c[2], self.tags, cwd=self.tmp), [])
+        self.assertEqual(pr.no_antecesores(self.c[1], self.tags, cwd=self.tmp), [])
+        self.assertEqual(pr.no_antecesores(self.c[0], self.tags, cwd=self.tmp), [self.t1])
+        self.assertEqual(pr.no_antecesores(self.d, self.tags, cwd=self.tmp), [self.t1])
+        self.assertEqual(pr.no_antecesores(self.c[2], self.tags + [("v2026.11.09-abcdef0", "f" * 40)], cwd=self.tmp),
+                         ["v2026.11.09-abcdef0"])  # un commit que no está en el clon no cuenta como antecesor
 
-            run("init", "-q")
-            shas = []
-            for i, fecha in enumerate(("2026-11-01T10:00:00", "2026-11-02T10:00:00", "2026-11-03T10:00:00")):
-                run("commit", "-q", "--allow-empty", "-m", f"c{i}", fecha=fecha)
-                shas.append(run("rev-parse", "HEAD"))
-            run("tag", "-a", "-m", "anotado", f"v2026.11.01-{shas[0][:7]}", shas[0])
-            run("tag", f"v2026.11.02-{shas[1][:7]}", shas[1])
-            run("tag", "otro-tag", shas[1])
-            self.assertEqual(pr.release_anterior(shas[2], remoto=tmp, cwd=tmp),
-                             (f"v2026.11.02-{shas[1][:7]}", shas[1]))
-            self.assertEqual(pr.release_anterior(shas[1], remoto=tmp, cwd=tmp),
-                             (f"v2026.11.01-{shas[0][:7]}", shas[0]))  # el anotado, por su commit
-            self.assertIsNone(pr.release_anterior(shas[0], remoto=tmp, cwd=tmp))
+    def test_solo_se_publica_lo_que_esta_en_main(self):
+        self.assertEqual(pr.resolver(self.c[1], base="main", cwd=self.tmp)[0], self.c[1])
+        with self.assertRaises(pr.Fallo):
+            pr.resolver(self.d, base="main", cwd=self.tmp)
 
 
 if __name__ == "__main__":

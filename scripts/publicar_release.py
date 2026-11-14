@@ -37,6 +37,7 @@ GENERADOS = {"_app/version.txt"}  # los escribe build_package; no están en git
 # Los únicos .txt que lleva el zip público. Uno nuevo hace fallar la publicación hasta que se añada aquí: mejor parar
 # una entrega que publicar una lista por error.
 TXT_PERMITIDOS = {"LEEME.txt", "_app/export/LEEME.txt", "_app/version.txt", "_app/static/fuentes-OFL.txt"}
+OBLIGATORIOS = {"INSTALAR.bat", "LEEME.txt", "_app/server.py", "_app/instalar.ps1", "_app/version.txt"}
 TAG_RE = re.compile(r"^v\d{4}\.\d{2}\.\d{2}-[0-9a-f]{7,40}$")
 LIMITE_NOTAS = 60000  # GitHub admite 125.000 caracteres; con más, solo el índice de apartados
 # «(07/11/2026, msgs 1154 y 1156)» -> «(07/11/2026)»: referencias de trabajo que no dicen nada a quien descarga
@@ -69,12 +70,12 @@ def nombre_tag(fecha, corto):
     return tag
 
 
-def resolver(ref, base="origin/main"):
+def resolver(ref, base="origin/main", cwd=REPO):
     """(sha completo, sha corto, fecha del commit) de `ref`, que tiene que estar en `base`: no se publica una rama."""
-    sha = git("rev-parse", "--verify", f"{ref}^{{commit}}")
-    if not git_ok("merge-base", "--is-ancestor", sha, base):
+    sha = git("rev-parse", "--verify", f"{ref}^{{commit}}", cwd=cwd)
+    if not git_ok("merge-base", "--is-ancestor", sha, base, cwd=cwd):
         raise Fallo(f"{ref} ({sha[:12]}) no está en {base}: primero se integra y luego se publica")
-    return sha, git("rev-parse", "--short", sha), git("log", "-1", "--format=%cs", sha)
+    return sha, git("rev-parse", "--short", sha, cwd=cwd), git("log", "-1", "--format=%cs", sha, cwd=cwd)
 
 
 def repo_github(url):
@@ -116,10 +117,14 @@ def construir_zip(carpeta, dest, version, python=sys.executable):
 def problemas_zip(nombres, versionados):
     """Lo que impide publicar un zip con estas entradas. `versionados`: las rutas que hay en git en esa versión.
     El zip público lleva solo ficheros de git (con el layout de build_package) y _app/version.txt."""
-    out = []
+    out, aceptados, carpetas, vistos = [], set(), [], set()
     versionados = set(versionados)
     plantillas = {p.split("/")[-1] for p in versionados if p.startswith("_app/export/") and p.count("/") == 2}
     for n in nombres:
+        if n.casefold() in vistos:
+            out.append(f"{n}: repetido")
+            continue
+        vistos.add(n.casefold())
         partes = n.replace("\\", "/").split("/")
         if n.startswith(("/", "\\")) or ".." in partes or re.match(r"^[A-Za-z]:", n):
             out.append(f"{n}: ruta absoluta o con «..»")
@@ -132,20 +137,21 @@ def problemas_zip(nombres, versionados):
             continue
         rel = "/".join(partes[1:])
         if not rel or n.endswith("/"):
-            continue  # entrada de carpeta
+            carpetas.append((n, rel))  # una carpeta vale solo si lleva algún fichero aceptado (abajo)
+            continue
         if rel.lower().endswith(".txt") and rel not in TXT_PERMITIDOS:
             out.append(f"{n}: .txt que no es de la app (si lo es, añádelo a TXT_PERMITIDOS)")
             continue
-        if rel in GENERADOS:
-            continue
-        if "/" not in rel:  # en la raíz, solo las plantillas de _app/export y la licencia
-            if rel in plantillas or (rel == "LICENSE" and rel in versionados):
-                continue
-        elif rel.startswith("_app/") and rel in versionados:
+        if rel in GENERADOS or ("/" not in rel and (rel in plantillas or (rel == "LICENSE" and rel in versionados))) \
+                or (rel.startswith("_app/") and rel in versionados):
+            aceptados.add(rel)  # en la raíz, solo las plantillas de _app/export y la licencia
             continue
         out.append(f"{n}: no está en git en esta versión, o no es de lo que lleva el zip")
-    if not any(n.replace("\\", "/") == f"{RAIZ_ZIP}/INSTALAR.bat" for n in nombres):
-        out.append(f"falta {RAIZ_ZIP}/INSTALAR.bat: no parece el zip instalable")
+    for n, rel in carpetas:
+        if rel and not any(a.startswith(rel.rstrip("/") + "/") for a in aceptados):
+            out.append(f"{n}: carpeta sin ficheros de la app")
+    for rel in sorted(OBLIGATORIOS - aceptados):
+        out.append(f"falta {RAIZ_ZIP}/{rel}: no parece el zip instalable")
     return out
 
 
@@ -226,7 +232,8 @@ def notas(version, sha, sha256, repo, tag, nuevos, cambiados, primera=False):
         "```",
         "",
         f"Para comprobarlo en Windows, en la carpeta donde lo descargaste: `certutil -hashfile {ASSET} SHA256` "
-        "tiene que dar esa misma línea (en PowerShell, `Get-FileHash .\\" + ASSET + "`).",
+        "tiene que dar esa misma línea (en PowerShell, `Get-FileHash .\\" + ASSET + "` la da en mayúsculas: "
+        "es la misma).",
         "",
         "## Cambios",
         "",
@@ -248,24 +255,33 @@ def notas(version, sha, sha256, repo, tag, nuevos, cambiados, primera=False):
     return "\n".join(lineas) + "\n"
 
 
-def release_anterior(sha, remoto="origin", cwd=REPO):
-    """(tag, sha) del último tag vAAAA.MM.DD-… del remoto que es antecesor de `sha` (por fecha del commit), o None."""
+def tags_release(remoto="origin", cwd=REPO):
+    """[(tag, commit)] de los tags vAAAA.MM.DD-… del remoto (los anotados, por su commit)."""
     directos, pelados = {}, {}
     for linea in git("ls-remote", "--tags", remoto, cwd=cwd).splitlines():
         objeto, ref = linea.split("\t")
         nombre = ref[len("refs/tags/"):]
         if nombre.endswith("^{}"):
-            pelados[nombre[:-3]] = objeto  # el commit de un tag anotado
+            pelados[nombre[:-3]] = objeto
         else:
             directos[nombre] = objeto
+    return sorted((n, pelados.get(n, o)) for n, o in directos.items() if TAG_RE.match(n))
+
+
+def release_anterior(sha, tags, cwd=REPO):
+    """(tag, commit) del último de `tags` que es antecesor de `sha` (por fecha del commit), o None."""
     candidatos = []
-    for nombre, objeto in directos.items():
-        commit = pelados.get(nombre, objeto)
-        if not TAG_RE.match(nombre) or commit == sha or not git_ok("cat-file", "-e", f"{commit}^{{commit}}", cwd=cwd):
-            continue
-        if git_ok("merge-base", "--is-ancestor", commit, sha, cwd=cwd):
+    for nombre, commit in tags:
+        if commit != sha and git_ok("merge-base", "--is-ancestor", commit, sha, cwd=cwd):
             candidatos.append((int(git("log", "-1", "--format=%ct", commit, cwd=cwd)), nombre, commit))
     return max(candidatos)[1:] if candidatos else None
+
+
+def no_antecesores(sha, tags, cwd=REPO):
+    """Los de `tags` que no son antecesores de `sha`: un Release más nuevo (o de otra línea). Con alguno, esta versión
+    no se publica: saldría como «Latest» y el enlace del README daría la vieja. Un commit que no está en este clon
+    tampoco cuenta como antecesor."""
+    return [n for n, c in tags if c != sha and not git_ok("merge-base", "--is-ancestor", c, sha, cwd=cwd)]
 
 
 # ----------------------------------------------------------------------------- publicar
@@ -290,16 +306,20 @@ def main(argv):
     ap = argparse.ArgumentParser(description="Publica el zip público como Release de GitHub.")
     ap.add_argument("--ref", default="origin/main", help="versión a publicar (por defecto, origin/main)")
     ap.add_argument("--publicar", action="store_true", help="crear el Release (sin esto, solo prepara y comprueba)")
-    ap.add_argument("--repo", default=None, help="dueño/repo en GitHub (por defecto, el del remoto origin)")
     ap.add_argument("--salida", default=os.path.join(REPO, "dist", "release"), help="carpeta del zip y las notas")
     a = ap.parse_args(argv[1:])
     try:
         git("fetch", "--quiet", "origin", "main", timeout=120)
         sha, corto, fecha = resolver(a.ref)
         version, tag = f"{fecha} · {corto}", nombre_tag(fecha, corto)
-        repo = a.repo or repo_github(git("remote", "get-url", "origin"))
+        repo = repo_github(git("remote", "get-url", "origin"))
         if git("ls-remote", "--tags", "origin", f"refs/tags/{tag}"):
             raise Fallo(f"el tag {tag} ya existe en origin: esa versión ya está publicada")
+        tags = tags_release()
+        nuevos_tags = no_antecesores(sha, tags)
+        if nuevos_tags:
+            raise Fallo(f"ya hay un Release posterior o de otra línea ({', '.join(nuevos_tags)}): {version} no se "
+                        "publica, porque saldría como el último")
         os.makedirs(a.salida, exist_ok=True)
         zip_path = os.path.join(a.salida, ASSET)
         with tempfile.TemporaryDirectory(prefix="tenca-release-") as tmp:
@@ -317,7 +337,7 @@ def main(argv):
         sha_path = zip_path + ".sha256"
         with open(sha_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(f"{suma}  {ASSET}\n")
-        previo = release_anterior(sha)
+        previo = release_anterior(sha, tags)
         anterior = git("show", f"{previo[1]}:CHANGELOG.md") if previo else None
         nuevos, cambiados = cambios(git("show", f"{sha}:CHANGELOG.md"), anterior)
         texto = notas(version, sha, suma, repo, tag, nuevos, cambiados, primera=previo is None)
