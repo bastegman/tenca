@@ -6747,11 +6747,14 @@ class App:
         """Lo que se graba, para no proponerlo al parar ([{asunto, inicio}], ver calendario.excluida): si la grabación
         se llama como la reunión de ahora (o no tiene nombre), esa reunión con su hora de inicio (así, otra con el mismo
         asunto a otra hora sí se propone); si se llama de otra forma (escrito a mano), solo ese nombre, sin hora: la
-        cita en curso no era la grabada y se puede proponer."""
+        cita en curso no era la grabada y se puede proponer. Una llamada de Teams sin cita (sin hora) queda fuera
+        siempre."""
         info = self._reunion_ahora()[1]
         suyos = [x for x in dict.fromkeys((info or {}).get(k) for k in ("asunto", "titulo")) if x]
         out = []
-        if suyos and (not nombre or calendario.excluida([{"asunto": a} for a in suyos], nombre)):
+        # sin hora (solo la ventana de Teams), no hay «otra a otra hora» que distinguir: fuera también (revisión 3)
+        if suyos and (not nombre or not info.get("inicio") or calendario.excluida([{"asunto": a} for a in suyos],
+                                                                                  nombre)):
             out = [{"asunto": a, "inicio": info.get("inicio")} for a in suyos]
         if nombre and not calendario.excluida(out, nombre):
             out.append({"asunto": nombre, "inicio": None})
@@ -6785,7 +6788,7 @@ class App:
         return sug, info
 
     def _siguiente_pub(self, fresco=False):
-        """Lo que ve la interfaz de _siguiente ({titulo, inicio, fin, teams, tema}, o None), mirado como mucho cada
+        """Lo que ve la interfaz de _siguiente ({titulo, inicio, fin, teams}, o None), mirado como mucho cada
         SIGUIENTE_CACHE_S. Lo que falle no tumba /api/rec/status ni Hoy: sin propuesta."""
         if not getattr(self, "siguiente", None):
             return None

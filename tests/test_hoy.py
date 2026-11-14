@@ -766,6 +766,19 @@ class SiguienteServidorTests(TempTree):
         a.rec_stop({})
         self.assertEqual(a.rec_status({})["siguiente"]["titulo"], quien["titulo"])
 
+    def test_solo_teams_con_otro_nombre_no_propone_la_misma_llamada(self):
+        """Revisión 3: una llamada de Teams sin cita (sin hora), grabada con otro nombre, y se para aún en ella: no se
+        propone esa misma llamada."""
+        a = self.app(outlook_on=False)
+        self.lect = {"teams": {"title": "Llamada rápida"}, "sugerencia": {"name": "Llamada rápida", "source": "teams"}}
+        a.grabada = a._que_se_graba("Con el proveedor")
+        self.assertEqual(a.grabada, [{"asunto": "Llamada rápida", "inicio": None},
+                                     {"asunto": "Con el proveedor", "inicio": None}])
+        a.rec, a._movs = types.SimpleNamespace(alive=lambda: True, path=os.path.join(self.tmp, "x.wav"),
+                                               stop=lambda: 60.0, timeline=lambda: None), lambda: {}
+        a.rec_stop({})
+        self.assertIsNone(a.rec_status({})["siguiente"])
+
     def test_con_avisarme_si_estoy_en_una_llamada_apagado_nada(self):
         a = self.app(outlook_on=True, meeting_detect=False)
         self.grabar_y_parar(a)

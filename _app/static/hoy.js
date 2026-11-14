@@ -112,7 +112,7 @@ function hoyCargar(refrescar, otraVez, abrir) {
   if (refrescar) HOY.hasta = { t: Date.now() + 45000, comprobada: HOY.datos?.agenda?.comprobada || null };
   const q = refrescar ? '?refrescar=1' : abrir ? '?abrir=1' : '';
   HOY.cargando = api('/api/hoy' + q).then(d => {
-    const antes = HOY.datos?.plan?.nombre?.valor;
+    const antes = hoyPlan()?.nombre?.valor;  // la que se ve (con un chip cambiado, la de su plan)
     HOY.datos = d; HOY.at = Date.now(); HOY.error = null;
     // otra reunión: lo que cambiaste era para la anterior, y la tarjeta se repinta aunque tengas el foco en ella (si
     // no, enseñaría la anterior y «Grabar» grabaría la nueva)
@@ -214,8 +214,10 @@ function hoyCambio(el) {
   HOY.pedido = pedido;
   const seq = ++HOY.seq;
   HOY.pendiente = api('/api/grabar/plan', pedido).then(plan => {
-    // solo la respuesta a lo último que cambiaste, y de la reunión que se ve: si entretanto cambió, se descarta
-    if (seq !== HOY.seq || HOY.pedido !== pedido || plan.nombre?.valor !== HOY.datos?.plan?.nombre?.valor) return;
+    // solo la respuesta a lo último que cambiaste; si entretanto el sondeo trajo otra reunión (HOY.seq), se descarta.
+    // Si el servidor ya estaba en otra antes del sondeo, se pinta la que da (con lo cambiado): lo que se ve es lo que
+    // se graba (revisión 3)
+    if (seq !== HOY.seq || HOY.pedido !== pedido) return;
     HOY.plan = plan;
     const ah = $('#hoyAhora');
     if (ah) { ah.innerHTML = hoyAhoraHtml(); $(`[data-hoy="${el.dataset.hoy}"]`, ah)?.focus(); }
@@ -225,9 +227,11 @@ async function hoyGrabar(b) {
   if (S.rec?.recording) return toast('Ya hay una grabación en marcha.', 'err');
   b.disabled = true;
   try {
+    const vista = HOY.visto?.nombre?.valor;  // la reunión que se veía al pulsar
     await HOY.pendiente;  // lo último que has cambiado: se graba con lo que se está viendo
     const p = HOY.visto;
     if (!p) throw new Error('Aún no se sabe cómo grabar: espera un segundo y vuelve a pulsar.');
+    if (vista && p.nombre?.valor !== vista) throw new Error('La reunión de ahora ha cambiado: mírala y vuelve a pulsar «Grabar».');
     S.recLocal = true;
     const r = await api('/api/rec/start', { ...p.rec, resumen: p.resumen });
     toast(`● Grabando · ${esc(p.resumen)}${r.aviso ? ` · ${esc(r.aviso)}` : ''}`);

@@ -459,6 +459,67 @@ class HoyCambiosTests(Base):
         self.assertEqual((enviado[0]["name"], enviado[0]["language"]), ("Reunión B", ""))
         self.sin_errores(permitidas=("/api/rec/start",))
 
+    # revisión 3: dos carreras más de la tarjeta (sondas del revisor, con aserciones)
+    def _abrir_a(self):
+        self.escribir([{"asunto": "Reunión A", "en": -20, "duracion": 60}])
+        self.releer("Reunión A")
+        datos_a = self.srv.api("/api/hoy")
+        pg = self.pagina()
+        pg.wait_for_selector("#hoyAhora .ha-titulo:has-text('Reunión A')", timeout=30000)
+        return pg, datos_a
+
+    def _start_capturado(self, pg):
+        enviado = []
+
+        def start(route):
+            enviado.append(json.loads(route.request.post_data))
+            route.fulfill(status=400, content_type="application/json", body=json.dumps({"error": "Prueba: no"}))
+        pg.route("**/api/rec/start", start)
+        return enviado
+
+    def test_el_servidor_ya_en_otra_antes_del_sondeo_se_graba_lo_que_se_ve(self):
+        """El servidor ya está en B y cambias el idioma antes de que el sondeo de 30 s lo traiga: la respuesta (de B)
+        se pinta con lo cambiado y «Grabar» manda eso (con 4b7acc3 era así; una guarda de b70e7de la descartaba y
+        dejaba el chip en «pt» con A y sin «pt»)."""
+        pg, datos_a = self._abrir_a()
+        pg.route("**/api/hoy*", lambda r: r.fulfill(status=200, content_type="application/json",
+                                                    body=json.dumps(datos_a)) if "/api/hoy/" not in r.request.url
+                 else r.continue_())  # el sondeo aún no ha llegado: la página sigue con A
+        self.escribir([{"asunto": "Reunión B", "en": -1, "duracion": 60}])
+        self.releer("Reunión B")
+        with pg.expect_response("**/api/grabar/plan") as resp:
+            pg.select_option("[data-hoy='idioma']", "pt")
+        self.assertEqual(resp.value.json()["nombre"]["valor"], "Reunión B")
+        pg.wait_for_selector("#hoyAhora .ha-titulo:has-text('Reunión B')", timeout=5000)
+        self.assertEqual(pg.input_value("[data-hoy='idioma']"), "pt")
+        pg.unroute("**/api/hoy*")
+        pg.evaluate("hoyCargar()")  # el sondeo trae B (la página ya la enseñaba): no se pierde lo cambiado
+        pg.wait_for_timeout(800)
+        self.assertEqual((pg.inner_text("#hoyAhora .ha-titulo"), pg.input_value("[data-hoy='idioma']")),
+                         ("Reunión B", "pt"))
+        enviado = self._start_capturado(pg)
+        pg.click("[data-act='hoy-grabar']")
+        pg.wait_for_function("document.querySelector('#toasts').textContent.includes('Prueba: no')", timeout=5000)
+        self.assertEqual((enviado[0]["name"], enviado[0]["language"]), ("Reunión B", "pt"))
+
+    def test_grabar_con_el_plan_en_camino_y_cambia_la_reunion_no_graba_la_otra(self):
+        pg, _ = self._abrir_a()
+        retenidas = []
+        pg.route("**/api/grabar/plan", lambda route: retenidas.append((route.fetch(), route)))
+        pg.select_option("[data-hoy='idioma']", "pt")
+        fin = time.time() + 10
+        while not retenidas and time.time() < fin:
+            pg.wait_for_timeout(100)
+        enviado = self._start_capturado(pg)
+        pg.click("[data-act='hoy-grabar']")  # espera a HOY.pendiente
+        self.escribir([{"asunto": "Reunión B", "en": -1, "duracion": 60}])
+        self.releer("Reunión B")
+        pg.evaluate("hoyCargar()")
+        pg.wait_for_selector("#hoyAhora .ha-titulo:has-text('Reunión B')", timeout=10000)
+        retenidas[0][1].fulfill(response=retenidas[0][0])
+        pg.wait_for_function("document.querySelector('#toasts').textContent.includes('ha cambiado')", timeout=5000)
+        self.assertEqual(enviado, [])  # ni la que se veía al pulsar (A) ni la otra (B)
+
     def test_actualizar_la_agenda_la_repinta(self):
         self.escribir([{"asunto": "Reunión A", "en": -20, "duracion": 60},
                        {"asunto": "Primera cita", "dia": 1, "hora": "10:00"}])
