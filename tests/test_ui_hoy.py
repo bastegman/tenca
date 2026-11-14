@@ -422,6 +422,43 @@ class HoyCambiosTests(Base):
                          (pg.inner_text("#hoyAhora .ha-titulo"), ""))
         self.sin_errores(permitidas=("/api/rec/start",))
 
+    def test_un_plan_que_llega_tarde_no_vuelve_a_la_reunion_anterior(self):
+        """Revisión 2 (P1): cambias un chip en A, el sondeo trae B y después llega la respuesta del plan de A: no puede
+        volver a pintar A (ni «Grabar» grabarla) con el servidor ya en B."""
+        self.escribir([{"asunto": "Reunión A", "en": -20, "duracion": 60}])
+        self.releer("Reunión A")
+        pg = self.pagina()
+        pg.wait_for_selector("#hoyAhora .ha-titulo:has-text('Reunión A')", timeout=30000)
+        retenida = {}
+
+        def plan(route):  # el servidor calcula el plan de A ya, pero la respuesta tarda en llegar
+            retenida["r"], retenida["route"] = route.fetch(), route
+        pg.route("**/api/grabar/plan", plan)
+        pg.select_option("[data-hoy='idioma']", "pt")
+        fin = time.time() + 10
+        while "r" not in retenida and time.time() < fin:
+            pg.wait_for_timeout(100)
+        self.assertEqual(retenida["r"].json()["nombre"]["valor"], "Reunión A")
+        self.escribir([{"asunto": "Reunión B", "en": -10, "duracion": 60}])
+        self.releer("Reunión B")
+        pg.evaluate("hoyCargar()")
+        pg.wait_for_selector("#hoyAhora .ha-titulo:has-text('Reunión B')", timeout=10000)
+        retenida["route"].fulfill(response=retenida["r"])
+        pg.wait_for_timeout(800)
+        self.assertEqual(pg.inner_text("#hoyAhora .ha-titulo"), "Reunión B")
+        self.assertEqual(pg.input_value("[data-hoy='idioma']"), "")
+        pg.unroute("**/api/grabar/plan")
+        enviado = []
+
+        def start(route):
+            enviado.append(json.loads(route.request.post_data))
+            route.fulfill(status=400, content_type="application/json", body=json.dumps({"error": "Prueba: no"}))
+        pg.route("**/api/rec/start", start)
+        pg.click("[data-act='hoy-grabar']")
+        pg.wait_for_function("document.querySelector('#toasts').textContent.includes('Prueba: no')", timeout=5000)
+        self.assertEqual((enviado[0]["name"], enviado[0]["language"]), ("Reunión B", ""))
+        self.sin_errores(permitidas=("/api/rec/start",))
+
     def test_actualizar_la_agenda_la_repinta(self):
         self.escribir([{"asunto": "Reunión A", "en": -20, "duracion": 60},
                        {"asunto": "Primera cita", "dia": 1, "hora": "10:00"}])

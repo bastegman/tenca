@@ -641,6 +641,10 @@ class SiguienteReglaTests(unittest.TestCase):
         self.assertFalse(f(self.A, "Revisión", "2026-11-09T09:30"))
         self.assertFalse(f([{"asunto": "", "inicio": None}, "rara"], "Comité Alfa"))
         self.assertTrue(f([{"asunto": "Comité Alfa", "inicio": None}], "Comité Alfa", "2026-11-09T10:30"))
+        # sin hora en ninguno de los dos, el mismo nombre: «Daily» no tapa «Daily de producto» (revisión 2, P2)
+        self.assertFalse(f([{"asunto": "Daily", "inicio": None}], "Daily de producto"))
+        self.assertTrue(f([{"asunto": "Daily", "inicio": None}], "daily"))
+        self.assertTrue(f([{"asunto": "Daily", "inicio": None}], "Daily de producto", "2026-11-09T10:30"))
 
     def test_sin_la_grabada_en_teams_en_la_lectura_y_en_la_agenda(self):
         citas = [publica("Comité Alfa", NOW - timedelta(minutes=60)),  # 9:30-10:30: la grabada
@@ -716,7 +720,8 @@ class SiguienteServidorTests(TempTree):
         self.assertEqual(a.grabada[0]["asunto"], "Comité de seguimiento")
         self.lect = {}  # colgó: ya no hay ventana de Teams
         g = a.rec_status({})["siguiente"]
-        self.assertEqual((g["titulo"], g["teams"], g["tema"]), ("Revisión de presupuesto", False, ""))
+        self.assertEqual((g["titulo"], g["teams"]), ("Revisión de presupuesto", False))
+        self.assertNotIn("tema", g)  # el proyecto lo dice el plan al grabar, no una sugerencia que puede no ser él
         self.assertEqual(g["inicio"], self.citas[1]["start"])
         self.assertEqual(a.hoy({})["siguiente"], g)  # también en Hoy
         self.assertIn("   siguiente reunión: propuesta (empezó hace 3 min)", self.logs)
@@ -744,6 +749,28 @@ class SiguienteServidorTests(TempTree):
         self.grabar_y_parar(a)
         self.lect = {}
         self.assertIsNone(a.rec_status({})["siguiente"])
+
+    def test_lo_grabado_con_otro_nombre_no_tapa_la_cita_en_curso(self):
+        """Grabar «Llamada imprevista» (escrito a mano) con «Revisión de presupuesto» en curso en el calendario: al
+        parar, se propone la cita (no era la grabada). Con el nombre de la cita, la cita y su hora."""
+        a = self.app(outlook_on=True)
+        self.lect = {}  # sin Teams: la reunión de ahora es la cita en curso
+        a.siguiente = None
+        self.assertEqual(a._que_se_graba("Llamada imprevista"), [{"asunto": "Llamada imprevista", "inicio": None}])
+        quien = a._reunion_ahora()[1]
+        self.assertEqual(a._que_se_graba(quien["titulo"]), [{"asunto": quien["titulo"], "inicio": quien["inicio"]}])
+        self.assertEqual(a._que_se_graba(""), [{"asunto": quien["titulo"], "inicio": quien["inicio"]}])
+        a.grabada = a._que_se_graba("Llamada imprevista")
+        a.rec, a._movs = types.SimpleNamespace(alive=lambda: True, path=os.path.join(self.tmp, "x.wav"),
+                                               stop=lambda: 60.0, timeline=lambda: None), lambda: {}
+        a.rec_stop({})
+        self.assertEqual(a.rec_status({})["siguiente"]["titulo"], quien["titulo"])
+
+    def test_con_avisarme_si_estoy_en_una_llamada_apagado_nada(self):
+        a = self.app(outlook_on=True, meeting_detect=False)
+        self.grabar_y_parar(a)
+        self.lect = {"teams": {"title": "Otra en Teams"}, "sugerencia": {"name": "Otra en Teams", "source": "teams"}}
+        self.assertIsNone(a._siguiente_pub(fresco=True))
 
     def test_teams_sin_outlook(self):
         a = self.app(outlook_on=False)

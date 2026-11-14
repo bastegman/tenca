@@ -116,7 +116,8 @@ function hoyCargar(refrescar, otraVez, abrir) {
     HOY.datos = d; HOY.at = Date.now(); HOY.error = null;
     // otra reunión: lo que cambiaste era para la anterior, y la tarjeta se repinta aunque tengas el foco en ella (si
     // no, enseñaría la anterior y «Grabar» grabaría la nueva)
-    if (antes !== d.plan?.nombre?.valor) { HOY.pedido = null; HOY.plan = null; HOY.forzarAhora = true; }
+    // (HOY.seq sube: un plan de la anterior que llegue tarde ya no se pinta; revisión 2, P1)
+    if (antes !== d.plan?.nombre?.valor) { HOY.pedido = null; HOY.plan = null; HOY.forzarAhora = true; HOY.seq++; }
     if (!HOY.pedido) HOY.plan = null;
     // la agenda se está leyendo, o la has pedido otra vez y aún no ha cambiado: se vuelve a preguntar enseguida
     clearTimeout(HOY.leerTimer);
@@ -213,7 +214,8 @@ function hoyCambio(el) {
   HOY.pedido = pedido;
   const seq = ++HOY.seq;
   HOY.pendiente = api('/api/grabar/plan', pedido).then(plan => {
-    if (seq !== HOY.seq) return;
+    // solo la respuesta a lo último que cambiaste, y de la reunión que se ve: si entretanto cambió, se descarta
+    if (seq !== HOY.seq || HOY.pedido !== pedido || plan.nombre?.valor !== HOY.datos?.plan?.nombre?.valor) return;
     HOY.plan = plan;
     const ah = $('#hoyAhora');
     if (ah) { ah.innerHTML = hoyAhoraHtml(); $(`[data-hoy="${el.dataset.hoy}"]`, ah)?.focus(); }
@@ -245,7 +247,7 @@ function hoySiguienteTxt(g) {
 }
 function hoySiguienteHtml(g) {
   return `<div class="hoy-siguiente" role="status" data-siguiente="${esc(g.titulo)}"><span class="hs-ico">${I.calendar}</span>`
-    + `<span class="hs-txt">${esc(hoySiguienteTxt(g))}${g.tema ? `<span class="hs-tema">${esc(g.tema)}</span>` : ''}</span>`
+    + `<span class="hs-txt">${esc(hoySiguienteTxt(g))}</span>`
     + `<button class="btn sm primary" type="button" data-sig-act="grabar" title="Empieza a grabar esta reunión con su proyecto y su idioma"><i class="recdot"></i>Grabar</button>`
     + '<button class="btn sm ghost" type="button" data-sig-act="no" title="No volver a proponerla hasta la próxima grabación">Ahora no</button></div>';
 }
@@ -254,7 +256,7 @@ function renderSiguiente() {
   if (!dada || dada.titulo !== hoySigNo) hoySigNo = null;  // «Ahora no» vale hasta que el servidor deje de darla
   const g = dada && dada.titulo !== hoySigNo ? dada : null;
   const enHoy = S.route?.kind === 'home' && $('#hoySiguiente');
-  const sig = g ? JSON.stringify([g.titulo, g.inicio, g.fin, g.teams, g.tema]) : '';
+  const sig = g ? JSON.stringify([g.titulo, g.inicio, g.fin, g.teams]) : '';
   for (const [el, toca] of [[$('#hoySiguiente'), enHoy], [$('#sigToast'), !enHoy]]) {
     if (!el) continue;
     const html = toca && g ? hoySiguienteHtml(g) : '';

@@ -6739,16 +6739,20 @@ class App:
 
     # --- «Ya ha empezado «X» · Grabar · Ahora no» al parar una grabación (msg 1479)
     SIGUIENTE_S = 600  # tras parar, 10 min para ver empezar otra reunión; la que se propone, mientras dure
-    SIGUIENTE_CACHE_S = 5  # /api/rec/status llega cada 1,5 s: la reunión de ahora no se mira más de una vez cada 5 s
+    # /api/rec/status llega cada 1,5 s (y cada 2 s de cada aviso flotante): la reunión de ahora, que lee Teams y las
+    # listas de vocabulario, no se mira más de una vez cada 15 s (al parar y con «Ahora no», al momento)
+    SIGUIENTE_CACHE_S = 15
 
     def _que_se_graba(self, nombre):
-        """Lo que se graba, para no proponerlo al parar: la reunión de ahora (su asunto y su hora de inicio) y el nombre
-        de la grabación si es otro (escrito a mano: sin hora, vale el nombre)."""
+        """Lo que se graba, para no proponerlo al parar ([{asunto, inicio}], ver calendario.excluida): si la grabación
+        se llama como la reunión de ahora (o no tiene nombre), esa reunión con su hora de inicio (así, otra con el mismo
+        asunto a otra hora sí se propone); si se llama de otra forma (escrito a mano), solo ese nombre, sin hora: la
+        cita en curso no era la grabada y se puede proponer."""
         info = self._reunion_ahora()[1]
+        suyos = [x for x in dict.fromkeys((info or {}).get(k) for k in ("asunto", "titulo")) if x]
         out = []
-        if info:
-            for a in dict.fromkeys(x for x in (info.get("asunto"), info.get("titulo")) if x):
-                out.append({"asunto": a, "inicio": info.get("inicio")})
+        if suyos and (not nombre or calendario.excluida([{"asunto": a} for a in suyos], nombre)):
+            out = [{"asunto": a, "inicio": info.get("inicio")} for a in suyos]
         if nombre and not calendario.excluida(out, nombre):
             out.append({"asunto": nombre, "inicio": None})
         return out
@@ -6764,6 +6768,9 @@ class App:
             return None
         t = time.time() if now is None else now.timestamp()
         if t > s["hasta"]:
+            return None
+        st = st or self.settings.get()
+        if st.get("meeting_detect", True) is False:  # «Avisarme si estoy en una llamada» apagado: ni Teams ni esto
             return None
         sug, info = self._reunion_ahora(st, recordar=False, excluir=s["excluir"])
         if not info or not info.get("en_curso") or not sug.get("name"):
@@ -6793,8 +6800,10 @@ class App:
         pub = None
         if r:
             sug, info = r
+            # sin el proyecto: el que daría la sugerencia no es siempre el del plan (lo preparado, la última vez o el
+            # fijo de Ajustes mandan), y lo que se ve tiene que ser lo que se graba (revisión 2, P1)
             pub = {"titulo": info["titulo"], "inicio": info.get("inicio"), "fin": info.get("fin"),
-                   "teams": bool(info.get("teams")), "tema": sug.get("vocab_label") or ""}
+                   "teams": bool(info.get("teams"))}
             s = self.siguiente
             if s and not s.get("dicha"):
                 s["dicha"] = True
@@ -6865,7 +6874,7 @@ class App:
         if not self.vigia.abrir_aviso(PORT, APP_DIR, creationflags=engines.NO_WINDOW,
                                       ocultar=st.get("ocultar_al_compartir", True) is not False,
                                       siguiente=pub["titulo"], titulo=f"Ya ha empezado «{pub['titulo']}»",
-                                      sub=horas + "Pulsa Grabar para tomar notas", tema=pub.get("tema") or ""):
+                                      sub=horas + "Pulsa Grabar para tomar notas"):
             return False
         if app:
             self.vigia.avisado = app

@@ -35,10 +35,13 @@ carguen las siguientes (un mes al menos)». Rama `hoy` (rediseño B7).
   siguiente reunión si ya ha empezado»). Al parar una grabación (a mano o con «paro en 30 s»), si hay otra reunión en
   curso que no es la grabada, se propone encima de la tarjeta de Hoy, en las demás páginas junto a los avisos y en el
   aviso flotante (si está activado). Es la misma regla de «la reunión de ahora» (la ventana de Teams o la cita de
-  Outlook) sin la que se acaba de grabar (mismo asunto y misma hora de inicio; sin hora, el asunto), y solo si ya ha
-  empezado. «Grabar» la graba con el plan de la tarjeta de Hoy, con lo preparado si lo hay, y solo si sigue siendo la
-  que se ve. Nunca graba sola. Se va con «Ahora no», al empezar otra grabación, cuando la cita acaba o si en 10 min no
-  ha empezado ninguna. Sin Outlook ni Teams, no sale nada.
+  Outlook) sin la que se acaba de grabar (mismo asunto y misma hora de inicio; si la grabación se llamaba de otra
+  forma, solo ese nombre), y solo si ya ha empezado. «Grabar» la graba con el plan de la tarjeta de Hoy, con lo
+  preparado si lo hay, y solo si sigue siendo la que se ve. Nunca graba sola. Se va con «Ahora no», al empezar otra
+  grabación, cuando la cita acaba o si en 10 min no ha empezado ninguna. Sin Outlook ni Teams, o con «Avisarme si
+  estoy en una llamada» apagado, no sale nada.
+- Arreglado (revisión): en Hoy, si cambiabas un chip justo cuando cambiaba la reunión de ahora, la respuesta tardía
+  del plan podía volver a pintar la anterior y «Grabar» grabarla.
 - «Copiar diagnóstico»: las líneas del fin de la llamada («paro en 30 s», «No terminar») y las de la siguiente reunión
   salen con su texto (sin asuntos), no como `<texto>`.
 - En la página de una reunión sin carpeta, «Sin clasificar» lleva a «Reuniones» (donde están las sueltas) y no a Hoy,

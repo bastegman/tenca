@@ -112,7 +112,6 @@
 .hoy-siguiente-box .hoy-siguiente { margin-top: 14px; }
 .hoy-siguiente .hs-ico svg { width: 16px; height: 16px; vertical-align: -3px; }
 .hoy-siguiente .hs-txt { flex: 1; min-width: 160px; font-weight: 600; overflow-wrap: anywhere; }
-.hoy-siguiente .hs-tema { display: block; font-weight: 400; color: var(--muted); font-size: 12.5px; }
 .hoy-siguiente .recdot { animation: none; width: 7px; height: 7px; }
 .toast.sig-toast { padding: 0; background: none; box-shadow: var(--shadow); cursor: default; }
 .toast.sig-toast .hoy-siguiente { border: 1px solid var(--accent-line); }

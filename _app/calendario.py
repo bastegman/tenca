@@ -1379,13 +1379,17 @@ def _mismo_asunto(a, b):
 def excluida(excluir, asunto, inicio=None):
     """True si la reunión (asunto, inicio ISO) es una de `excluir` ([{asunto, inicio}]: la que se acaba de grabar):
     el mismo asunto (como lo compara reunion_de_ahora con el título de Teams, ya limpio como el nombre del archivo) y,
-    si las dos tienen hora de inicio, la misma. Sin hora (solo Teams), basta el asunto."""
+    si las dos tienen hora de inicio, la misma. Con hora en un solo lado (el título de Teams frente a una cita), basta
+    el asunto; sin hora en ninguno, tiene que ser el mismo nombre («Daily» no tapa «Daily de producto»)."""
     for x in excluir or ():
         a = x.get("asunto") if isinstance(x, dict) else None
-        if not (a and asunto and _mismo_asunto(nombre_archivo(a), nombre_archivo(asunto))):
+        if not (a and asunto):
             continue
-        i = str(x.get("inicio") or "")[:16]
-        if not i or not inicio or i == str(inicio)[:16]:
+        a, b, i = nombre_archivo(a), nombre_archivo(asunto), str(x.get("inicio") or "")[:16]
+        if not i and not inicio:  # dos títulos (Teams o el nombre de la grabación): el mismo, no uno dentro del otro
+            if fold(a).strip() == fold(b).strip():
+                return True
+        elif _mismo_asunto(a, b) and (not i or not inicio or i == str(inicio)[:16]):
             return True
     return False
 
