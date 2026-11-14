@@ -2,6 +2,8 @@
 # los workflows, que van fijadas por SHA con la versión en un comentario, y de requirements*.txt. Las alertas y los
 # arreglos de seguridad están activados en Settings -> Code security. Los pull requests de Dependabot no reciben los
 # secretos de Actions: el paso de agnosticismo con la lista privada se salta en ellos y lo avisa (tests.yml).
+# Los de pip salen en rojo hasta que se cambie a mano la misma versión en _app/instalar.ps1: test_package exige
+# que requirements.txt y la lista del instalador sean iguales.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
