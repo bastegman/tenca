@@ -62,6 +62,8 @@ class ZipTests(unittest.TestCase):
         malos = pr.problemas_zip(LIMPIO + ["Tenca/_app/server.py"], VERSIONADOS)
         self.assertEqual(len(malos), 1, malos)
         self.assertIn("repetido", malos[0])
+        for otro in ("Tenca\\_app\\server.py", "Tenca/_APP/SERVER.PY"):
+            self.assertTrue(any("repetido" in m for m in pr.problemas_zip(LIMPIO + [otro], VERSIONADOS)), otro)
         malos = pr.problemas_zip(LIMPIO + ["Tenca/Proyecto Alfa/"], VERSIONADOS)
         self.assertEqual(len(malos), 1, malos)
         self.assertIn("carpeta sin ficheros", malos[0])
@@ -263,6 +265,14 @@ class ReleaseAnteriorTests(unittest.TestCase):
         self.assertEqual(pr.no_antecesores(self.d, self.tags, cwd=self.tmp), [self.t1])
         self.assertEqual(pr.no_antecesores(self.c[2], self.tags + [("v2026.11.09-abcdef0", "f" * 40)], cwd=self.tmp),
                          ["v2026.11.09-abcdef0"])  # un commit que no está en el clon no cuenta como antecesor
+
+    def test_comprobar_publicable(self):
+        pr.comprobar_publicable(self.c[2], "v", self.tags, cwd=self.tmp)  # lo normal: un main nuevo
+        pr.comprobar_publicable(self.c[0], "v", [], cwd=self.tmp)  # el primer Release
+        with self.assertRaisesRegex(pr.Fallo, "posterior"):
+            pr.comprobar_publicable(self.c[0], "v", self.tags[1:], cwd=self.tmp)
+        with self.assertRaisesRegex(pr.Fallo, "ya está publicado como " + self.t1):  # el mismo sha con otro nombre
+            pr.comprobar_publicable(self.c[1], "v", self.tags, cwd=self.tmp)
 
     def test_solo_se_publica_lo_que_esta_en_main(self):
         self.assertEqual(pr.resolver(self.c[1], base="main", cwd=self.tmp)[0], self.c[1])
