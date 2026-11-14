@@ -442,6 +442,9 @@ class FakeRec:
     def alive(self):
         return True
 
+    def motivo(self):
+        return "error en la grabadora (prueba)"
+
 
 class GrabacionArrancadaTests(TempTree):
     """02/11/2026, 10:35: la primera pulsacion de Ctrl+Alt+R arranco la grabadora, algo fallo justo despues y el aviso

@@ -10,6 +10,35 @@ nada de ningún proyecto concreto.
 empresa. Entre paréntesis va el número de cada hallazgo, el mismo que citan los commits; el informe de la auditoría no
 está en este repositorio. «Desarrollo y CI» es para quien mantiene el repositorio: no cambia nada en la app instalada.
 
+### La grabación no se corta sin decirlo, y menos eco del altavoz (14/11/2026)
+
+Puntos 1 y 6 de la revisión del 14/11/2026. Rama `grabadora`.
+
+- **La grabadora ya no se para con el primer fallo al escribir.** Lo que no se puede escribir (el antivirus o OneDrive
+  con el fichero cogido, un disco de red que va y viene) se guarda en memoria y se reintenta hasta 20 s; la franja del
+  directo dice «No se puede escribir en el disco: N s de audio esperando en memoria». Si no se arregla, se para con el
+  motivo («el disco está lleno») y la cabecera del WAV cerrada.
+- **Disco.** No se empieza a grabar con menos de 500 MB libres (lo dice y por qué: una hora ocupa unos 690 MB); con
+  menos de ~2 h, se avisa al empezar. Mientras se graba se mira cada 30 s: la franja del directo lo dice por debajo de
+  2 h y, a los ~15 min, aviso de Windows y uno en la app que no se va solo.
+- **Si la grabadora termina sin que nadie la pare** (se muere, la matan o falla), ya no sale «■ Grabación guardada»:
+  franja roja y aviso que no caduca («Grabación interrumpida a las 10:37: el disco está lleno»), aviso de Windows y el
+  sonido de error. La reunión queda marcada «Grabación interrumpida a las hh:mm · motivo». A los ~2 s sigue grabando
+  en «Nombre (continuación)», en la misma carpeta y con el mismo proyecto, idioma, participantes y directo, como mucho
+  3 veces. La reserva del directo se suelta y la línea de tiempo del micro («Tú») se guarda cada 30 s, no solo al
+  parar.
+- **Tenca no responde.** Los sondeos tienen tope de 5 s y, tras 3 seguidos sin respuesta, sale una franja fija
+  «Tenca no responde: puede que no se esté grabando · Reabrir» que se quita sola al volver. Los errores de red dicen
+  «Tenca no responde» en vez de «Failed to fetch».
+- **Al arrancar**, las grabaciones propias que quedaron abiertas (un corte de luz, un cuelgue, Windows Update) y ya no
+  crecen se cierran y se dice («Se recuperó la grabación X, cortada a las hh:mm»). Solo las que Tenca apuntó al empezar
+  a grabar: nunca un WAV de otro programa que siga grabando.
+- **Voces dobles con altavoces.** El nivelador del micro tomaba el eco de la reunión por tu voz entre dos frases tuyas
+  y lo subía hasta +18 dB: cada voz de los demás quedaba dos veces casi igual de fuerte. Ahora solo aprende de tu voz
+  (con la reunión callada, o claramente por encima de lo que el micro recoge cuando suena), baja despacio mientras
+  suena la reunión, ignora los golpes cortos (una tos) y empieza con una ganancia prudente. Medido con señal
+  sintética: el eco pasa de 0/−2,5 dB a −10/−15 dB frente a la voz directa, y tu voz se queda donde estaba.
+
 ### Hoy, con un mes de agenda de Outlook (09/11/2026)
 
 Bernardo, msg 1380: el calendario «conecta bien al parecer, pero no veo las siguientes reuniones»; msg 1390: «que se

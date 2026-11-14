@@ -23,6 +23,8 @@ name: ui-smoke
 # lista (también conectada y de solo lectura) y la regla aplicada al transcribir con el Groq falso, subrayada y deshecha.
 # test_e2e_avisos: los avisos de la franja del directo (B6, msg 1378): el micro que se calla, «Lo último suena a…» con
 # «Cambiar» y «No», y «La llamada ha terminado: paro en N s» con «Seguir grabando» y la parada sola (Teams falso).
+# test_ui_grabadora: la grabadora que se corta sola (franja roja, aviso que no caduca, «(continuación)» y la reunión
+# marcada) y «Tenca no responde» con el servidor caído o colgado (review del 14/11/2026, punto 1).
 on:
   push:
     paths: ["_app/**", "tests/**", "requirements.txt", ".github/workflows/ui-smoke.yml"]
@@ -57,9 +59,9 @@ jobs:
           NOTAS_ARTEFACTOS: ${{ github.workspace }}/artefactos
         run: |
           mkdir -p "$NOTAS_ARTEFACTOS"
-          python -m unittest -v test_ui_smoke test_ui_voces test_e2e_carpetas test_subir_audio test_e2e_idioma test_ui_aprender test_sin_groq test_fix_groq test_fix_lento test_ui_movil test_e2e_avisos test_ui_hoy 2>&1 | tee salida.txt
+          python -m unittest -v test_ui_smoke test_ui_voces test_e2e_carpetas test_subir_audio test_e2e_idioma test_ui_aprender test_sin_groq test_fix_groq test_fix_lento test_ui_movil test_e2e_avisos test_ui_hoy test_ui_grabadora 2>&1 | tee salida.txt
           test ${PIPESTATUS[0]} -eq 0
-          if grep -q "skipped=" salida.txt; then echo "::error::test_ui_smoke, test_ui_voces, test_e2e_carpetas, test_subir_audio, test_e2e_idioma, test_ui_aprender, test_sin_groq, test_fix_groq, test_fix_lento, test_ui_movil, test_e2e_avisos o test_ui_hoy se ha saltado"; exit 1; fi
+          if grep -q "skipped=" salida.txt; then echo "::error::test_ui_smoke, test_ui_voces, test_e2e_carpetas, test_subir_audio, test_e2e_idioma, test_ui_aprender, test_sin_groq, test_fix_groq, test_fix_lento, test_ui_movil, test_e2e_avisos, test_ui_hoy o test_ui_grabadora se ha saltado"; exit 1; fi
           grep -q "^Ran [1-9][0-9]* tests\?" salida.txt
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         if: always()

@@ -768,6 +768,9 @@ class FakeRec:
     def timeline(self):
         return None
 
+    def sin_estado_s(self):
+        return 0.0
+
 
 class ServidorTests(unittest.TestCase):
     def setUp(self):

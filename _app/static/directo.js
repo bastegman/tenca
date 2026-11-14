@@ -552,6 +552,20 @@ function directoAvisos(rec, d, mine) {
     out.push({ id: 'sys', texto: `El ordenador no suena desde hace ${directoMinTxt(c.sys)}`,
       nota: 'Si los demás están hablando, no se les está grabando: revisa la salida de sonido.' });
   }
+  // el disco (recorder.py lo mira cada 30 s; 691 MB por hora) y la escritura que falla y espera en memoria
+  const dm = mine && rec ? rec.disco_min : null;
+  if (dm != null && dm <= 120) {
+    out.push({ id: 'disco', texto: dm <= 15 ? `Quedan unos ${dm} min de disco para grabar` : `Caben unos ${dm} min más de grabación en el disco`,
+      nota: dm <= 15 ? 'Libera espacio ya o la grabación se cortará.' : 'Si la reunión va a durar más, libera espacio.' });
+  }
+  if (mine && rec && rec.sin_estado_s >= 5) {
+    out.push({ id: 'atascada', texto: `La grabadora no contesta desde hace ${Math.round(rec.sin_estado_s)} s`,
+      nota: 'Puede que no se esté grabando. ¿Graba en un disco de red o en OneDrive? Si sigue así, para y vuelve a grabar.' });
+  }
+  if (mine && rec && rec.pendiente_s >= 2) {
+    out.push({ id: 'escritura', texto: `No se puede escribir en el disco: ${Math.round(rec.pendiente_s)} s de audio esperando en memoria`,
+      nota: 'Se reintenta solo. ¿Un disco de red, OneDrive o el antivirus?' });
+  }
   const p = d && d.propuesta;
   if (p && p.idioma) {
     const mezcla = p.cambiar_a && p.cambiar_a !== p.idioma && p.cambiar_a.includes('-');
@@ -593,6 +607,11 @@ function renderDirectoAvisos() {
     S.directo.finVisto = true;
     toast(`La llamada ha terminado: paro en ${Math.round(rec.fin_llamada.quedan_s)} s · <u>No terminar</u>`, '', directoSeguir);
   } else if (!fin) S.directo.finVisto = false;
+  const poco = rec.recording && rec.disco_min != null && rec.disco_min <= 15;
+  if (poco && !S.directo.discoVisto) {  // como el «paro en 30 s»: en cualquier página, una vez
+    S.directo.discoVisto = true;
+    toast(`Quedan unos ${rec.disco_min} min de disco para grabar: libera espacio o la grabación se cortará`, 'err', null, true);
+  } else if (!rec.recording) S.directo.discoVisto = false;
   const el = $('[data-lh-avisos]');
   const a = curAudio();
   if (!el || !a) return;

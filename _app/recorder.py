@@ -18,8 +18,11 @@ el servidor se cierra) corrige la cabecera y queda un WAV normal.
 Por stdout sale una linea JSON de estado cada 0,25 s; por stdin se le manda "stop".
 """
 import argparse
+import errno
 import json
 import math
+import os
+import shutil
 import struct
 import sys
 import threading
@@ -85,6 +88,106 @@ class Leveler:
         ramp = np.linspace(self.gain, target, len(x), dtype=np.float32)[:, None]
         self.gain = target
         return x * ramp
+
+
+# El micro con altavoces: entre dos frases suyas el micro solo recoge el eco de la reunion (20-25 dB por debajo). Con
+# el nivelador de arriba la estimacion bajaba en ~1,7 s, tomaba el eco por su voz y lo subia hasta +18 dB: cada voz de
+# los demas quedaba dos veces casi igual de fuerte (medido el 14/11/2026: eco a 0/-2,5 dB de la voz directa, la queja
+# de «escucho las voces dos veces»). Este solo aprende de lo que es su voz: con la reunion callada, o con la reunion
+# sonando si el micro supera en ECO_MARGEN_DB lo que suele recoger entonces (el eco). Sube hacia la mediana del ultimo
+# segundo de su voz (una tos no la mueve). Baja despacio (MIC_BAJA_S) mientras suena la reunion, donde confundir el eco
+# con su voz es lo que hay que evitar, y algo mas deprisa (MIC_BAJA_SOLO_S) cuando habla solo: si empezo hablando
+# fuerte y luego normal, su voz no se queda un minuto baja. Hasta oirle, una ganancia prudente.
+# No es cancelacion de eco: no toca el audio, solo decide de que bloques aprende la ganancia.
+MIC_PRUDENTE_DB = 6.0   # ganancia hasta oir su voz (antes, hasta +18 dB sobre el eco de lo primero que sonase)
+MIC_BAJA_S = 30.0       # constante de tiempo al bajar la estimacion con la reunion sonando (antes ~1,7 s)
+MIC_BAJA_SOLO_S = 1.5   # ...y con la reunion callada (solo puede ser el: como antes, ~1,7 s)
+MIC_SUBE_S = 0.3
+MIC_VENTANA_S = 1.0     # sube hacia la mediana de su voz en este ultimo segundo...
+MIC_VOZ_MIN_S = 0.4     # ...si en el hay al menos esto de voz
+REF_CALLA_DB = -50.0    # la reunion (la salida, en crudo) calla por debajo de esto...
+REF_COLA_S = 0.3        # ...y desde hace esto (la cola del eco en la sala)
+ECO_MARGEN_DB = 10.0
+ECO_VENTANA_S = 10.0    # lo que el micro suele recoger con la reunion sonando: mediana de estos ultimos segundos
+
+
+def block_db(x):
+    import numpy as np
+    if x is None or not len(x):
+        return None
+    return 20 * math.log10(float(np.sqrt(np.mean(np.square(x, dtype=np.float64)))) + 1e-12)
+
+
+class MicLeveler(Leveler):
+    """Leveler del micro que aprende solo de su voz (ver arriba). ref: la salida en crudo del mismo bloque."""
+
+    def __init__(self, lo, hi):
+        super().__init__(lo, hi)
+        self.gain = 10 ** (min(max(MIC_PRUDENTE_DB, lo), hi) / 20)
+        self.t, self.ref_at, self.ref_seen, self.solo = 0.0, -1e9, False, False
+        self.recent = deque()   # (t, duracion, dB) de los bloques de su voz del ultimo MIC_VENTANA_S
+        self.eco = deque()      # (t, dB) del micro con la reunion sonando (ECO_VENTANA_S)
+
+    def _mine(self, db, ref_db):
+        """¿Este bloque del micro es su voz?"""
+        if ref_db is not None:
+            self.ref_seen = True
+            if ref_db > REF_CALLA_DB:
+                self.ref_at = self.t
+        sounding = self.ref_seen and self.t - self.ref_at <= REF_COLA_S
+        if sounding:
+            self.eco.append((self.t, max(db, -100.0)))
+        while self.eco and self.eco[0][0] < self.t - ECO_VENTANA_S:
+            self.eco.popleft()
+        if db <= GATE_DB or (self.level is not None and db <= self.level - 15):
+            return False
+        self.solo = not sounding
+        if not sounding:
+            return True
+        if len(self.eco) < 10:  # aun no se sabe cuanto eco hay: no se aprende de esto
+            return False
+        import numpy as np
+        return db > float(np.median([e[1] for e in self.eco])) + ECO_MARGEN_DB
+
+    def __call__(self, x, update=True, ref=None):
+        import numpy as np
+        if not len(x):
+            return x
+        dur = len(x) / SR
+        self.t += dur
+        db = block_db(x)
+        if update and self._mine(db, block_db(ref)):
+            self.recent.append((self.t, dur, db))
+        while self.recent and self.recent[0][0] < self.t - MIC_VENTANA_S:
+            self.recent.popleft()
+        if update and self.recent and self.recent[-1][0] == self.t and sum(r[1] for r in self.recent) >= MIC_VOZ_MIN_S:
+            cand = float(np.median([r[2] for r in self.recent]))
+            if self.level is None:
+                self.level = cand
+            else:
+                tau = MIC_SUBE_S if cand > self.level else MIC_BAJA_SOLO_S if self.solo else MIC_BAJA_S
+                self.level += (cand - self.level) * (1 - math.exp(-dur / tau))
+        target = self.gain
+        if self.level is not None:
+            target = 10 ** (min(max(TARGET_DB - self.level, self.lo), self.hi) / 20)
+        ramp = np.linspace(self.gain, target, len(x), dtype=np.float32)[:, None]
+        self.gain = target
+        return x * ramp
+
+
+def mezclar(parts, levelers, mic_muted=False):
+    """La mezcla de un bloque: cada fuente con su nivelador (el del micro mira la salida en crudo) y el limitador."""
+    import numpy as np
+    n = len(next(iter(parts.values())))
+    mix = np.zeros((n, 2), np.float32)
+    for k, part in parts.items():
+        if k == "mic" and mic_muted:
+            continue
+        lev = levelers[k]
+        mix += lev(part, ref=parts.get("sys")) if isinstance(lev, MicLeveler) else lev(part)
+    soft_limit(mix)
+    np.clip(mix, -1.0, 1.0, out=mix)
+    return mix
 
 
 def soft_limit(x, knee=0.8):
@@ -362,6 +465,81 @@ class AllOutputs:
             s.stopping = v
 
 
+# Escribir no puede cortar la grabacion por un fallo pasajero (el antivirus o OneDrive con el fichero cogido, un disco
+# de red que va y viene, el disco lleno mientras se libera sitio): lo que no se puede escribir se guarda en memoria y
+# se reintenta en cada vuelta, hasta WRITE_RETRY_S seguidos. Solo entonces se da por perdido y se dice el motivo.
+WRITE_RETRY_S = 20.0
+WAV_BYTES_S = SR * 4                 # 48 kHz, estereo, 16 bits: 691 MB por hora
+DISK_CHECK_S = 30.0                  # cada cuanto se mira el espacio libre mientras se graba
+DISK_WARN_MIN = 15                   # aviso: quedan ~15 min de disco
+
+
+class Escritor:
+    """El WAV sin bufer de Python (cada write va al disco, como antes con flush): devuelve cuanto se escribio, asi un
+    fallo a medias no pierde ni duplica bytes. pend: lo que falta por escribir."""
+
+    def __init__(self, f, log=None):
+        self.f, self.log = f, log or (lambda msg: None)
+        self.pend, self.pend_n, self.since, self.error = deque(), 0, None, None
+        self.retried_s = 0.0  # tiempo total con escrituras pendientes (va al log al acabar)
+
+    def write(self, data):
+        if data:
+            self.pend.append(memoryview(data))
+            self.pend_n += len(data)
+        return self.flush()
+
+    def flush(self):
+        """Escribe lo pendiente; True si no queda nada. Lanza OSError si lleva mas de WRITE_RETRY_S sin poder."""
+        while self.pend:
+            b = self.pend[0]
+            try:
+                k = self.f.write(b)
+            except OSError as e:
+                now = time.monotonic()
+                if self.since is None:
+                    self.since = now
+                    self.log(f"⚠ no se puede escribir la grabacion ({e.__class__.__name__}: {e}): se guarda en memoria "
+                             f"y se reintenta durante {WRITE_RETRY_S:.0f} s")
+                self.error = e
+                if now - self.since > WRITE_RETRY_S:
+                    raise
+                return False
+            k = len(b) if k is None else k
+            self.pend_n -= k
+            if k >= len(b):
+                self.pend.popleft()
+            else:
+                self.pend[0] = b[k:]
+        if self.since is not None:
+            s = time.monotonic() - self.since
+            self.retried_s += s
+            self.log(f"✓ se vuelve a escribir la grabacion (tras {s:.1f} s con el audio en memoria)")
+            self.since, self.error = None, None
+        return True
+
+
+def disk_free(path):
+    """Bytes libres en el disco de `path` (None si no se puede saber: una ruta de red rara, por ejemplo)."""
+    try:
+        return shutil.disk_usage(os.path.dirname(os.path.abspath(path)) or ".").free
+    except (OSError, ValueError):
+        return None
+
+
+def disk_minutes(free):
+    return None if free is None else int(free / WAV_BYTES_S / 60)
+
+
+def motivo_de(e):
+    """Una frase para el usuario con el porque de un fallo de la grabadora."""
+    if isinstance(e, OSError) and (e.errno == errno.ENOSPC or getattr(e, "winerror", None) in (39, 112)):
+        return "el disco está lleno"
+    if isinstance(e, OSError):
+        return f"no se puede escribir la grabación ({e.__class__.__name__}: {e.strerror or e})"[:200]
+    return f"error en la grabadora ({e.__class__.__name__}: {e})"[:200]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("out", nargs="?")
@@ -383,7 +561,7 @@ def main():
     if a.list:
         emit(list_devices())
         return
-    import numpy as np
+    import numpy  # noqa: F401  (antes que soundcard, como antes)
     import soundcard  # noqa: F401  (al importarse reactiva sus avisos: se vuelven a silenciar)
     warnings.filterwarnings("ignore")
 
@@ -404,7 +582,7 @@ def main():
 
     stop = threading.Event()
     muted = {"mic": False}
-    levelers = {k: Leveler(*GAIN_RANGE[k]) for k in sources}
+    levelers = {k: (MicLeveler if k == "mic" else Leveler)(*GAIN_RANGE[k]) for k in sources}
     # con micro y salida: el eco de los altavoces en el micro (B) y una salida que lleva el micro (A). Solo se MIDEN y
     # se avisan (recorder.log y el medidor), sin tocar el audio: decidir por niveles cuando hablan los dos (o con musica
     # o un video sonando) se comia la voz (refutador del 07/11/2026: el 73 % de la voz del usuario bajaba > 10 dB con
@@ -425,11 +603,27 @@ def main():
 
     threading.Thread(target=read_stdin, daemon=True).start()
 
-    f = None
+    f = w = None
+    disk = {"at": -1e9, "min": None, "warned": False}
+
+    def check_disk(now):
+        if not f or now - disk["at"] < DISK_CHECK_S:
+            return
+        disk["at"] = now
+        disk["min"] = disk_minutes(disk_free(a.out))
+        if disk["min"] is not None and disk["min"] <= DISK_WARN_MIN and not disk["warned"]:
+            disk["warned"] = True
+            elog(f"⚠ queda poco disco: unos {disk['min']} min de grabacion")
+
     if a.out and not a.monitor:
-        f = open(a.out, "wb")
-        f.write(wav_header())
-        f.flush()
+        try:
+            f = open(a.out, "wb", buffering=0)
+            w = Escritor(f, log=elog)
+            w.write(wav_header())
+        except OSError as e:
+            emit({"fatal": motivo_de(e)})
+            elog(f"✖ no se puede crear la grabacion: {e.__class__.__name__}: {e}")
+            raise
     t0, written, last = time.perf_counter(), 0, 0.0
     base = int(round((t0 - EPOCH) * SR))  # posicion de la muestra 0 del fichero: lo capturado en t0
     try:
@@ -449,16 +643,13 @@ def main():
                     except Exception as e:  # un fallo aqui no puede parar la grabacion
                         gates[0] = False
                         elog(f"✖ eco: {e.__class__.__name__}: {e}: se deja de medir")
-                mix = np.zeros((n, 2), np.float32)
-                for k, part in parts.items():
-                    if not (k == "mic" and muted["mic"]):
-                        mix += levelers[k](part)  # micro y reunion a un volumen parecido
-                soft_limit(mix)
-                np.clip(mix, -1.0, 1.0, out=mix)
-                if f:
-                    f.write((mix * 32767).astype("<i2").tobytes())
-                    f.flush()
+                mix = mezclar(parts, levelers, muted["mic"])  # micro y reunion a un volumen parecido
+                if w:
+                    w.write((mix * 32767).astype("<i2").tobytes())
                 written += n
+            elif w and w.pend:
+                w.flush()  # lo que quedo en memoria por un fallo al escribir
+            check_disk(now)
             if now - last >= 0.25 or final:
                 last = now
                 st = {k: s.status() for k, s in sources.items()}
@@ -475,10 +666,23 @@ def main():
                                "Sonido de Windows")
                     st[k]["note"] = f"{st[k]['note']} · {txt}" if st[k].get("note") else txt
                 emit({"t": round(written / SR, 2), "mic_muted": muted["mic"], **st,
-                      "eco": {"micro": echo.status(), "salida": mon.status()} if both else None})
+                      "eco": {"micro": echo.status(), "salida": mon.status()} if both else None,
+                      # minutos de grabacion que caben en el disco (cada DISK_CHECK_S) y segundos de audio que esperan
+                      # en memoria a poder escribirse (un fallo pasajero al escribir)
+                      "disco_min": disk["min"], "pendiente_s": round(w.pend_n / WAV_BYTES_S, 1) if w else 0})
             if final:
+                if w and w.pend:
+                    w.flush()  # ultimo intento: lo que no se pueda escribir ya, se pierde (y se dice en el log)
                 break
             time.sleep(0.05)
+    except BaseException as e:  # el porque, para el servidor (rec_status: «cortada») y para recorder.log
+        if not isinstance(e, (KeyboardInterrupt, SystemExit)):
+            try:
+                emit({"fatal": motivo_de(e)})
+            except (OSError, ValueError):
+                pass
+            elog(f"✖ la grabadora se para: {motivo_de(e)}")
+        raise
     finally:
         for s in sources.values():
             s.stopping = True
@@ -491,14 +695,28 @@ def main():
             elog(f"cortes de audio recolocados en su sitio (s): {cortes}")
         if both:
             elog(f"eco al terminar: micro {echo.status()} · salida {mon.status()}")
+        if w and w.pend_n:
+            elog(f"✖ {w.pend_n / WAV_BYTES_S:.1f} s de audio no se han podido escribir")
+        if w and w.retried_s:
+            elog(f"escrituras reintentadas: {w.retried_s:.1f} s con el audio en memoria")
         if f:
-            size = f.tell()
-            f.seek(4)
-            f.write(struct.pack("<I", size - 8))
-            f.seek(40)
-            f.write(struct.pack("<I", size - 44))
-            f.close()
-        emit({"done": True, "t": round(written / SR, 2)})
+            try:  # cerrar la cabecera no necesita sitio nuevo; si falla, el servidor lo reintenta (close_wav)
+                size = f.tell()
+                f.seek(4)
+                f.write(struct.pack("<I", size - 8))
+                f.seek(40)
+                f.write(struct.pack("<I", size - 44))
+            except OSError as e:
+                elog(f"✖ no se pudo cerrar la cabecera del WAV: {e.__class__.__name__}: {e}")
+            finally:
+                try:
+                    f.close()
+                except OSError:
+                    pass
+        try:
+            emit({"done": True, "t": round(written / SR, 2)})
+        except (OSError, ValueError):
+            pass
 
 
 if __name__ == "__main__":
