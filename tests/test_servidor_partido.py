@@ -162,5 +162,55 @@ class ArranqueComoLaAppTests(unittest.TestCase):
         self.assertNotIn(403, vistos, "el Handler no tiene el puerto de --port (api.PORT sin _compartir)")
 
 
+class NadaNuevoEnServerTests(unittest.TestCase):
+    """Regla desde que se partio (15/11/2026, punto 23 del review): nada nuevo en server.py; cada cosa en su modulo
+    (y el modulo, en server.PARTES). server.py solo lleva la fachada, main() y la cabeza de App (__init__ y lo que usa
+    App._movil_*); lo que sale de aqui se quita tambien de estas listas, que solo pueden encoger."""
+
+    NIVEL_SUPERIOR = {"SERVER", "WINDOW", "PARTES", "COMPARTIDAS", "_AQUI", "_partes", "_compartir", "_Fachada", "App",
+                      "arg", "main"}
+    APP = {"rec_body", "rec_cadena", "cortes", "__init__", "rec_toggle", "_reparar_proveedor", "_migrar_nombre_raiz",
+           "_movil_lock", "_movil_rec", "_movil_ultima", "_movil_red", "_movil_datos", "_movil_parar", "movil_red",
+           "movil_abrir", "movil_datos", "movil_estado", "movil_cerrar"}
+
+    @staticmethod
+    def nombres(cuerpo):
+        out = set()
+        for n in cuerpo:
+            if isinstance(n, (ast.FunctionDef, ast.ClassDef)):
+                out.add(n.name)
+            elif isinstance(n, (ast.Assign, ast.AnnAssign)):
+                out |= {x.id for tg in (n.targets if isinstance(n, ast.Assign) else [n.target])
+                        for x in ast.walk(tg) if isinstance(x, ast.Name)}
+        return out
+
+    def test_nada_nuevo_en_server_py(self):
+        with open(os.path.join(APP, "server.py"), encoding="utf-8") as f:
+            arbol = ast.parse(f.read())
+        nuevos = self.nombres(arbol.body) - self.NIVEL_SUPERIOR
+        self.assertEqual(nuevos, set(), "nada nuevo en server.py: va en su módulo (y el módulo, en server.PARTES)")
+        app = next(n for n in arbol.body if isinstance(n, ast.ClassDef) and n.name == "App")
+        nuevos = self.nombres(app.body) - self.APP
+        self.assertEqual(nuevos, set(), "nada nuevo en App dentro de server.py: va en su clase base (app_*.py)")
+
+    def test_claude_windows_sigue_mirando_lo_que_era_server_py(self):
+        """El workflow de Claude en Windows se lanza con los cambios de server.py: tambien con los de sus partes."""
+        with open(os.path.join(APP, "..", ".github", "workflows", "claude-windows.yml"), encoding="utf-8") as f:
+            yml = f.read()
+        faltan = [n for n in ("server",) + server.PARTES if f'- "_app/{n}.py"' not in yml]
+        self.assertEqual(faltan, [])
+
+    def test_ningun_modulo_importa_server(self):
+        """Ejecutado como la app, server es __main__: `import server` cargaria una segunda copia de todo."""
+        for n in server.PARTES:
+            with open(os.path.join(APP, n + ".py"), encoding="utf-8") as f:
+                arbol = ast.parse(f.read())
+            for x in ast.walk(arbol):
+                if isinstance(x, ast.Import):
+                    self.assertNotIn("server", [a.name for a in x.names], n)
+                elif isinstance(x, ast.ImportFrom):
+                    self.assertNotEqual(x.module, "server", n)
+
+
 if __name__ == "__main__":
     unittest.main()
