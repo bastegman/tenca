@@ -640,6 +640,12 @@ PISTA_ECO = 0.6          # un grupo del micro que suena con los demas el 60 % de
 PISTA_VUELTA = 0.6       # un grupo de los demas que coincide con tu micro el 60 % de su tiempo y se parece a ti: tu voz
 #                          que vuelve por la llamada (otro participante con altavoz)
 PISTA_HUECO_S = 0.3      # silencio entre los tramos del micro al juntarlos para diarizarlos
+# Lo que suena tambien se diariza junto (solo sus tramos con sonido, por encima de PISTA_JUNTAR_DB, con las pausas de
+# menos de PISTA_PAUSA_S dentro): el segmentador cuesta por segundo de audio, y en ese canal hay silencio cada vez que
+# hablas tu. Sin esto, «Quién habla» tardaba un 16 % mas que con la mezcla (voces-memoria en Windows, 55 min, run
+# 43761758493: 52 s frente a 45); medido en la simulacion, ademas, los demas salen algo mejor (DER 0,208 -> 0,175).
+PISTA_JUNTAR_DB = -55.0  # muy por debajo de una voz (el nivelador la deja hacia -22 dB): no se pierde a nadie flojo
+PISTA_PAUSA_S = 1.0
 PISTA_COPIA_DB = 6.0     # ...y esos dos solo si la copia va al menos 6 dB por debajo del otro canal en esos tramos
 #                          (el original suena mas: es el mismo criterio que pistas.ganancias_eco al reproducir)
 
@@ -735,11 +741,11 @@ def nivel_db(x16, tramos):
 
 
 def diarize_pistas(stereo16, micro, data_dir, threads=2, progress=None, cancelled=None, participantes=None,
-                   tmp_micro=None):
+                   tmp_micro=None, tmp_demas=None):
     """«Quién habla» de un WAV en dos pistas (stereo16: (n, 2) int16 16 kHz, p. ej. un memmap; micro: la linea de la
     grabadora). None si no vale (micro_de_grabadora, o PISTA_VOZ_MIN_S): quien llama diariza la suma. Si vale, el
     formato de diarize con, en cada hablante, "pista": "micro" o "sistema":
-      - los demas: diarize del canal derecho entero;
+      - los demas: diarize del canal derecho, solo sus tramos con sonido, juntados (PISTA_JUNTAR_DB);
       - el micro: diarize solo de sus tramos con su voz («1» en micro, pistas.tramos_de_bits), juntados (compactar);
       - un grupo del micro que suena con los demas (PISTA_ECO), se parece a uno de ellos (>= ENLACE) y en sus tramos va
         PISTA_COPIA_DB por debajo de lo que suena es su eco y se quita; uno de los demas que coincide con el micro
@@ -762,7 +768,15 @@ def diarize_pistas(stereo16, micro, data_dir, threads=2, progress=None, cancelle
         return lambda stage=None, frac=None: progress(stage=stage, frac=None if frac is None else a + (b - a) * frac)
 
     total = len(stereo16) / SR
-    res_s = diarize(der, data_dir, threads, prog(0.0, 0.8), cancelled, participantes=participantes)
+    sonando = actividad(der, umbral_db=PISTA_JUNTAR_DB)
+    suyos = pistas.tramos_de_bits("".join("1" if b else "0" for b in sonando), hueco_s=PISTA_PAUSA_S, min_s=0.1,
+                                  margen_s=0.25)
+    comp_s, mapa_s = compactar(der, suyos, en_disco=tmp_demas)  # tmp_demas: lo borra quien llama
+    try:
+        rs = diarize(comp_s, data_dir, threads, prog(0.0, 0.8), cancelled, participantes=participantes)
+    finally:
+        del comp_s
+    res_s = dict(rs, tramos=descompactar(rs["tramos"], mapa_s))
     mios = pistas.tramos_de_bits(micro["activo"])
     voz_mic = sum(b - a for a, b in mios)
     res_m = {"tramos": [], "hablantes": {}, "huellas": {}}
@@ -1702,6 +1716,7 @@ def main(argv=None):
     tmp = os.path.join(a.data, "tmp", f"voces-{os.getpid()}-{uuid.uuid4().hex[:8]}.pcm")
     tmp_suma = tmp[:-4] + "-suma.pcm"  # dos pistas en una reunion presencial: la suma de las dos
     tmp_micro = tmp[:-4] + "-micro.pcm"  # dos pistas: los tramos del micro, juntados
+    tmp_demas = tmp[:-4] + "-demas.pcm"  # y los de lo que suena
     samples = None
     try:
         if not models_ready(a.data):  # p. ej. tras actualizar con otro modelo de huellas: «Recordar» antes que nada
@@ -1737,7 +1752,7 @@ def main(argv=None):
         if pistas.es_doble(a.diarize) and micro_de_grabadora(micro):
             samples = load_audio_16k(a.diarize, en_disco=tmp, canal="ambos")
             res = diarize_pistas(samples, micro, a.data, a.threads, progress, participantes=a.participantes or None,
-                                 tmp_micro=tmp_micro)
+                                 tmp_micro=tmp_micro, tmp_demas=tmp_demas)
             if res is None:  # presencial: la suma, sin decodificar otra vez
                 samples = _suma_en_disco(samples, tmp_suma)
         else:
@@ -1763,6 +1778,7 @@ def main(argv=None):
         _borrar_tmp(tmp)
         _borrar_tmp(tmp_suma)
         _borrar_tmp(tmp_micro)
+        _borrar_tmp(tmp_demas)
 
 
 if __name__ == "__main__":

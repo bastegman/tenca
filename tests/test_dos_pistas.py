@@ -375,9 +375,11 @@ class GrabadoraRealTests(unittest.TestCase):
         n = 12000
         e = np.array([np.sqrt(np.mean(x[i * n:(i + 1) * n] ** 2)) for i in range(min(len(bits), len(x) // n))])
         b = np.array([c == "1" for c in bits[:len(e)]])
-        tarde = np.arange(len(e)) >= 32  # desde los 8 s, con la puerta de eco ya convencida
-        self.assertGreater(b[tarde].sum(), 8, bits)
-        self.assertGreater((~b[tarde]).sum(), 8, bits)
+        # desde los 6 s, con la puerta de eco ya convencida; en la CI (Ubuntu y Windows) caben ~15 s en 16 de reloj, con
+        # dos de sus frases de 1,6 s (6 pasos cada una): se pedían más de 8 «1» y salieron 8 (run 43761731619)
+        tarde = np.arange(len(e)) >= 24
+        self.assertGreaterEqual(b[tarde].sum(), 6, bits)
+        self.assertGreaterEqual((~b[tarde]).sum(), 10, bits)
         self.assertGreater(np.median(e[tarde & b]), 3 * np.median(e[tarde & ~b]), (bits, e.round(3).tolist()))
         # con la reunion sonando y él callado (solo eco en el micro), casi nunca «1»
         x_r = self.canales()[:, 1]
@@ -595,7 +597,7 @@ class DiarizarPistasTests(unittest.TestCase):
                     "huellas": {"h1": [0.0, 0.0, 1.0] + [0.0] * 189}}
         mic = micro(bits_de(mios, self.TOTAL))
         res, llamadas = self.correr(x, mic, [der, izq])
-        self.assertEqual(llamadas[0], len(x))  # la derecha entera
+        self.assertEqual(llamadas[0], int(100.25 * voices.SR))  # de la derecha, solo lo que suena (y su margen)
         self.assertTrue(res["pistas"])
         por = {h: i for h, i in res["hablantes"].items()}
         self.assertEqual(sorted(i["pista"] for i in por.values()), ["micro", "sistema", "sistema"])
@@ -603,6 +605,29 @@ class DiarizarPistasTests(unittest.TestCase):
         tramos_tu = [(t["inicio"], t["fin"]) for t in res["tramos"] if t["h"] == tu_h]
         self.assertEqual(tramos_tu, [(109.9, 130.1), (149.9, 160.1)])  # de vuelta a sus tiempos (el hueco no cuenta)
         self.assertEqual(voices.mark_user(res["tramos"], mic), tu_h)
+
+    def test_lo_que_suena_se_junta(self):
+        # los demás hablan de 0 a 50 s y de 120 a 170 s (en medio hablas tú): se diariza solo eso, y vuelve a su sitio
+        x = self.estereo(voz_der=False)
+        x[:int(50 * voices.SR), 1] = 1600
+        x[int(120 * voices.SR):int(170 * voices.SR), 1] = 1600
+        visto = {}
+
+        def der(s):
+            visto["seg"] = len(s) / voices.SR
+            corte = 50.25 + 0.3  # el primer tramo (con su margen) y el silencio entre los dos
+            return {"tramos": [{"inicio": 0.0, "fin": 50.0, "h": "h1"},
+                               {"inicio": corte + 0.25, "fin": corte + 50.25, "h": "h2"}],
+                    "hablantes": {}, "huellas": {"h1": [1.0] + [0.0] * 191, "h2": [0.0, 1.0] + [0.0] * 190}}
+
+        def izq(s):
+            return {"tramos": [{"inicio": 0.0, "fin": len(s) / voices.SR, "h": "h1"}], "hablantes": {},
+                    "huellas": {"h1": [0.0, 0.0, 1.0] + [0.0] * 189}}
+        mic = micro(bits_de([(60.0, 110.0)], self.TOTAL))
+        res, _ = self.correr(x, mic, [der, izq])
+        self.assertAlmostEqual(visto["seg"], 50.25 + 0.3 + 50.5, places=2)  # 101 s de 200
+        h_s = sorted((t["inicio"], t["fin"]) for t in res["tramos"] if res["hablantes"][t["h"]]["pista"] == "sistema")
+        self.assertEqual(h_s, [(0.0, 50.0), (120.0, 170.0)])
 
     def test_una_sala_no_da_tu(self):
         mios = [(110.0, 140.0), (150.0, 180.0)]
