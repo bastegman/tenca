@@ -1785,7 +1785,8 @@ class InterfazEnNavegadorTests(unittest.TestCase):
 
     def test_reuniones_por_proyecto(self):
         """Reuniones › Tabla (punto 43 del review): columna y filtro «Proyecto» en vez de «Carpeta»; fuera las columnas
-        sin datos (aquí ninguna reunión lleva etiquetas ni estado) y cada desplegable con su nombre accesible."""
+        sin datos y cada desplegable con su nombre accesible. Otros tests de la clase añaden reuniones al mismo
+        servidor: se mira la del montaje («Comité de prueba», de Proyecto › General)."""
         pg, errores, red = self.pagina()
         pg.goto(f"{self.base}/?t={self.token}", wait_until="networkidle")
         pg.wait_for_selector("#main h1:has-text('Hoy')", timeout=15000)
@@ -1794,23 +1795,33 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         pg.reload(wait_until="networkidle")
         pg.wait_for_selector("#main h1:has-text('Hoy')", timeout=15000)
         pg.click("[data-nav='r']")
-        pg.wait_for_selector("#main .db-table tbody tr[data-path]", timeout=10000)
+        fila = "#main .db-table tbody tr[data-path*='Comité de prueba']"
+        pg.wait_for_selector(fila, timeout=10000)
         cab = pg.eval_on_selector_all("#main .db-table thead th", "ths => ths.map(t => t.textContent)")
-        self.assertEqual(cab, ["Nombre", "Fecha", "Duración", "Proyecto", "Transcripción"])
-        celda = pg.text_content("#main .db-table tbody tr[data-path] td:nth-child(4)")
-        self.assertEqual(celda.strip(), "Proyecto › General")
-        nombres = pg.eval_on_selector_all("#main .db-tools select, #main .db-tools input",
-                                          "els => els.map(e => [e.dataset.tbl, e.getAttribute('aria-label') || ''])")
-        self.assertEqual(nombres, [["q", "Filtrar reuniones"], ["proy", "Proyecto"], ["tx", "Transcripción"],
-                                   ["group", "Agrupar"], ["sort", "Orden"]])
-        # lo guardado de antes (carpeta, estado) ya no filtra, y «Agrupar por carpeta» pasa a «por proyecto»
+        datos = pg.evaluate("""() => [allAudios().some(a => ((a.props || {}).etiquetas || []).length),
+                                     allAudios().some(a => (a.props || {}).estado)]""")
+        esperadas = ["Nombre", "Fecha", "Duración", "Proyecto"] + (["Etiquetas"] if datos[0] else []) \
+            + (["Estado"] if datos[1] else []) + ["Transcripción"]
+        self.assertEqual(cab, esperadas)
+        self.assertEqual(pg.text_content(fila + " td:nth-child(4)").strip(), "Proyecto › General")
+        js = "els => els.map(e => [e.dataset.tbl, e.getAttribute('aria-label') || ''])"
+        nombres = dict(pg.eval_on_selector_all("#main .db-tools select, #main .db-tools input", js))
+        self.assertEqual(nombres["q"], "Filtrar reuniones")
+        self.assertEqual(nombres["proy"], "Proyecto")
+        self.assertNotIn("folder", nombres)  # con proyectos, el filtro de carpeta se va
+        self.assertTrue(all(nombres.values()), nombres)
+        # lo guardado de antes (carpeta) ya no filtra, y «Agrupar por carpeta» pasa a «por proyecto»
         self.assertEqual(pg.input_value("[data-tbl='group']"), "proy")
-        self.assertEqual(pg.text_content("#main .db-table tr.grp td").split()[0], "Proyecto")
+        js = "tds => tds.map(t => t.firstChild.textContent.trim())"
+        grupos = pg.eval_on_selector_all("#main .db-table tr.grp td", js)
+        self.assertIn("Proyecto", grupos)
         pg.select_option("[data-tbl='proy']", "")
-        pg.wait_for_selector("#main .db-table td.empty", timeout=5000)
-        self.assertEqual(pg.get_attribute("#main .db-table td.empty", "colspan"), "5")
+        pg.wait_for_selector(fila, state="detached", timeout=5000)
         pg.select_option("[data-tbl='proy']", "Proyecto")
-        pg.wait_for_selector("#main .db-table tbody tr[data-path]", timeout=5000)
+        pg.wait_for_selector(fila, timeout=5000)
+        celdas = pg.eval_on_selector_all("#main .db-table tbody tr[data-path] td:nth-child(4)",
+                                         "tds => tds.map(t => t.textContent.trim())")
+        self.assertTrue(celdas and all(c.startswith("Proyecto ›") for c in celdas), celdas)
         err, red = self.limpiar(errores, red)
         self.assertEqual(err, [], (err, red))
         self.assertEqual(red, [], red)
