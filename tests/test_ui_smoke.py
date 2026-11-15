@@ -584,7 +584,8 @@ class InterfazEnNavegadorTests(unittest.TestCase):
             self.abrir_ajustes(pg)
             self.assertEqual(pg.input_value("#pfContext"), "Antes de salir r12")
             pg.keyboard.press("Escape")
-            err, red = self.limpiar(errores, red)
+            # (el editor de la lista se cierra con su comprobación aún en el aire: se cancela, no es un fallo)
+            err, red = self.limpiar(errores, [r for r in red if "/api/vocab/check" not in r])
             self.assertEqual(err, [], (err, red))
             self.assertEqual(red, [], red)
         finally:
@@ -1721,6 +1722,7 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         os.makedirs(destino, exist_ok=True)
         pg.click("#btnSettings")
         pg.click(".aj-nav [data-sec='proyectos']")
+        pg.wait_for_timeout(1500)  # que acabe lo que mira Ajustes al abrir (si no, se repinta con el rev nuevo)
         self.api_post("/api/settings", {"summary": {"lang": "es"}})
         pg.evaluate("api('/api/config').then(setConfig)")
         pg.evaluate("p => { perfilOuts.push({path: p, format: 'md', by_project: false});"

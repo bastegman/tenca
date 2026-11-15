@@ -2235,6 +2235,9 @@ const ajMezclar = (a, b) => {
 };
 function openSettings(opts) {
   if (!S.config) return toast('La app aún está arrancando: espera unos segundos y vuelve a probar.', 'err');
+  // cerrado con algo guardándose y vuelto a abrir enseguida: se abre cuando termine, para pintar lo ya guardado (si
+  // no, se abría con lo de antes y se repintaba solo al llegar el guardado)
+  if (S.ajPendiente) return void S.ajPendiente.finally(() => openSettings(opts));
   const sec = (opts && typeof opts === 'object' && AJ_SECS.some(x => x[0] === opts.sec) && opts.sec)
     || (AJ_SECS.some(x => x[0] === S.ajSec) && S.ajSec) || 'algrabar';
   S.ajSec = sec;
@@ -2522,7 +2525,11 @@ function openSettings(opts) {
     S.modalCleanup = () => {
       document.body.classList.remove('aj-abierto');
       window.removeEventListener('focus', mirarOtroCambio);
-      guardarYa().then(() => { if (S.ajGuardado) { S.ajGuardado = false; refreshView(); } });
+      const p = guardarYa().then(() => { if (S.ajGuardado) { S.ajGuardado = false; refreshView(); } });
+      if (enVuelo) {  // como mucho 4 s: un servidor que no contesta no deja Ajustes sin abrir
+        const q = S.ajPendiente = Promise.race([p, new Promise(r => setTimeout(r, 4000))]);
+        q.finally(() => { if (S.ajPendiente === q) S.ajPendiente = null; });
+      }
     };
 
     // la tarjeta de estado (configurar.js): «Probar» y «Cambiar…» abren el asistente (antes, lo pendiente se guarda)
