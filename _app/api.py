@@ -24,6 +24,7 @@ WINDOW = None  # la ventana propia (None si se abre en Edge); la pone main()
 
 
 HOST, PORT = "127.0.0.1", 8765
+URL = f"http://{HOST}:{PORT}/"
 
 
 # P0-2: la interfaz no lleva <script> en linea ni manejadores on…= (todo va en los .js), asi que un script colado en el

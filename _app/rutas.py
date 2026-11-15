@@ -17,6 +17,7 @@ from common import APP_NAME, ApiError, read_text
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 ROOT = os.path.dirname(APP_DIR)
+DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "AudiosApp")
 
 
 def root_name():
