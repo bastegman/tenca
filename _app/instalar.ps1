@@ -1030,7 +1030,7 @@ $borrable = -not $DesdeSetup -and $origen -and -not (Test-TieneReuniones $origen
 if ($borrable) { Say "  La carpeta que descomprimiste ($origen) ya no hace falta: puedes borrarla." Green }
 Say "  Si es la primera vez: Ajustes (rueda dentada) > Dónde se procesan tus reuniones: solo en este PC, con tu cuenta de Claude o con una API." Green
 Say "  Para apagar $AppName del todo: Ajustes > Apagar $AppName (cerrar la ventana la deja en segundo plano)." Green
-Say "  Instrucciones completas en LEEME.txt" Green
+Say "  Primeros pasos en LEEME.txt" Green
 $abrir = -not $NoLaunch
 if ($Gui) {
     $borrable = if ($borrable) { " La carpeta descomprimida ya se puede borrar." } else { "" }

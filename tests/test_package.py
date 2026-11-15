@@ -119,6 +119,17 @@ class TemplatesTests(unittest.TestCase):
                   os.path.join("_app", "static", "notas.ico"), os.path.join("_app", "static", "notas.png")):
             self.assertFalse(os.path.exists(os.path.join(REPO, n)), n)  # renombrados con git mv
 
+    def test_leeme_de_una_pantalla(self):
+        """El LEEME cabe en una pantalla (punto 45 del review): instalar, abrir, grabar, dónde queda todo y si algo
+        falla; el detalle está en el README («Manual de uso»)."""
+        leeme = self.read("_app", "export", "LEEME.txt").decode("utf-8-sig")
+        self.assertLessEqual(len(leeme.split("\r\n")), 50)
+        cabeceras = [ln.split(" (")[0] for ln in leeme.split("\r\n")[2:] if ln[:1].isalpha()]
+        self.assertEqual([c for c in cabeceras if c == c.upper()],
+                         ["INSTALAR", "ABRIR", "GRABAR", "DÓNDE QUEDA TODO", "SI ALGO FALLA"])
+        self.assertIn("https://github.com/bastegman/tenca#readme", leeme)
+        self.assertIn("## Manual de uso", self.read("README.md").decode("utf-8"))
+
     def test_requirements_igual_que_el_instalador(self):
         ps1 = self.read("_app", "instalar.ps1").decode("utf-8-sig")
         pkgs = []

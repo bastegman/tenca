@@ -755,7 +755,9 @@ ol.pasos code { user-select: all; }
 .wz-body h2 { font: 620 21px/1.25 var(--font-display); margin: 0 0 6px; letter-spacing: -.005em; outline: none; }
 .wz-lead { color: var(--ink-2); margin: 0 0 14px; }
 .wz-opts { border: 0; padding: 0; margin: 0; }
-.wz-opt { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); margin-top: 8px; cursor: pointer; font-weight: 400; }
+/* .dialog .wz-opt: el asistente vive en un diálogo y `.dialog label` (display: block) le ganaba, con el botón de radio
+   solo en una línea encima del texto (punto 45 del review) */
+.wz-opt, .dialog .wz-opt { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); margin-top: 8px; cursor: pointer; font-weight: 400; }
 .wz-opt:hover { border-color: var(--accent-line); }
 .wz-opt.on { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
 .wz-opt input { margin-top: 4px; accent-color: var(--accent); }
@@ -1144,3 +1146,63 @@ fieldset.ct-opciones { margin-top: 16px; }
 .mv-conectado { display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; font-size: 12.5px; color: var(--ink-2); }
 .mv-conectado > svg { width: 15px; height: 15px; flex: none; margin-top: 2px; color: var(--ok); }
 .mv-conectado .gr-cambiar { font-size: 12.5px; padding: 0 2px; }
+
+/* ---------------------------------------------------------------- B5: la página de la reunión (punto 22 del review) */
+.pmeta-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: -4px 0 6px; }
+.pmeta { flex: 1; min-width: 260px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 0; color: var(--ink-2); font-size: 13.5px; }
+.pmeta > *:not(:first-child)::before { content: '·'; margin: 0 8px; color: var(--muted); }
+.pmeta .pill { margin-left: 0; }
+.plink { border: 0; background: none; padding: 0; color: inherit; font: inherit; cursor: pointer; border-bottom: 1px dashed var(--line-2); }
+.plink:hover { color: var(--accent); border-bottom-color: var(--accent); }
+.pacts { display: flex; align-items: center; gap: 8px; }
+.pmas { position: relative; }
+.pmas-btn { min-width: 38px; justify-content: center; font-size: 18px; line-height: 1; letter-spacing: 1px; }
+.pmenu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 40; min-width: 220px; padding: 6px; border-radius: var(--radius); background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); display: flex; flex-direction: column; }
+.pmenu.hidden { display: none; }
+.pmenu button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--ink); text-align: left; cursor: pointer; font-size: 13.5px; }
+.pmenu button svg { width: 16px; height: 16px; color: var(--muted); }
+.pmenu button:hover, .pmenu button:focus-visible { background: var(--hover); outline: none; }
+.pmenu button.danger { color: var(--err); margin-top: 4px; border-top: 1px solid var(--line); border-radius: 0 0 var(--radius-sm) var(--radius-sm); }
+.pmenu button.danger svg { color: var(--err); }
+.pdet { margin: 2px 0 0; }
+.pdet > summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--muted); font-size: 13px; padding: 4px 6px 4px 2px; border-radius: 6px; list-style: none; }
+.pdet > summary::-webkit-details-marker { display: none; }
+.pdet > summary::before { content: ''; width: 0; height: 0; border-left: 5px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .12s; }
+.pdet[open] > summary::before { transform: rotate(90deg); }
+.pdet > summary:hover { color: var(--ink); background: var(--hover); }
+.pdet > .props { margin-top: 6px; }
+.reunion-page .ptabs { margin-top: 14px; }
+.reunion-page #aVoz .voz-bar { margin: 12px 0 0; }
+.page.reunion-page.dual { max-width: 1500px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 28px; align-items: start; }
+.page.dual > * { grid-column: 1 / -1; }
+.page.dual > #aSum { grid-column: 1; grid-row: span 2; position: sticky; top: 0; max-height: calc(100vh - 56px - 96px); overflow: auto; padding-top: 14px; }
+.page.dual > #aVoz, .page.dual > #aTx { grid-column: 2; }
+.page.dual > #aTx { padding-top: 0; }
+@media (prefers-reduced-motion: reduce) { .pdet > summary::before { transition: none; } }
+
+/* el lateral plegable (B5): por debajo de 1.000 px, plegado y, si se abre, encima del contenido */
+.lat-btn { margin-left: 0; margin-right: 8px; flex: none; }
+.lat-btn + .brand { width: 226px; }  /* 270 - el botón: la caja de búsqueda sigue alineada con el contenido */
+body.lat-off .layout, body.lat-sobre .layout { grid-template-columns: minmax(0, 1fr); }
+body.lat-off .sidebar { display: none; }
+body.lat-sobre .sidebar { position: fixed; top: 56px; left: 0; bottom: 0; width: 300px; z-index: 45; background: var(--panel); box-shadow: var(--shadow); }
+
+/* ---------------------------------------------------------------- B8: «Quién habla», dentro de la página (punto 21) */
+.voz-bar.abierto { align-items: flex-start; }
+.qh { flex-basis: 100%; margin-top: 8px; border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 8px; }
+.qh-sug { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12.5px; }
+.qh-chip { cursor: pointer; border: 1px solid var(--line-2); }
+.qh-chip:hover { border-color: var(--accent); }
+.qh-lista { display: grid; gap: 4px; }
+.qh-fila { display: grid; grid-template-columns: auto 92px auto minmax(110px, 1fr) auto auto; align-items: center; gap: 8px; min-height: 40px; }
+.qh-quien { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; }
+.qh-t { font-size: 11.5px; }
+.qh-oir svg { width: 12px; height: 12px; }
+.qh-nombre { height: 30px; min-width: 0; }
+.qh-yo { grid-column: span 3; font-size: 13px; }
+.qh-oir { padding: 0 8px; }
+.qh-rec { margin: 0; font-size: 12.5px; white-space: nowrap; }
+.qh-pie { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.qh-ayuda { font-size: 12.5px; }
+.qh .chk.sub { margin: 0; font-size: 12.5px; }
+@media (max-width: 760px) { .qh-fila { grid-template-columns: auto 92px auto 1fr; } .qh-nombre { grid-column: 2 / -1; } .qh-yo { grid-column: 2 / -1; } }
