@@ -30,6 +30,7 @@ function renderVoicesBar(a) {
   const j = vozJobFor(a.path), s = S.spk && S.spk.path === a.path ? S.spk : null;
   const last = S.jobs.filter(x => x.path === a.path && x.kind === 'voces').pop();
   const on = S.config.voices && S.config.voices.enabled;
+  if (S.irQuien === a.path && s && !s.exists) S.irQuien = null;  // sin voces: «Ponles nombre» no tiene bloque al que ir
   let html = '';
   if (j) {
     html = `<span class="vz-st">${I.voice}${esc(j.status === 'queued' ? 'En cola para identificar voces' : j.stage)}${j.status === 'running' ? ` (${Math.round(j.progress * 100)} %)` : ''}</span>
