@@ -275,8 +275,8 @@ def ruta_de(abs_path):
 
 def leer(abs_path, estricto=False):
     """El informe de esa reunion ({} si no hay o no se puede leer). Con estricto (para escribir encima), un fichero que
-    existe pero no se deja leer (OneDrive o el antivirus lo tienen un instante) se reintenta como write_bytes y, si
-    sigue sin poder, OSError: mejor no anotar esta seccion que pisar las que ya tenia."""
+    existe pero no se deja leer (OneDrive o el antivirus lo tienen un instante) se reintenta unos 2 s y, si sigue sin
+    poder, OSError: mejor no anotar esta seccion que pisar las que ya tenia."""
     for intento in range(20 if estricto else 1):
         try:
             with open(ruta_de(abs_path), encoding="utf-8") as f:

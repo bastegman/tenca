@@ -155,7 +155,7 @@ DIAG_LINES = (
     "   ✖ se ha parado {t}: hasta reiniciar no funcionará",
     "✖ error sin atender ({c})",
     "   la sesión anterior dejó un volcado de faulthandler ({n} líneas): fallos-graves.anterior.log",
-    "   la sesión anterior terminó de golpe (sin apagar)",
+    "   la sesión anterior terminó sin apagar",
     "   sin volcado de fallos graves ({c})",
     "   versión nueva: consultada ({s})",
     "   versión nueva: no se pudo consultar ({e})",

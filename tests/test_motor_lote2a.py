@@ -442,7 +442,7 @@ class FallosTests(unittest.TestCase):
                 fallos._ESTADO["fichero"].close()
         self.addCleanup(restaurar)
         open(os.path.join(tmp, "settings.json"), "w").close()
-        open(os.path.join(tmp, "sesion.token"), "w").close()  # no lo borró: terminó de golpe
+        open(os.path.join(tmp, "sesion.token"), "w").close()  # no lo borró: terminó sin apagar
         with mock.patch.object(fallos, "log") as log:
             self.assertTrue(fallos.instalar(tmp))
         self.assertIs(threading.excepthook, fallos.hilo)
@@ -450,13 +450,13 @@ class FallosTests(unittest.TestCase):
         self.assertTrue(faulthandler.is_enabled())
         self.assertEqual(os.path.getsize(os.path.join(tmp, fallos.FALLOS_GRAVES)), 0)
         self.assertEqual([c.args[0] for c in log.call_args_list],
-                         ["   la sesión anterior terminó de golpe (sin apagar)",
+                         ["   la sesión anterior terminó sin apagar",
                           "   la sesión anterior dejó un volcado de faulthandler (3 líneas): "
                           "fallos-graves.anterior.log"])
         lineas = fallos.diagnostico(tmp)
-        self.assertIn("Sesión anterior: terminó de golpe (sin apagar: cierre forzado, corte de luz o fallo grave)",
-                      lineas)
-        self.assertIn("Volcado de faulthandler (sesión anterior; terminó de golpe):", lineas)
+        self.assertIn("Sesión anterior: terminó sin apagar (se cerró la consola o el proceso, corte de luz o fallo "
+                      "grave)", lineas)
+        self.assertIn("Volcado de faulthandler (sesión anterior; terminó sin apagar):", lineas)
         self.assertIn("  live.py:12 run", lineas)
         self.assertNotIn("omega", "\n".join(lineas))
 
@@ -473,12 +473,20 @@ class FallosTests(unittest.TestCase):
             fallos._ESTADO.update(antes[3])
         self.addCleanup(restaurar)
 
+    @staticmethod
+    def fin_de_sesion():
+        """Como al terminar el proceso: faulthandler suelta su fichero (en Windows, abierto no se puede apartar; en la
+        app instalar va una vez por proceso)."""
+        faulthandler.disable()
+        if fallos._ESTADO["fichero"]:
+            fallos._ESTADO["fichero"].close()
+
     def test_un_volcado_viejo_no_se_dice_como_de_la_sesion_anterior(self):
         """Revisión 1 (P2): tras arranques limpios, el .anterior de hace semanas no sale en el diagnóstico; y el de
         una sesión que terminó bien se dice como lo que es (un error recuperado), no como una caída."""
-        self.restaurar_faulthandler()
         tmp = tempfile.mkdtemp(prefix="fallos-viejo-")
         self.addCleanup(shutil.rmtree, tmp, True)
+        self.restaurar_faulthandler()  # despues: se cierra el fichero antes de borrar la carpeta (Windows)
         open(os.path.join(tmp, "settings.json"), "w").close()
         with open(os.path.join(tmp, fallos.FALLOS_GRAVES_ANTERIOR), "w", encoding="utf-8") as f:
             f.write("Windows fatal exception: access violation\n")
@@ -487,6 +495,7 @@ class FallosTests(unittest.TestCase):
         lineas = fallos.diagnostico(tmp)
         self.assertIn("Sesión anterior: terminó bien", lineas)
         self.assertFalse(any("Volcado" in l for l in lineas), lineas)
+        self.fin_de_sesion()
         with open(os.path.join(tmp, fallos.FALLOS_GRAVES), "w", encoding="utf-8") as f:
             f.write("Windows fatal exception: access violation\n")  # la sesión que termina bien con un volcado
         with mock.patch.object(fallos, "log"):
@@ -496,9 +505,9 @@ class FallosTests(unittest.TestCase):
                       lineas)
 
     def test_la_primera_vez_no_hay_sesion_anterior(self):
-        self.restaurar_faulthandler()
         tmp = tempfile.mkdtemp(prefix="fallos-primera-")
         self.addCleanup(shutil.rmtree, tmp, True)
+        self.restaurar_faulthandler()  # despues: se cierra el fichero antes de borrar la carpeta (Windows)
         with mock.patch.object(fallos, "log") as log:
             fallos.instalar(tmp)
         log.assert_not_called()
@@ -506,9 +515,9 @@ class FallosTests(unittest.TestCase):
 
     def test_si_no_se_puede_apartar_no_se_vacia(self):
         """Revisión 1 (P3): sin poder apartar el volcado (bloqueado), se sigue escribiendo detrás, sin vaciarlo."""
-        self.restaurar_faulthandler()
         tmp = tempfile.mkdtemp(prefix="fallos-bloqueado-")
         self.addCleanup(shutil.rmtree, tmp, True)
+        self.restaurar_faulthandler()  # despues: se cierra el fichero antes de borrar la carpeta (Windows)
         with open(os.path.join(tmp, fallos.FALLOS_GRAVES), "w", encoding="utf-8") as f:
             f.write("Fatal Python error: Aborted\n")
         with mock.patch.object(fallos.os, "replace", side_effect=PermissionError("en uso")), \
@@ -516,6 +525,9 @@ class FallosTests(unittest.TestCase):
             self.assertTrue(fallos.instalar(tmp))
         with open(os.path.join(tmp, fallos.FALLOS_GRAVES), encoding="utf-8") as f:
             self.assertIn("Fatal Python error: Aborted", f.read())
+        # revisión 2 (P3): el diagnóstico no lo da por un error de esta sesión
+        self.assertIn("Volcado de faulthandler (esta sesión; con el de la sesión anterior, que no se pudo apartar):",
+                      fallos.diagnostico(tmp))
 
     def test_un_fallo_grave_de_verdad_deja_su_volcado(self):
         """Un proceso que cae de verdad (faulthandler._sigsegv) con fallos.instalar: el volcado queda en el fichero,
