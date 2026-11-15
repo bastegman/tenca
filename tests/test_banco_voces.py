@@ -91,6 +91,35 @@ class BancoTests(unittest.TestCase):
         with open(self.p("m.rttm"), encoding="utf-8") as f:
             self.assertEqual(f.read(), antes)
 
+    def test_insertar_a_alguien_que_habla_poco(self):
+        # base: 60 s con dos turnos de A y B (silencio entre medias); fuente: X habla sola dos veces y una con Y
+        base = np.concatenate([tono(20.0, 200.0), silencio(5.0), tono(20.0, 300.0), silencio(15.0)])
+        banco.write_wav(self.p("b.wav"), base)
+        banco.write_rttm(self.p("b.rttm"), "b", [(0.0, 20.0, "A"), (25.0, 20.0, "B")])
+        src = np.concatenate([tono(6.0, 500.0), silencio(2.0), tono(8.0, 500.0), silencio(2.0), tono(6.0, 500.0)])
+        banco.write_wav(self.p("f.wav"), src)
+        # la tercera de X se pisa con Y: no vale
+        banco.write_rttm(self.p("f.rttm"), "f", [(0.0, 6.0, "X"), (8.0, 8.0, "X"), (18.0, 6.0, "X"), (19.0, 2.0, "Y")])
+        dur, suyos = banco.insertar(self.p("b.wav"), self.p("b.rttm"), self.p("f.wav"), self.p("f.rttm"), "X",
+                                    self.p("o.wav"), segundos=10.0, trozos=2)
+        self.assertAlmostEqual(suyos, 10.0, places=1)  # dos intervenciones solas, recortadas a 5 s cada una
+        y = banco.read_wav(self.p("o.wav"))
+        self.assertAlmostEqual(len(y) / SR, dur, places=2)
+        self.assertAlmostEqual(dur, 60.0 + suyos + 2 * 0.6, places=1)
+        spans = sorted(banco.read_rttm(self.p("o.rttm")))
+        x = [s for s in spans if s[2] == "X"]
+        self.assertEqual(len(x), 2)
+        for a, d, _ in spans:  # cada tramo de la RTTM cae donde suena su tono
+            seg = y[int((a + 0.1) * SR):int((a + d - 0.1) * SR)].astype(np.float32)
+            self.assertGreater(float(np.sqrt(np.mean(seg * seg))), 3000.0, (a, d))
+        a_, b_ = [s for s in spans if s[2] in ("A", "B")]
+        self.assertEqual((a_[1], b_[1]), (20.0, 20.0))
+        self.assertGreaterEqual(b_[0], 25.0)  # B, retrasado por lo que se metió antes
+        # nada de X se pisa con A o B
+        for xa, xd, _ in x:
+            for oa, od, _ in (a_, b_):
+                self.assertTrue(xa + xd <= oa or xa >= oa + od, (x, a_, b_))
+
     @unittest.skipUnless(HAY_AV, "sin PyAV")
     def test_teams_deja_el_audio_alineado(self):
         x = np.concatenate([silencio(1.0), tono(2.0), silencio(1.0)])

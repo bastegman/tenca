@@ -6,6 +6,7 @@ no van al repositorio.
     python scripts/banco_voces.py serie  --out SERIE.wav  A.wav A.rttm B.wav B.rttm …    (encadena reuniones)
     python scripts/banco_voces.py montar --out REUNION.wav [--minutos 20] [--semilla 1] VOZ_DIR VOZ_DIR …
     python scripts/banco_voces.py teams  ENTRADA.wav SALIDA.wav [--kbps 24]
+    python scripts/banco_voces.py insertar --out R.wav --quien X [--segundos 60] BASE.wav BASE.rttm OTRA.wav OTRA.rttm
 
 - `serie`: varias reuniones del mismo grupo una detrás de otra (p. ej. las cuatro de una serie del AMI Meeting Corpus,
   CC BY 4.0, con las mismas cuatro personas: ~2 h), con 2 s de silencio entre ellas, y su RTTM con los tiempos
@@ -14,6 +15,8 @@ no van al repositorio.
   p. ej. OpenSLR 71, voces chilenas, CC BY-SA 4.0). Turnos de 1-3 frases, con quién habla después al azar (unos hablan
   más que otros), pausas de 0,2-0,9 s y algún solape corto. La RTTM marca solo la voz de cada frase (energía por tramas
   de 10 ms), no el turno entero con sus silencios: así el DER vale.
+- `insertar`: la reunión base con alguien más que habla poco (p. ej. 1 min en una serie de 2 h), con intervenciones
+  suyas sacadas de otra reunión: ¿sale como persona aparte o se le atribuye a otro?
 - `teams`: pasa el audio por Opus a 24 kbps (lo que usa Teams con poca red), con PyAV, y lo deja otra vez en WAV de
   16 kHz.
 """
@@ -174,6 +177,53 @@ def montar(carpetas, out, minutos=20.0, semilla=1, solape=0.12, nivel_db=6.0):
     return len(y) / SR, hablado
 
 
+# ----------------------------------------------------------------------------- insertar (alguien que habla poco)
+
+def insertar(base_wav, base_rttm, fuente_wav, fuente_rttm, quien, out, segundos=60.0, trozos=6, min_s=4.0):
+    """La reunión base con una persona más que habla poco: `trozos` intervenciones suyas de la fuente (sola, sin
+    solape, de >= min_s), recortadas hasta sumar ~`segundos`, repartidas por la reunión. Cada una entra en un silencio
+    de la base (entre dos turnos), con 0,3 s antes y después: lo de detrás se retrasa y su RTTM se desplaza igual.
+    Devuelve (duración, segundos suyos)."""
+    x, ref = read_wav(base_wav), sorted(read_rttm(base_rttm))
+    src, sref = read_wav(fuente_wav), read_rttm(fuente_rttm)
+    otros = [(a, a + d) for a, d, k in sref if k != quien]
+    solos = sorted(((a, a + d) for a, d, k in sref if k == quien and d >= min_s
+                    and not any(o0 < a + d and o1 > a for o0, o1 in otros)), key=lambda t: -(t[1] - t[0]))
+    if not solos:
+        raise SystemExit(f"{quien} no tiene intervenciones solas de >= {min_s} s en la fuente")
+    largo = max(min_s, segundos / max(1, trozos))
+    clips = [(a, min(b, a + largo)) for a, b in sorted(solos[:trozos], key=lambda t: t[0])]
+    dur = len(x) / SR
+    fin, huecos = 0.0, []  # silencios de la base (>= 0,6 s sin nadie): su punto medio
+    for a, d, _ in ref:
+        if a - fin >= 0.6:
+            huecos.append((fin + a) / 2)
+        fin = max(fin, a + d)
+    if dur - fin >= 0.6:
+        huecos.append((fin + dur) / 2)
+    pausa = np.zeros(int(0.3 * SR), np.int16)
+    partes, spans, desde, extra, ins = [], [], 0, 0.0, []
+    for k, (a, b) in enumerate(clips):
+        objetivo = dur * (k + 1) / (len(clips) + 1)
+        # nunca en medio de alguien: sin silencio libre, al final
+        t = min((h for h in huecos if h * SR > desde), key=lambda h: abs(h - objetivo), default=dur)
+        i = max(desde, int(t * SR))
+        clip = src[int(a * SR):int(b * SR)]
+        partes += [x[desde:i], pausa, clip, pausa]
+        add = (2 * len(pausa) + len(clip)) / SR
+        spans.append((i / SR + extra + 0.3, len(clip) / SR, quien))
+        ins.append((i / SR, add))
+        extra += add
+        desde = i
+    partes.append(x[desde:])
+    for a, d, k in ref:
+        spans.append((a + sum(add for t, add in ins if t <= a), d, k))
+    y = np.concatenate(partes)
+    write_wav(out, y)
+    write_rttm(os.path.splitext(out)[0] + ".rttm", os.path.splitext(os.path.basename(out))[0], spans)
+    return len(y) / SR, sum(b - a for a, b in clips)
+
+
 # ----------------------------------------------------------------------------- teams
 
 def teams(entrada, salida, kbps=24):
@@ -233,6 +283,15 @@ def main(argv=None):
     m.add_argument("--minutos", type=float, default=20.0)
     m.add_argument("--semilla", type=int, default=1)
     m.add_argument("voces", nargs="+")
+    i = sub.add_parser("insertar")
+    i.add_argument("--out", required=True)
+    i.add_argument("--quien", required=True, help="la persona de la fuente que se mete")
+    i.add_argument("--segundos", type=float, default=60.0)
+    i.add_argument("--trozos", type=int, default=6)
+    i.add_argument("base_wav")
+    i.add_argument("base_rttm")
+    i.add_argument("fuente_wav")
+    i.add_argument("fuente_rttm")
     t = sub.add_parser("teams")
     t.add_argument("entrada")
     t.add_argument("salida")
@@ -246,6 +305,9 @@ def main(argv=None):
     elif a.op == "montar":
         d, h = montar(a.voces, a.out, a.minutos, a.semilla)
         print(f"{a.out}: {d / 60:.1f} min, {len(h)} voces: " + ", ".join(f"{k} {v:.0f} s" for k, v in h.items()))
+    elif a.op == "insertar":
+        d, h = insertar(a.base_wav, a.base_rttm, a.fuente_wav, a.fuente_rttm, a.quien, a.out, a.segundos, a.trozos)
+        print(f"{a.out}: {d / 60:.1f} min, {a.quien} habla {h:.0f} s")
     else:
         print(f"{a.salida}: Opus a {teams(a.entrada, a.salida, a.kbps):.1f} kbps reales")
 
