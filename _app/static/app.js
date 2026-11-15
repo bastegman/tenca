@@ -1932,6 +1932,8 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (typing || e.ctrlKey || e.metaKey || e.altKey || !$('#modal').classList.contains('hidden')) return;
+  // Espacio en el título de «Detalles» lo pliega o despliega, no pone a sonar la reunión (revisión 3, N9)
+  if (e.key === ' ' && el && el.tagName === 'SUMMARY') return;
   if (e.key === ' ') { e.preventDefault(); togglePlay(); }
   else if (e.key === 'ArrowLeft') { e.preventDefault(); seekBy(e.shiftKey ? -15 : -5); }
   else if (e.key === 'ArrowRight') { e.preventDefault(); seekBy(e.shiftKey ? 15 : 5); }

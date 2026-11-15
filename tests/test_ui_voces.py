@@ -382,8 +382,10 @@ class VocesEnNavegadorTests(unittest.TestCase):
         pg.evaluate("() => { document.activeElement.blur(); S.spk = null; renderVoicesBar(curAudio()); }")
         self.assertTrue(pg.is_visible("#qhBloque"))
         self.assertEqual(pg.input_value(fila.format("h3") + "[data-qh-nombre]"), "Borrador")
-        pg.evaluate("() => loadSpeakers(curAudio())")
-        pg.wait_for_function("S.spk && S.spk.exists", timeout=5000)
+        # y al llegar las voces se repinta (sin `sucio`, como tras guardar) con lo escrito (revisión 3, N10)
+        pg.evaluate("() => { const b = document.querySelector('#qhBloque'); b.dataset.viejo = '1'; "
+                    "delete b.dataset.sucio; return loadSpeakers(curAudio()); }")
+        pg.wait_for_function("(b => b && !b.dataset.viejo)(document.querySelector('#qhBloque'))", timeout=5000)
         self.assertEqual(pg.input_value(fila.format("h2") + "[data-qh-nombre]"), "Luis Prueba")
         self.assertEqual(pg.input_value(fila.format("h3") + "[data-qh-nombre]"), "Borrador")
         self.assertEqual(self.limpio(errores, red), ([], []))
@@ -423,14 +425,15 @@ class VocesEnNavegadorTests(unittest.TestCase):
         pg.wait_for_selector("#txBody .spk[data-spk='h2']", timeout=15000)
         self.assertEqual(pg.evaluate("qhMuestra('h2')"), {"t": 10.5, "d": 4.0})
         pg.click("#qhBloque .qh-fila[data-h='h2'] [data-qh-oir]")
-        pg.wait_for_function("audio.readyState >= 1 && Math.abs(audio.currentTime - 10.5) < 0.3", timeout=10000)
+        pg.wait_for_function("audio.readyState >= 1 && audio.currentTime >= 10.2 && audio.currentTime < 14",
+                             timeout=10000)
         self.assertIsNotNone(pg.evaluate("qhOyendo"))
         # quieto (lo que tarde el clic no cuenta) y con la cuenta de pausas; la frase siguiente (15,0) cae dentro del
         # margen de la muestra (acaba en 14,5): antes, el salto contaba como «llegó al final» y la pausaba
         pg.evaluate("() => { audio.pause(); window.pausas = 0; const p = audio.pause.bind(audio); "
                     "audio.pause = () => { window.pausas++; p(); }; }")
         pg.click("#txBody .ts[data-i='2']")
-        pg.wait_for_function("!audio.seeking && Math.abs(audio.currentTime - 15) < 0.3", timeout=10000)
+        pg.wait_for_function("!audio.seeking && audio.currentTime >= 14.9 && audio.currentTime < 20", timeout=10000)
         pg.wait_for_timeout(400)  # el timeupdate del salto
         self.assertEqual(pg.evaluate("window.pausas"), 0)
         self.assertIsNone(pg.evaluate("qhOyendo"))
@@ -483,10 +486,14 @@ class VocesEnNavegadorTests(unittest.TestCase):
         self.assertFalse(pg.evaluate(abierto))
         self.ir(pg, una)
         self.assertFalse(pg.evaluate(abierto))
-        # con el teclado en su título también se recuerda
+        # con el teclado en su título también se recuerda; Espacio no pone a sonar la reunión (revisión 3, N9)
         pg.focus("#aHead .pdet summary")
         pg.keyboard.press("Enter")
         self.assertEqual(pg.evaluate(guardado), "1")
+        pg.keyboard.press("Space")
+        self.assertFalse(pg.evaluate(abierto))
+        self.assertEqual(pg.evaluate(guardado), "0")
+        self.assertIsNone(pg.evaluate("S.playing"))
         self.assertEqual(errores, [])
 
     def test_lateral_con_teclado_no_quita_el_foco(self):
