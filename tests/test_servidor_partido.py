@@ -84,7 +84,7 @@ class CompartidasTests(unittest.TestCase):
                    and any(isinstance(t, ast.Attribute) and t.attr == "__class__" for t in n.targets)]
         self.assertEqual(len(cambios), 1)
         guarda = next(n for n in arbol.body if isinstance(n, ast.If) and cambios[0] in n.body)
-        self.assertEqual(ast.unparse(guarda.test), "__name__ != '__main__'")
+        self.assertTrue(ast.unparse(guarda.test).startswith("__name__ != '__main__' and "), ast.unparse(guarda.test))
 
     def test_cada_asignacion_global_se_comparte(self):
         """En server.py, cada asignacion a una de COMPARTIDAS dentro de una funcion (main(), App.__init__), tambien en
@@ -96,6 +96,7 @@ class CompartidasTests(unittest.TestCase):
 
         def asignados(st):
             dianas = st.targets if isinstance(st, ast.Assign) else [st.target] if isinstance(st, ast.AugAssign) else []
+            dianas += [n.target for n in ast.walk(st) if isinstance(n, ast.NamedExpr)]  # x := … dentro de la sentencia
             return {x.id for t in dianas for x in ast.walk(t) if isinstance(x, ast.Name)} & compartidas
 
         def compartir(st):
@@ -110,7 +111,8 @@ class CompartidasTests(unittest.TestCase):
             if not globales:
                 continue
             for bloque in [n for n in ast.walk(fn) if isinstance(getattr(n, "body", None), list)]:
-                for cuerpo in (bloque.body, getattr(bloque, "orelse", []) or []):
+                for cuerpo in (bloque.body, getattr(bloque, "orelse", None) or [],
+                               getattr(bloque, "finalbody", None) or []):
                     for i, st in enumerate(cuerpo):
                         nombres = asignados(st) & globales
                         if not nombres:
@@ -127,6 +129,11 @@ class CompartidasTests(unittest.TestCase):
                                 break
                         self.assertTrue(nombres <= hechos, f"{fn.name}(), línea {st.lineno}: falta _compartir"
                                         f"{tuple(sorted(nombres - hechos))} antes de seguir")
+        # y nada de globals()["X"] = … (el AST no lo ve como asignacion)
+        sub = [n.lineno for n in ast.walk(arbol) if isinstance(n, ast.Assign) for d in n.targets
+               if isinstance(d, ast.Subscript) and isinstance(d.value, ast.Call)
+               and getattr(d.value.func, "id", "") in ("globals", "vars")]
+        self.assertEqual(sub, [], "globals()[…] = … en server.py")
         # main(): PORT, URL, DATA_DIR, SERVER y las tres de WINDOW; App.__init__: COMPLETE
         self.assertGreaterEqual(len([v for v in vistas if v[0] == "main"]), 7)
         self.assertIn("__init__", [v[0] for v in vistas])
@@ -137,14 +144,16 @@ class ArranqueComoLaAppTests(unittest.TestCase):
     Por una ruta con un enlace (en macOS, los temporales de /var son /private/var): el __file__ de server.py no lleva
     el enlace resuelto y el de los modulos importados si (el fallo de la revision del 15/11/2026: Host rechazado)."""
 
-    def test_el_puerto_de_la_linea_de_ordenes_llega_al_handler(self):
+    def test_lo_de_la_linea_de_ordenes_llega_a_las_partes(self):
         tmp = tempfile.mkdtemp(prefix="tenca-partido-")
         self.addCleanup(shutil.rmtree, tmp, True)
+        real = os.path.join(tmp, "real", "_app")  # una copia: con el enlace, ROOT es la carpeta real (revision 2, N1)
+        shutil.copytree(APP, real, ignore=shutil.ignore_patterns("__pycache__"))
         app = os.path.join(tmp, "enlace")
         try:
-            os.symlink(APP, app, target_is_directory=True)
+            os.symlink(real, app, target_is_directory=True)
         except (OSError, NotImplementedError):  # Windows sin permiso de enlaces: la ruta de verdad
-            app = APP
+            app = real
         datos = os.path.join(tmp, "datos")
         os.makedirs(datos)
         with socket.socket() as s:
@@ -178,6 +187,15 @@ class ArranqueComoLaAppTests(unittest.TestCase):
             with open(os.path.join(tmp, "salida.log"), encoding="utf-8") as fh:
                 self.fail("no arrancó: " + fh.read()[-1500:])
         self.assertNotIn(403, vistos, "el Handler no tiene el puerto de --port (api.PORT sin _compartir)")
+        # DATA_DIR y SERVER llegan a apagado: Apagar borra el sesion.token de --data (remove_token(DATA_DIR, …)) y
+        # termina el proceso con 0
+        self.assertTrue(os.path.isfile(os.path.join(datos, "sesion.token")))
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/apagar", data=b"{}", method="POST",
+                                     headers={"X-Chuleta-Token": token, "X-Audios": "1",
+                                              "Content-Type": "application/json"})
+        self.assertTrue(json.load(opener.open(req, timeout=5)).get("ok"))
+        self.assertEqual(proc.wait(30), 0)
+        self.assertFalse(os.path.exists(os.path.join(datos, "sesion.token")), "apagado.DATA_DIR sin _compartir")
 
 
 class NadaNuevoEnServerTests(unittest.TestCase):

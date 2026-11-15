@@ -166,7 +166,7 @@ def _partes():
     """Los modulos de PARTES, tal como los importa server.py (por su nombre: sys.modules[n] es el mismo que lee
     `from n import …` arriba). Sin comparar carpetas: con un enlace en la ruta, __file__ de server.py y el de sus
     partes no coinciden (/var y /private/var) y un modulo se quedaria fuera sin decir nada."""
-    return [sys.modules[n] for n in PARTES if n in sys.modules]
+    return [m for m in (sys.modules.get(n) for n in PARTES) if m is not None]
 
 
 def _compartir(*nombres):
@@ -190,7 +190,9 @@ class _Fachada(type(sys)):
                 setattr(m, k, v)
 
 
-if __name__ != "__main__":  # la app (python server.py) no lo necesita: nadie le asigna nada desde fuera
+# la app (python server.py) no lo necesita: nadie le asigna nada desde fuera; y solo si este modulo es el registrado
+# con su nombre (no al cargarlo con spec_from_file_location sin registrarlo)
+if __name__ != "__main__" and getattr(sys.modules.get(__name__), "__dict__", None) is globals():
     sys.modules[__name__].__class__ = _Fachada
 
 
