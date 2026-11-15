@@ -191,7 +191,8 @@ document.addEventListener('modelos', () => {
 
 /* ================================================================ asistente «Configurar» de la app (3 pasos)
    1 · elegir dónde se procesan · 2 · prepararlo (descarga, Claude Code o la clave) · 3 · «Probar» de punta a punta.
-   No guarda nada hasta terminar el paso 3 (como «Aplicar ahora» en Ajustes: un clic de prueba no cambia nada). */
+   No guarda nada hasta terminar el paso 3: un clic de prueba no cambia nada. Es el único sitio donde se cambia de opción
+   (punto 37 del review, 14/11/2026: Ajustes › Procesado tiene la tarjeta con «Cambiar…», que lo abre). */
 const W = { paso: 1, modo: 'local', cloud: {}, prueba: null, timer: null, agTimer: null, volver: null, d: null };
 // los avisos de privacidad, con su texto de siempre (decisión de producto del 02/11/2026)
 const AVISO_CLAUDE = 'El texto de la reunión (título, fecha, transcripción con quién habla si se sabe, notas, contexto, participantes confirmados e instrucciones; el audio no) se envía a Anthropic con esa cuenta: con la de empresa, bajo el acuerdo de tu empresa; con la personal, bajo sus términos de uso. En algunas reuniones puede ser un bloqueante: compruébalo antes. Al terminar de transcribir, las reuniones de los últimos 3 días se resumen solas; se desactiva en Ajustes.';

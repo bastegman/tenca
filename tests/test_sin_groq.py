@@ -291,7 +291,7 @@ class ActualizarConGroqTests(unittest.TestCase):
         # (punto 12 del review) cada cambio se guarda al momento: uno que no tiene nada que ver con la nube
         pg.click(".aj-nav [data-sec='resumen']")
         pg.select_option("#sSumLang", "same" if pg.input_value("#sSumLang") != "same" else "es")
-        pg.wait_for_function("document.querySelector('#sSumLang').nextElementSibling?.textContent.includes('Guardado')",
+        pg.wait_for_function("document.querySelector('#sSumLang')._ajMarca?.textContent.includes('Guardado')",
                              timeout=10000)
         fin = time.time() + 10
         while time.time() < fin and os.path.getmtime(os.path.join(self.s.datos, "settings.json")) == antes:

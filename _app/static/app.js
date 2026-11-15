@@ -1847,7 +1847,7 @@ function openModal(html, onOpen, cls = '') {
   cerrarSobre(false);  // una confirmación de encima no se queda sobre otro diálogo (p. ej. Ctrl+Alt+R mientras tanto)
   m.innerHTML = `<div class="dialog ${cls}">${html}</div>`;
   m.classList.remove('hidden');
-  document.body.classList.toggle('aj-abierto', cls === 'aj');  // los avisos, arriba solo con Ajustes (su «Guardar» abajo)
+  document.body.classList.toggle('aj-abierto', cls === 'aj');  // los avisos, arriba solo con Ajustes (su pie abajo)
   onOpen && onOpen($('.dialog', m));
   const f = $('.dialog [autofocus]', m) || $('.dialog input, .dialog button.primary', m);
   f && f.focus();
@@ -2230,7 +2230,15 @@ function openSettings(opts) {
     };
     d.irSec = irSec;
     document.body.classList.add('aj-abierto');
-    setTimeout(() => $('.aj-nav [data-sec].on', d)?.focus(), 0);  // el foco, dentro del diálogo (no en ⚙)
+    // el foco, dentro del diálogo (no en ⚙). Tras repintar (otra ventana guardó), donde estaba, con lo seleccionado:
+    // si no, lo que se siguiera tecleando se perdía (revisión 1 de ajustes-uno, P2-1)
+    const foco = opts && typeof opts === 'object' ? opts.foco : null;
+    setTimeout(() => {
+      const f = foco && $('#' + CSS.escape(foco.id), d);
+      if (!f) return $('.aj-nav [data-sec].on', d)?.focus();
+      f.focus();
+      try { if (foco.a != null) f.setSelectionRange(foco.a, foco.b); } catch { /* no es un campo de texto */ }
+    }, 0);
     d.addEventListener('click', e => {
       const x = e.target.closest('.aj-nav [data-sec], [data-sec-ir]');
       if (!x) return;
@@ -2251,27 +2259,34 @@ function openSettings(opts) {
       if (el.type === 'checkbox') el.checked = el.dataset.guardado === 'true';
       else el.value = el.dataset.guardado;
     };
+    // la marca, junto al control y fuera de su <label> (si no, entraba en el nombre de la casilla para un lector de
+    // pantalla); con dos desplegables en una fila (micro y audio del PC), al final de la fila (revisión 1, P2-6/P2-10)
     const marcaDe = el => {
       if (ESP[el.id]) return ESP[el.id].marca();
-      const lab = el.type === 'checkbox' && el.closest('label');
-      if (lab) return $(':scope > .aj-ok', lab) || lab.appendChild(Object.assign(document.createElement('span'), { className: 'aj-ok' }));
-      const n = el.nextElementSibling;
-      if (n && n.classList.contains('aj-ok')) return n;
+      if (el._ajMarca && el._ajMarca.isConnected) return el._ajMarca;
       const s = Object.assign(document.createElement('span'), { className: 'aj-ok' });
-      s.setAttribute('aria-live', 'polite');
-      el.after(s);
-      return s;
+      s.setAttribute('role', 'status');
+      const lab = el.type === 'checkbox' && el.closest('label');
+      if (lab) lab.after(s);
+      else if (el.parentElement?.classList.contains('ag-dos')) el.parentElement.append(s);
+      else el.after(s);
+      return (el._ajMarca = s);
     };
     const marcar = (el, estado, txt = '') => {
       if (!document.body.contains(el)) return;
       const m = marcaDe(el);
       clearTimeout(m.t);
       m.className = 'aj-ok ' + estado;
-      m.textContent = { ok: 'Guardado ✓', err: `No se ha guardado: ${txt}`, guardando: 'Guardando…' }[estado] || '';
+      m.setAttribute('role', estado === 'err' ? 'alert' : 'status');
+      // «Guardado como «16» ✓» si el servidor lo ha ajustado y aún no se ve (el foco sigue en la casilla, P2-5)
+      m.textContent = { ok: txt ? `Guardado como «${txt}» ✓` : 'Guardado ✓', err: `No se ha guardado: ${txt}`, guardando: 'Guardando…' }[estado] || '';
       if (estado === 'ok') m.t = setTimeout(() => { m.textContent = ''; m.className = 'aj-ok'; }, 4000);
     };
     const pend = new Set(), textos = new Map();  // textos: el temporizador de lo que se está escribiendo
     let enVuelo = null, guardados = 0, refrescar = '';  // refrescar: repintar al terminar (con su aviso, si es un texto)
+    // el config_rev de lo que enseña este Ajustes (al abrir y tras cada guardado suyo). No el de S.config: lo ponen al
+    // día otras cosas con Ajustes abierto (una carpeta vinculada, una fila de Proyectos) sin repintarlo (P2-3)
+    let rev = S.config.config_rev;
     const ajeno = () => !document.body.contains(d);
     const mandar = () => enVuelo || (enVuelo = (async () => {
       while (pend.size) {
@@ -2283,29 +2298,50 @@ function openSettings(opts) {
           const v = valorDe(el);
           if (v === el.dataset.guardado) { marcar(el, 'nada'); continue; }  // vuelto a lo guardado, o nada que mandar
           const p = patchDe(el);
-          if (!p) { volver(el); continue; }
+          if (!p) {
+            // vacío (o no vale) mientras se escribe: se deja como está; al salir de la casilla, vuelve y se dice. Antes
+            // volvía solo a los 0,7 s y lo que se tecleaba después quedaba pegado al valor viejo (revisión 1, P1-3)
+            if (document.activeElement === el && !ajeno()) { marcar(el, 'nada'); continue; }
+            volver(el);
+            marcar(el, 'err', 'no puede quedar vacío; sigue el de antes');
+            continue;
+          }
           ajMezclar(cuerpo, p);
           van.push([el, v]);
         }
         if (!van.length) continue;
         van.forEach(([el]) => marcar(el, 'guardando'));
         try {
-          const r = await api('/api/settings', { ...cuerpo, rev: S.config.config_rev });
+          const r = await api('/api/settings', { ...cuerpo, rev });
           setConfig(r);
+          rev = r.config_rev;
           guardados++;
+          S.ajGuardado = true;  // al cerrar Ajustes (esta instancia u otra tras repintar), la vista se pone al día
           if ('language' in cuerpo) S.selLang = cuerpo.language;
           van.forEach(([el, v]) => {
             const norm = AJ_VALOR[el.id]?.(r);
             el.dataset.guardado = norm != null && !pend.has(el) ? norm : v;
-            if (norm != null && !pend.has(el) && document.activeElement !== el) el.value = norm;
-            if (!pend.has(el)) marcar(el, 'ok');
+            const visto = norm != null && !pend.has(el) && document.activeElement !== el;
+            if (visto) el.value = norm;
+            if (!pend.has(el)) marcar(el, 'ok', norm != null && norm !== v && !visto ? norm : '');
           });
-          if (r.otro_cambio) refrescar = 'Los ajustes habían cambiado en otra ventana: ya ves lo guardado.';
+          // la tarjeta de Procesado, con lo que se acaba de guardar (modelo, motor…): antes seguía con lo de antes (P1-1)
+          const tarjeta = $('.cfg-estado', d);
+          if (tarjeta && typeof cfgEstadoHtml === 'function') tarjeta.outerHTML = cfgEstadoHtml();
+          if (r.otro_cambio) refrescar = 'Ajustes se ha puesto al día con lo guardado.';
           d.ajTrasGuardar?.(cuerpo);
         } catch (err) {
-          van.forEach(([el]) => { if (!pend.has(el)) { volver(el); marcar(el, 'err', err.message); } });
+          // lo elegido vuelve a lo guardado; lo escrito se queda, con su error (un fallo pasajero no borra un texto
+          // largo: se vuelve a intentar al cambiarlo, revisión 1, P2-4). Si no está a la vista, también arriba
+          let oculto = ajeno();
+          van.forEach(([el]) => {
+            if (pend.has(el) || textos.has(el)) return;
+            if (!esTexto(el) && el.id !== 'dkRows') volver(el);  // (una clave escrita, tampoco se borra)
+            marcar(el, 'err', err.message);
+            oculto = oculto || !!el.closest('[hidden]');
+          });
           d.ajPlanPedir?.();  // el plan de Al grabar, con lo que se ve otra vez
-          if (ajeno()) toast(`No se ha guardado un ajuste: ${esc(err.message)}`, 'err');
+          if (oculto) toast(`No se ha guardado un ajuste: ${esc(err.message)}`, 'err');
           if (err.status === 409) {
             try { setConfig(await api('/api/config')); } catch { /* el siguiente intento lo dirá */ }
             refrescar = esc(err.message);
@@ -2347,26 +2383,26 @@ function openSettings(opts) {
       const n = guardados;
       try {
         const r = await api('/api/config');
-        if (ajeno() || n !== guardados || enVuelo || pend.size || textos.size || r.config_rev === S.config.config_rev) return;
+        if (ajeno() || n !== guardados || enVuelo || pend.size || textos.size || r.config_rev === rev) return;
         setConfig(r);
-        ajRepintar('Ajustes se ha puesto al día con un cambio hecho en otra ventana.');
+        ajRepintar('Ajustes se ha puesto al día con lo guardado.');
       } catch { /* sin servidor: ya lo dirá otra cosa */ }
     };
     window.addEventListener('focus', mirarOtroCambio);
     const ajRepintar = msg => {
       window.removeEventListener('focus', mirarOtroCambio);
-      const top = $('.aj-main', d).scrollTop, foco = document.activeElement?.id;
-      openSettings({ sec: S.ajSec });
+      const top = $('.aj-main', d).scrollTop, a = document.activeElement;
+      const foco = a?.id && d.contains(a) ? { id: a.id, a: a.selectionStart ?? null, b: a.selectionEnd ?? null } : null;
+      openSettings({ sec: S.ajSec, proc: pedido, foco });  // con la opción pedida, si la había (P2-2)
       const nd = $('#modal .dialog.aj');
-      if (nd) { $('.aj-main', nd).scrollTop = top; if (foco) $('#' + CSS.escape(foco), nd)?.focus(); }
+      if (nd) $('.aj-main', nd).scrollTop = top;
       if (msg) toast(msg);
     };
     // ⚠ ESC, «Cerrar» o un clic fuera: lo que quede por guardar se manda igual (si falla, se dice con un aviso)
     S.modalCleanup = () => {
       document.body.classList.remove('aj-abierto');
       window.removeEventListener('focus', mirarOtroCambio);
-      const antes = guardados;
-      guardarYa().then(() => { if (guardados !== antes || antes) refreshView(); });
+      guardarYa().then(() => { if (S.ajGuardado) { S.ajGuardado = false; refreshView(); } });
     };
 
     // la tarjeta de estado (configurar.js): «Probar» y «Cambiar…» abren el asistente (antes, lo pendiente se guarda)
@@ -2458,15 +2494,22 @@ function openSettings(opts) {
       ESP.dkRows = {
         valor: () => JSON.stringify(lista()),
         patch: () => ({ cloud: { extra_keys_by: { [prov]: lista() } } }),
-        volver: () => { refrescar = refrescar || true; },  // al terminar, las filas se rehacen con lo guardado
+        volver: () => d.directoKeys.rehacer?.(),  // las filas, con lo guardado
         marca: () => { const r = $('#dkAdd', d).parentElement; return $('.aj-ok', r) || r.appendChild(Object.assign(document.createElement('span'), { className: 'aj-ok' })); },
       };
       dk.dataset.guardado = ESP.dkRows.valor();
-      // una clave escrita se guarda al salir de su casilla; quitar una fila, al momento
+      // una clave escrita se guarda al salir de su casilla; quitar una fila (directo.js, tras confirmarlo), al momento:
+      // las dos cosas llegan como «change» de las filas
       dk.addEventListener('change', () => pedirGuardar(dk));
-      dk.addEventListener('click', e => { if (e.target.closest('[data-xkey-del]')) setTimeout(() => pedirGuardar(dk), 0); });
-      // tras guardar, las claves nuevas vuelven enmascaradas: las filas se rehacen con lo guardado
-      d.ajTrasGuardar = cuerpo => { if (cuerpo.cloud?.extra_keys_by) refrescar = refrescar || true; };
+      // tras guardar, las claves nuevas vuelven enmascaradas: solo se rehacen las filas (repintar Ajustes entero se
+      // comía el clic con el que se salió de la casilla y llevaba el foco al menú, revisión 1, P1-2). No mientras se
+      // escribe otra
+      d.ajTrasGuardar = cuerpo => {
+        const a = document.activeElement;  // no mientras se escribe otra clave (una casilla nueva, aún sin guardar)
+        if (!cuerpo.cloud?.extra_keys_by || pend.has(dk) || dk.contains(a) && a.value?.trim() && !a.dataset.mask) return;
+        d.directoKeys.rehacer?.();
+        dk.dataset.guardado = ESP.dkRows.valor();
+      };
     }
     vigilados().forEach(el => { el.dataset.guardado = valorDe(el); });
     d.ajMarca = marcar;  // para lo que se guarda con su propia petición (ocultar al compartir pantalla, ajustes.js)

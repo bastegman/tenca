@@ -337,12 +337,32 @@ function bindDirectoSettings(d) {
     sync();
     $$('[data-xkey]', rows).pop().focus();
   };
-  rows.addEventListener('click', e => {
+  // quitar una clave ya guardada se guarda al momento (Ajustes no tiene «Guardar»): antes, se pregunta (encima de
+  // Ajustes). Al quitarla, un «change» de las filas para que app.js la guarde
+  rows.addEventListener('click', async e => {
     const b = e.target.closest('[data-xkey-del]');
-    if (b) { b.closest('.dk-row').remove(); sync(); }
+    if (!b) return;
+    const fila = b.closest('.dk-row'), mask = $('[data-xkey]', fila)?.dataset.mask;
+    if (mask && typeof ask === 'function' && !await ask('¿Quitar esta clave?', `<p>Se deja de usar la clave <code>${esc(mask)}</code> en ${esc(APP_NAME)}. Para volver a usarla, tendrás que pegarla otra vez.</p>`, 'Quitar')) return;
+    fila.remove();
+    sync();
+    rows.dispatchEvent(new Event('change', { bubbles: true }));
   });
   if (prov) prov.addEventListener('change', () => { stash(); cur = prov.value; draw(); sync(); });
-  d.directoKeys = { state, stash: () => stash() };  // collectDirectoSettings manda las de cada proveedor
+  // rehacer: las filas con lo guardado (tras guardar, las claves nuevas vuelven enmascaradas). Las filas vacías que se
+  // acaban de añadir se quedan, al final, y con el foco si lo tenían
+  const rehacer = () => {
+    const foco = rows.contains(document.activeElement);
+    const vacias = $$('[data-xkey]', rows).filter(i => !i.dataset.mask && !i.value.trim()).length;
+    const g = S.config?.cloud || {}, by = g.extra_keys_by || { [g.provider || 'groq']: g.extra_keys || [] };
+    Object.keys(state).forEach(p => { delete state[p]; });
+    Object.keys(by).forEach(p => { state[p] = (by[p] || []).map(m => ({ mask: m, value: '' })); });
+    state[cur] = [...(state[cur] || []), ...Array.from({ length: vacias }, () => ({ mask: '', value: '' }))];
+    draw();
+    sync();
+    if (foco && vacias) $$('[data-xkey]', rows).pop().focus();
+  };
+  d.directoKeys = { state, stash: () => stash(), rehacer };  // collectDirectoSettings manda las de cada proveedor
   draw();
   sync();
 }

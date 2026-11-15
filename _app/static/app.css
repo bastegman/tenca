@@ -997,6 +997,7 @@ details.ag-como > summary:hover { color: var(--ink-2); }
 .pj-tabla { width: 100%; min-width: 600px; margin-top: 14px; table-layout: fixed; }
 /* cada celda se queda en su columna: lo que no cabe se recorta con «…» (entero en el title) */
 .pj-tabla td:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pj-tabla .pj-nom { display: inline-block; max-width: calc(100% - 92px); overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 .pj-tabla th { text-align: left; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line); }
 .pj-tabla td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: middle; font-size: 13px; }
 .pj-tabla tr.pj-w td:first-child { padding-left: 22px; }

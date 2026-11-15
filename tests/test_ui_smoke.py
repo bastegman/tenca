@@ -222,8 +222,7 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         pg.click(".aj-nav [data-sec='avanzado']")
         pg.fill("#sThreads", "2")
         pg.press("#sThreads", "Tab")
-        pg.wait_for_function("document.querySelector('#sThreads').nextElementSibling?.textContent.includes('Guardado')",
-                             timeout=5000)
+        self.guardado_junto_a(pg, "#sThreads")
         self.assertEqual(pg.evaluate("api('/api/config')")["threads"], 2)  # guardado desde una sección oculta al abrir
         pg.evaluate("n => api('/api/settings', {threads: n})", hilos)
         pg.keyboard.press("Escape")
@@ -1422,9 +1421,8 @@ class InterfazEnNavegadorTests(unittest.TestCase):
     def guardado_junto_a(self, pg, sel, txt="Guardado ✓"):
         """Espera el «Guardado ✓» (o el error) junto al control."""
         pg.wait_for_function("""([s, t]) => { const el = document.querySelector(s); if (!el) return false;
-            const m = el.type === 'checkbox' && el.closest('label') ? el.closest('label').querySelector('.aj-ok')
-              : el.nextElementSibling;
-            return !!m && m.classList.contains('aj-ok') && m.textContent.includes(t); }""",
+            const m = el._ajMarca;  // la marca de ese control (junto a él, fuera de su <label>)
+            return !!m && m.isConnected && m.classList.contains('aj-ok') && m.textContent.includes(t); }""",
                              arg=[sel, txt], timeout=8000)
 
     def test_ajustes_se_guarda_al_cambiar_cada_seccion(self):
@@ -1506,8 +1504,8 @@ class InterfazEnNavegadorTests(unittest.TestCase):
             pg.route("**/api/settings", settings)
             a, b = ("pt", "de") if cfg0["language"] not in ("pt", "de") else ("fr", "it")
             pg.select_option("#sLang", a)
-            pg.wait_for_function("document.querySelector('#sLang').nextElementSibling?.textContent"
-                                 ".includes('Guardando')", timeout=5000)
+            pg.wait_for_function("document.querySelector('#sLang')._ajMarca?.textContent.includes('Guardando')",
+                                 timeout=5000)
             pg.select_option("#sLang", b)  # mientras la primera sigue en el aire
             pg.set_checked("#agDirecto", not (cfg0.get("rec_directo") is not False))
             pg.wait_for_timeout(300)
@@ -1554,7 +1552,7 @@ class InterfazEnNavegadorTests(unittest.TestCase):
             r = pg.evaluate("""async rev => { await api('/api/settings', {summary: {lang: 'same'}});
                 try { await api('/api/settings', {perfil: {outputs: []}, rev}); return 'guardado'; }
                 catch (e) { return e.status + ' ' + e.message; } }""", viejo)
-            self.assertTrue(r.startswith("409 Los ajustes han cambiado en otra ventana"), r)
+            self.assertTrue(r.startswith("409 Los ajustes han cambiado desde que abriste Ajustes"), r)
             # y un cambio suelto sí, diciendo que había otro
             r = pg.evaluate("rev => api('/api/settings', {summary: {lang: 'es'}, rev})", viejo)
             self.assertTrue(r["otro_cambio"])
@@ -1576,7 +1574,7 @@ class InterfazEnNavegadorTests(unittest.TestCase):
             self.assertNotEqual(pg.input_value("#sLang"), otro)
             pg.set_checked("#agDirecto", not (cfg0.get("rec_directo") is not False))
             pg.wait_for_function(f"document.querySelector('#modal #sLang')?.value === '{otro}'", timeout=8000)
-            pg.wait_for_selector(".toast:has-text('otra ventana')", timeout=5000)
+            pg.wait_for_selector(".toast:has-text('se ha puesto al día')", timeout=5000)
             directo = not (cfg0.get("rec_directo") is not False)
             self.assertEqual(pg.evaluate("api('/api/config')")["rec_directo"], directo)
             pg.keyboard.press("Escape")
@@ -1609,6 +1607,128 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         pg.wait_for_selector("#modal .aj-nav [data-sec='procesado'].on", timeout=5000)  # vuelve a Procesado
         pg.keyboard.press("Escape")
         err, red = self.limpiar(errores, red)
+        self.assertEqual(err, [], (err, red))
+        self.assertEqual(red, [], red)
+
+    def test_ajustes_revision_1(self):
+        """Revisión 1 de ajustes-uno (Fable 5.2): la tarjeta de Procesado se pone al día al guardar un motor (P1-1); un
+        campo vaciado no vuelve solo mientras se escribe y, al salir vacío, vuelve y lo dice (P1-3); el valor que ajusta
+        el servidor se dice (P2-5); la marca va fuera del <label> (P2-6) y al final de la fila de micro y audio (P2-10);
+        un texto que no se ha podido guardar no se borra (P2-4)."""
+        pg, errores, red = self.pagina()
+        cfg0 = None
+        try:
+            self.abrir_ajustes(pg, "procesado")
+            cfg0 = pg.evaluate("api('/api/config')")
+            locales = [p for p in cfg0["presets"] if p["engine"] == "local"]
+            otro = next(p for p in locales if p["id"] != cfg0["live_preset"] and p["model"] != next(
+                q["model"] for q in locales if q["id"] == cfg0["live_preset"]))
+            tarjeta0 = pg.inner_text("#modal .cfg-estado")
+            pg.select_option("#lPreset", otro["id"])
+            self.guardado_junto_a(pg, "#lPreset")
+            pg.wait_for_function("t => document.querySelector('#modal .cfg-estado').innerText !== t", arg=tarjeta0,
+                                 timeout=5000)
+            # vaciar los hilos para escribir otro número: no vuelve solo; al salir vacío, sí, y lo dice
+            pg.click(".aj-nav [data-sec='avanzado']")
+            hilos = str(cfg0["threads"])
+            pg.fill("#sThreads", "")
+            pg.wait_for_timeout(1200)
+            self.assertEqual(pg.input_value("#sThreads"), "")
+            pg.press("#sThreads", "Tab")
+            self.guardado_junto_a(pg, "#sThreads", "no puede quedar vacío")
+            self.assertEqual(pg.input_value("#sThreads"), hilos)
+            # un número que el servidor ajusta, con el foco aún en la casilla: «Guardado como «N» ✓»
+            pg.fill("#sThreads", "999")
+            self.guardado_junto_a(pg, "#sThreads", "Guardado como «")
+            # la marca de una casilla, fuera de su <label> y como «status»
+            pg.click(".aj-nav [data-sec='avanzado']")
+            pg.set_checked("#lAuto", not cfg0["live_auto"])
+            self.guardado_junto_a(pg, "#lAuto")
+            marca = pg.evaluate("(() => { const el = document.querySelector('#lAuto'); return"
+                                " [el.closest('label').contains(el._ajMarca), el._ajMarca.getAttribute('role')]; })()")
+            self.assertEqual(marca, [False, "status"])
+            # micro y audio del PC: la marca al final de la fila, no entre los dos desplegables
+            pg.click(".aj-nav [data-sec='algrabar']")
+            pg.select_option("#agMic", "none")
+            self.guardado_junto_a(pg, "#agMic")
+            self.assertTrue(pg.evaluate("(() => { const m = document.querySelector('#agMic')._ajMarca; return"
+                                        " m.parentElement.classList.contains('ag-dos')"
+                                        " && m.previousElementSibling.id !== 'agMic'; })()"))
+            pg.select_option("#agMic", cfg0["rec_mic"])
+            self.guardado_junto_a(pg, "#agMic")
+            # un texto que no se ha podido guardar se queda escrito, con su error
+            pg.route("**/api/settings", lambda r: r.fulfill(status=500, json={"error": "fallo pasajero r1"}))
+            pg.click(".aj-nav [data-sec='vocabulario']")
+            pg.fill("#sPrompt", "Texto largo que no se pierde r1")
+            pg.press("#sPrompt", "Tab")
+            self.guardado_junto_a(pg, "#sPrompt", "fallo pasajero r1")
+            self.assertEqual(pg.input_value("#sPrompt"), "Texto largo que no se pierde r1")
+            pg.unroute("**/api/settings")
+            pg.keyboard.press("Escape")
+            err, red = self.limpiar(errores, [r for r in red if "/api/settings" not in r])
+            self.assertEqual(err, [], (err, red))
+            self.assertEqual(red, [], red)
+        finally:
+            if cfg0:
+                pg.unroute_all(behavior="ignoreErrors")
+                pg.evaluate("c => api('/api/settings', {live_preset: c.live_preset, threads: c.threads, "
+                            "live_auto: c.live_auto, rec_mic: c.rec_mic, prompt: c.prompt || ''})", cfg0)
+
+    def test_ajustes_revision_1_claves_repintado_y_rev(self):
+        """Revisión 1: guardar una clave adicional no repinta Ajustes (el clic con el que se sale de la casilla llega a
+        su botón, P1-2) y quitar una ya guardada se pregunta antes (P2-7); el repintado por un cambio de otra ventana
+        conserva la opción pedida y el foco (P2-1, P2-2); y el config_rev es el de lo que enseña Ajustes, no el de
+        S.config: una lista vieja da 409 aunque otra cosa haya puesto S.config al día (P2-3)."""
+        pg, errores, red = self.pagina()
+        pg.goto(f"{self.base}/?t={self.token}", wait_until="networkidle")
+        pg.wait_for_selector("#main h1:has-text('Hoy')", timeout=15000)
+        self.addCleanup(self.api_post, "/api/settings", {"cloud": {"extra_keys_by": {"groq": []}},
+                                                         "perfil": {"outputs": []}})
+        # con la API (solo en esta página): Avanzado enseña las claves adicionales
+        pg.evaluate("S.config.procesado = 'api'")
+        pg.click("#btnSettings")
+        pg.click(".aj-nav [data-sec='avanzado']")
+        pg.click("#dkAdd")
+        pg.fill("#dkRows [data-xkey]", "gsk_adicional_r1_000000000000")
+        pg.click("#dkAdd")  # sale de la casilla (se guarda) y añade otra fila
+        pg.wait_for_function("document.querySelector('#dkAdd').parentElement.querySelector('.aj-ok')"
+                             "?.textContent.includes('Guardado')", timeout=8000)
+        self.assertEqual(pg.locator("#dkRows .dk-row").count(), 2)
+        self.assertEqual(len(pg.evaluate("api('/api/config')")["cloud"]["extra_keys_by"]["groq"]), 1)
+        self.assertIsNotNone(pg.get_attribute("#dkRows .dk-row:first-child [data-xkey]", "data-mask"))  # enmascarada
+        # quitarla: se pregunta (encima); «Cancelar» la deja
+        pg.click("#dkRows .dk-row:first-child [data-xkey-del]")
+        pg.wait_for_selector("#modalSobre:not(.hidden) .dialog", timeout=5000)
+        pg.click("#modalSobre [data-m='no']")
+        self.assertEqual(pg.locator("#dkRows [data-mask]").count(), 1)
+        pg.click("#dkRows .dk-row:first-child [data-xkey-del]")
+        pg.click("#modalSobre:not(.hidden) [data-m='ok']")
+        pg.wait_for_function("api('/api/config').then(c => !(c.cloud.extra_keys_by?.groq || []).length)", timeout=8000)
+        pg.keyboard.press("Escape")
+        # repintado por otra ventana: con la opción pedida y el foco donde estaba
+        pg.evaluate("() => openSettings({sec: 'procesado', proc: 'agente'})")
+        pg.wait_for_selector("#agModelo", timeout=5000)
+        pg.focus("#agModelo")
+        self.api_post("/api/settings", {"summary": {"lang": "same"}})  # otra ventana
+        pg.evaluate("window.dispatchEvent(new Event('focus'))")
+        pg.wait_for_selector(".toast:has-text('se ha puesto al día')", timeout=5000)
+        self.assertTrue(pg.is_visible("#ajProcPedido"))
+        pg.wait_for_function("document.activeElement?.id === 'agModelo'", timeout=3000)
+        pg.keyboard.press("Escape")
+        # el rev de lo que se ve: otra ventana deja una copia; aquí S.config se pone al día sin repintar Ajustes
+        # (como al vincular una carpeta) y la lista de aquí, vieja, no la pisa
+        destino = os.path.join(self.tmp, "copias r1")
+        os.makedirs(destino, exist_ok=True)
+        pg.click("#btnSettings")
+        pg.click(".aj-nav [data-sec='proyectos']")
+        self.api_post("/api/settings", {"summary": {"lang": "es"}})
+        pg.evaluate("api('/api/config').then(setConfig)")
+        pg.evaluate("p => { perfilOuts.push({path: p, format: 'md', by_project: false});"
+                    " document.querySelector('#modal .dialog.aj').ajOutsCambiadas(); }", destino)
+        pg.wait_for_selector(".toast:has-text('desde que abriste Ajustes')", timeout=8000)
+        self.assertEqual(pg.evaluate("api('/api/config')")["perfil"]["outputs"], [])
+        pg.keyboard.press("Escape")
+        err, red = self.limpiar(errores, [r for r in red if "/api/settings" not in r])
         self.assertEqual(err, [], (err, red))
         self.assertEqual(red, [], red)
 

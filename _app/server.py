@@ -2415,8 +2415,8 @@ def move_files(moves):
 
 
 SIN_AUDIO = "Sin micrófono y sin el audio del PC no se graba nada: deja al menos uno de los dos."
-AJUSTES_CAMBIADOS = ("Los ajustes han cambiado en otra ventana y esto no se ha guardado, para no borrar lo de allí. "
-                     "Ya ves lo guardado: vuelve a hacer el cambio.")
+AJUSTES_CAMBIADOS = ("Los ajustes han cambiado desde que abriste Ajustes (en otra ventana o al reiniciar Tenca) y esto "
+                     "no se ha guardado, para no borrar nada. Ya ves lo guardado: vuelve a hacer el cambio.")
 
 
 def ajustes_previstos(st, a):
@@ -8118,13 +8118,14 @@ class App:
         if audio == ["none", "none"]:
             raise ApiError(SIN_AUDIO)
 
-        base = b.get("rev")
-        conflicto = base is not None and base != self.settings.rev
+        base, estado = b.get("rev"), {"conflicto": False}
 
         def upd(d):
             # Ajustes guarda cada control al cambiarlo y manda el config_rev que tenia (rev). Si no coincide, otra
             # ventana (o el asistente) ha guardado antes: lo que es una lista entera (las copias en otras carpetas, las
-            # claves adicionales) no se pisa; lo demas se guarda y la respuesta lo dice (otro_cambio)
+            # claves adicionales) no se pisa; lo demas se guarda y la respuesta lo dice (otro_cambio). Se mira aqui,
+            # con el candado de Store.update: dos peticiones a la vez no pasan las dos como «sin conflicto»
+            conflicto = estado["conflicto"] = base is not None and base != self.settings.rev
             pf, cl = b.get("perfil"), b.get("cloud")
             listas = (isinstance(pf, dict) and "outputs" in pf
                       or isinstance(cl, dict) and any(k in cl for k in ("extra_keys", "extra_keys_by")))
@@ -8243,7 +8244,7 @@ class App:
         # recien elegido un modo que transcribe en este PC: el modelo del directo, ya, con su progreso en Ajustes (solo
         # al cambiar de modo: «Guardar» con el mismo no vuelve a empezar una descarga que se cancelo)
         descarga = self._descargar_modelo_del_directo() if ahora != antes and ahora in ("local", "agente") else None
-        return dict(self.config({}), descarga=descarga, otro_cambio=conflicto)
+        return dict(self.config({}), descarga=descarga, otro_cambio=estado["conflicto"])
 
     def agente_comprobar(self, b):
         """Ajustes → «Comprobar»: el agente esta instalado, responde a --version y contesta una peticion minima con la

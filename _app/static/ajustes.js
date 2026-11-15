@@ -276,7 +276,7 @@ function ajProyectosTabla(car, idioma0) {
       <td><button class="btn ghost sm" type="button" data-pj-editar="${esc(p)}" aria-label="Editar ${esc(p)}">Editar</button></td></tr>`;
     // (14/11/2026) el nombre se recorta con «…» y entero al pasar el ratón: «› Infraestructura · 2 términos» se montaba
     // sobre la columna de al lado
-    return cab + vs.map(v => `<tr class="pj-w" data-pjw="${esc(v.id)}"><td title="${esc(v.name)} · ${v.terms} ${v.terms === 1 ? 'término' : 'términos'}">› ${esc(v.name)} <span class="muted">· ${v.terms} ${v.terms === 1 ? 'término' : 'términos'}</span></td>
+    return cab + vs.map(v => `<tr class="pj-w" data-pjw="${esc(v.id)}"><td title="${esc(v.name)} · ${v.terms} ${v.terms === 1 ? 'término' : 'términos'}"><span class="pj-nom">› ${esc(v.name)}</span> <span class="muted">· ${v.terms} ${v.terms === 1 ? 'término' : 'términos'}</span></td>
       <td>${carpetaW(v.id)}</td>
       <td>${v.id in wl ? lang(wl[v.id]) : `<span class="pj-her">el del proyecto · ${lang(pl[p] ?? idioma0)}</span>`}</td>
       <td><button class="btn ghost sm" type="button" data-pjw-editar="${esc(v.id)}" aria-label="Editar ${esc(p)} › ${esc(v.name)}">Editar</button></td></tr>`).join('');
