@@ -218,8 +218,8 @@ El manual completo está en `LEEME.txt`.
   (≈35 MB) se descargan de los releases de sherpa-onnx al activar la opción, con su sha256 comprobado: segmentación
   pyannote 3.0 (MIT) y CAM++ de 3D-Speaker (`campplus_sv_zh_en_16k-common_advanced`, Alibaba; Apache License 2.0
   según su ficha en ModelScope; el `.onnx` lo publica el proyecto sherpa-onnx). Hasta noviembre de 2026 las huellas
-  eran de TitaNet-S (NVIDIA NeMo): al actualizar, las guardadas se rehacen desde el audio de sus reuniones y, las que
-  ya no tienen audio, con el siguiente «Recordar»; los nombres se conservan.
+  eran de TitaNet-S (NVIDIA NeMo): al actualizar, las guardadas dejan de usarse (no se comparan huellas de dos
+  modelos), los nombres se conservan y cada persona vuelve a tener huella con el siguiente «Recordar».
 - Las copias en otras carpetas escriben texto (nunca audio) en las carpetas que tú elijas, sin los participantes
   sugeridos que no hayas confirmado: si están sincronizadas (OneDrive, SharePoint), ese texto sale de tu PC por esa vía.
   Al borrar una reunión, sus documentos que nadie haya cambiado allí van también a la papelera.

@@ -24,6 +24,7 @@ import json
 import math
 import os
 import re
+import shutil
 import sys
 import tarfile
 import threading
@@ -74,9 +75,10 @@ UMBRAL_GRUPOS = 0.6      # corte del clustering de sherpa-onnx (distancia coseno
 # y la misma pureza, y quien habla poco sigue en su grupo en las 6 reuniones con ella. Con TitaNet, 0,65 ya juntaba a
 # dos personas.
 FUSION = 0.60            # coseno entre las huellas de dos grupos para unirlos
-TOPE_MIN = 0.65          # con el numero de participantes como pista: nunca se une por debajo de este coseno (con
-#                          0,3 una pista demasiado baja juntaba a personas distintas; con 0,65, da igual si se queda
-#                          corta)
+TOPE_MIN = 0.55          # con el numero de participantes como pista: nunca se une por debajo de este coseno (con
+#                          0,3 una pista demasiado baja juntaba a personas distintas). Con TitaNet era 0,65; por
+#                          encima de FUSION la pista no hace nada. Con CAM++, 0,50-0,65 dan lo mismo en dev y 0,55
+#                          baja de 10 a 8 los hablantes de mas en el resto del banco, con la misma pureza
 FUSION_GRANDES = 0.70    # el de FUSION cuando los dos grupos tienen >= GRANDE_S: sus dos huellas son fiables (con
 GRANDE_S = 30.0          # TitaNet, dos hombres distintos de 57 y 70 s llegaban a 0,72; ese caso no se ha medido con
 #                          CAM++)
@@ -755,6 +757,17 @@ def name_key(nombre):
     return "".join(c for c in s if not unicodedata.combining(c)).casefold()
 
 
+_CANDADOS, _CANDADOS_LOCK = {}, threading.Lock()
+
+
+def _candado(path):
+    """Un candado por fichero para todo el proceso: dos Voices() a la vez sobre el mismo voces.json (el servidor tiene
+    hilos) no escriben a la vez ni migran dos veces."""
+    key = os.path.normcase(os.path.abspath(path))
+    with _CANDADOS_LOCK:
+        return _CANDADOS.setdefault(key, threading.RLock())
+
+
 class Voices:
     """DATA_DIR/voces.json: personas con sus huellas. Cifrado con DPAPI (ambito usuario) en Windows; escritura
     atomica con copia .bak (que se elimina al olvidar o fusionar: ninguna copia con huellas sobrevive a un borrado).
@@ -763,10 +776,19 @@ class Voices:
     EMPTY = {"version": 1, "modelo": MODEL_ID, "dim": DIM, "umbral": UMBRAL, "contador": 0, "personas": []}
 
     def __init__(self, path):
-        self.path, self.lock, self.error = path, threading.RLock(), None
+        self.path, self.lock, self.error = path, _candado(path), None
         self.data = json.loads(json.dumps(self.EMPTY))
+        with self.lock:
+            self._load(path)
+
+    def _load(self, path):
         if not os.path.isfile(path):
-            return
+            if not os.path.isfile(path + ".bak"):
+                return
+            # sin voces.json pero con su copia: una escritura que se corto entre las dos (antes del 15/11/2026 la copia
+            # se hacia moviendo el fichero): se recupera de la copia
+            log("   voces.json no está; se recupera de voces.json.bak")
+            path = path + ".bak"
         try:
             raw = read_text(path).strip()
             text = unprotect(raw).decode("utf-8") if raw.startswith(("dpapi:", "plain:")) else raw
@@ -778,37 +800,47 @@ class Voices:
             self.error = f"{e.__class__.__name__}: {e}"
             log(f"   voces.json no se pudo leer ({self.error}); se aparta como voces.json.ilegible")
             try:
-                os.replace(path, path + ".ilegible")
+                os.replace(path, self.path + ".ilegible")
             except OSError:
                 pass
             return
-        if saved.get("modelo") not in (None, MODEL_ID):  # la app siempre lo escribe (EMPTY)
-            self._migrar(saved.get("modelo"))
+        self._migrar(saved.get("modelo"), recuperado=path != self.path)
 
-    def _migrar(self, anterior):
-        """voces.json de otro modelo de huellas (hasta el 15/11/2026, TitaNet small): sus vectores no se pueden
-        comparar con los del modelo de ahora (los dos tienen DIM valores, asi que compararlos no fallaria: daria
-        parecidos sin sentido). Cada persona conserva id, nombre, «Soy yo» y consentimiento; sus huellas pasan a
-        «rehacer» (reunion, fecha y segundos, sin el vector), para recalcularlas con el modelo de ahora desde el audio
-        de esas reuniones (rehacer_huellas). Mientras, no se reconoce a nadie por la voz: mejor que reconocer mal. La
-        copia .bak que deja save() es la de antes (con el modelo anterior); la siguiente escritura la sustituye."""
+    def _migrar(self, anterior, recuperado=False):
+        """Huellas de otro modelo (hasta el 15/11/2026, TitaNet small): sus vectores no se pueden comparar con los del
+        de ahora (los dos tienen DIM valores, asi que compararlos no fallaria: daria parecidos sin sentido). Cada
+        huella lleva su "modelo" desde ese dia; las que no lo llevan o llevan otro (un voces.json de antes, o una que
+        guardo una version anterior de la app sobre uno ya migrado) pasan a «rehacer» (reunion, fecha y segundos, sin
+        el vector), para recalcularlas desde el audio de esas reuniones (rehacer_huellas). Cada persona conserva id,
+        nombre, «Soy yo» y consentimiento. Mientras, no se la reconoce por la voz: mejor que reconocer mal. La copia
+        .bak que deja save() es la de antes."""
         n = 0
-        with self.lock:
-            for p in self.data["personas"]:
-                viejas = [h for h in p.get("huellas") or [] if isinstance(h, dict)]
-                pend = p.setdefault("rehacer", [])
-                for h in viejas:
+        for p in self.data["personas"]:
+            if not isinstance(p, dict):
+                continue
+            todas = p.get("huellas") if isinstance(p.get("huellas"), list) else []
+            viejas = [h for h in todas if not isinstance(h, dict) or h.get("modelo") != MODEL_ID]
+            if not viejas:
+                continue
+            pend = p.setdefault("rehacer", [])
+            for h in viejas:
+                if isinstance(h, dict):
                     pend.append({"reunion": h.get("reunion") or "", "fecha": h.get("fecha"),
                                  "segundos": h.get("segundos")})
-                n += len(viejas)
-                p["huellas"] = []
-            self.data.update(modelo=MODEL_ID, dim=DIM, modelo_anterior=anterior)
-            try:
-                self.save()
-            except OSError as e:  # se queda migrado en memoria; se escribe en el siguiente cambio
-                log(f"   voces.json: no se pudo escribir la migración ({e.__class__.__name__})")
-        log(f"   voces.json: modelo de huellas nuevo ({MODEL_ID}); {n} huellas de "
-            f"{len(self.data['personas'])} personas por rehacer desde sus reuniones")
+            n += len(viejas)
+            p["huellas"] = [h for h in todas if h not in viejas]
+        cambia = n or recuperado or self.data.get("modelo") != MODEL_ID
+        if anterior and anterior != MODEL_ID:
+            self.data["modelo_anterior"] = anterior
+        self.data.update(modelo=MODEL_ID, dim=DIM)
+        if not cambia:
+            return
+        try:
+            self.save()
+        except OSError as e:  # se queda migrado en memoria; se escribe en el siguiente cambio
+            log(f"   voces.json: no se pudo escribir ({e.__class__.__name__})")
+        if n:
+            log(f"   voces.json: modelo de huellas {MODEL_ID}; {n} huellas por rehacer desde sus reuniones")
 
     def pendientes(self):
         """[(pid, {"reunion", "fecha", "segundos"})]: las huellas por rehacer con el modelo de ahora."""
@@ -817,12 +849,17 @@ class Voices:
 
     def rehecha(self, pid, reunion, vector=None, segundos=None):
         """La huella de `reunion` ya rehecha (vector) o que no se puede rehacer (vector None: la reunion o su audio
-        ya no estan, o el hablante ya no es esa persona): sale de «rehacer». Con vector, entra con su fecha de
-        entonces, sin pedir de nuevo el consentimiento (se dio al guardarla). Devuelve cuantas huellas tiene."""
+        ya no estan, o era la misma reunion otra vez): sale de «rehacer». Con vector, entra con su fecha de entonces,
+        sin pedir de nuevo el consentimiento (se dio al guardarla). Devuelve cuantas huellas tiene, o None si la
+        persona ya no existe."""
+        if vector is not None:  # antes de tocar nada: una huella que no vale no quita la pendiente
+            vector = [round(float(x), 5) for x in vector]
+            if len(vector) != DIM:
+                raise ValueError(f"La huella no tiene {DIM} valores")
         with self.lock:
             p = self.find(pid)
             if not p:
-                return 0
+                return None
             pend = p.get("rehacer") or []
             item = next((x for x in pend if x.get("reunion") == reunion), None)
             if item is None:
@@ -831,28 +868,27 @@ class Voices:
             if not pend:
                 p.pop("rehacer", None)
             if vector is not None:
-                vector = [round(float(x), 5) for x in vector]
-                if len(vector) != DIM:
-                    raise ValueError(f"La huella no tiene {DIM} valores")
                 p.setdefault("huellas", []).append({"vector": vector, "fecha": item.get("fecha") or _now(),
                                                     "reunion": reunion, "segundos": round(float(
                                                         segundos if segundos is not None else
-                                                        item.get("segundos") or 0), 1)})
+                                                        item.get("segundos") or 0), 1), "modelo": MODEL_ID})
                 p["huellas"].sort(key=lambda h: h.get("fecha") or "")
                 del p["huellas"][:-MAX_HUELLAS]
             self.save()
             return len(p.get("huellas") or [])
 
     def save(self, backup=True):
-        """backup=False al olvidar o fusionar: el .bak (y un .ilegible apartado) guardarian huellas ya borradas."""
+        """backup=False al olvidar o fusionar: el .bak (y un .ilegible apartado) guardarian huellas ya borradas.
+        Un .tmp propio por escritura y la copia .bak copiando (no moviendo): voces.json nunca falta, ni con dos
+        escrituras a la vez (antes, dos Voices() a la vez podian dejar solo el .bak; revision 2 de motor-lote1)."""
         with self.lock:
             body = protect(json.dumps(self.data, ensure_ascii=False).encode("utf-8"))
-            tmp = self.path + ".tmp"
+            tmp = f"{self.path}.{os.getpid()}.{threading.get_ident()}.tmp"
             with open(tmp, "w", encoding="utf-8") as f:
                 f.write(body)
             if backup and os.path.isfile(self.path):
                 try:
-                    os.replace(self.path, self.path + ".bak")
+                    shutil.copyfile(self.path, self.path + ".bak")
                 except OSError:
                     pass
             os.replace(tmp, self.path)
@@ -931,7 +967,7 @@ class Voices:
             if not p:
                 raise KeyError(pid)
             p.setdefault("huellas", []).append({"vector": vector, "fecha": _now(), "reunion": reunion or "",
-                                                "segundos": round(float(segundos or 0), 1)})
+                                                "segundos": round(float(segundos or 0), 1), "modelo": MODEL_ID})
             p["huellas"].sort(key=lambda h: h.get("fecha") or "")
             del p["huellas"][:-MAX_HUELLAS]
             if not p.get("consentimiento"):
@@ -1013,64 +1049,99 @@ class Voices:
             self.save(backup=False)
 
 
-def buscar_por_nombre(raices, extensiones=(".wav", ".m4a", ".mp3", ".mp4", ".ogg", ".opus", ".webm", ".flac",
-                                           ".aac", ".wma", ".mkv", ".mov")):
-    """buscar(nombre) para rehacer_huellas: los audios con ese nombre de fichero bajo las raices (las carpetas de
-    reuniones), con un solo recorrido, que se hace la primera vez que se pide y solo si hay huellas por rehacer. Sin
-    las carpetas ocultas (.git, .tenca…) ni la papelera de la app."""
-    indice = {}
+# las de server.AUDIO_EXT (el servidor no se importa desde aqui: este fichero corre como subproceso)
+AUDIO_EXT = (".wav", ".mp3", ".m4a", ".mp4", ".flac", ".ogg", ".aac", ".wma", ".opus", ".mkv", ".mov", ".webm", ".oga",
+             ".amr", ".3gp", ".3gpp", ".3ga", ".caf", ".qta", ".aif", ".aiff", ".waptt")
+SOLO_EN_LINEA = 0x400000 | 0x1000  # FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS | OFFLINE (OneDrive «solo en línea»)
+
+
+def buscar_por_nombre(raices, extensiones=AUDIO_EXT):
+    """buscar(nombre) para rehacer_huellas: las rutas absolutas de los audios con ese nombre de fichero bajo las raices
+    (las carpetas de reuniones), con un solo recorrido, que se hace la primera vez que se pide. Sin carpetas ocultas
+    ni la de la app (_app), y sin los ficheros de OneDrive que solo estan en linea (leerlos los descargaria). Si el
+    servidor ya tiene su lista de reuniones, mejor un buscar() sobre esa lista."""
+    indice, hecho = {}, []
 
     def construir():
         for raiz in raices or []:
             for d, subs, files in os.walk(raiz):
-                subs[:] = [x for x in subs if not x.startswith(".") and x.lower() not in ("papelera", "$recycle.bin")]
+                subs[:] = [x for x in subs if not x.startswith(".") and x != "_app"]
                 for f in files:
-                    if f.lower().endswith(extensiones):
-                        indice.setdefault(f, []).append(os.path.join(d, f))
+                    if not f.lower().endswith(tuple(extensiones)):
+                        continue
+                    full = os.path.join(d, f)
+                    try:
+                        if getattr(os.stat(full), "st_file_attributes", 0) & SOLO_EN_LINEA:
+                            continue
+                    except OSError:
+                        continue
+                    indice.setdefault(f, []).append(full)
 
     def buscar(nombre):
-        if not indice:
-            indice[None] = []  # recorrido hecho (aunque no haya nada)
+        if not hecho:
+            hecho.append(True)
             construir()
         return list(indice.get(nombre) or [])
     return buscar
 
 
+def hablante_de(data, pid, segundos=None):
+    """El hablante del sidecar que el usuario puso a mano como esa persona (el de «Recordar»), no uno que la app solo
+    propuso (por voz, por el micro o provisional). Si hay varios, el de segundos mas cercanos a los de la huella."""
+    hablantes = (data or {}).get("hablantes") if isinstance(data, dict) else None
+    if not isinstance(hablantes, dict):
+        return None
+    cands = [(k, i) for k, i in hablantes.items() if isinstance(i, dict) and i.get("persona") == pid
+             and i.get("origen") == "manual" and not i.get("provisional")]
+    if not cands:
+        return None
+    if segundos is None or len(cands) == 1:
+        return cands[0][0]
+    return min(cands, key=lambda c: abs(float(c[1].get("segundos") or 0) - float(segundos)))[0]
+
+
 def rehacer_huellas(v, buscar, calcular, cancelled=None):
-    """Rehace con el modelo de ahora las huellas que dejo la migracion (Voices._migrar). buscar(reunion) -> rutas de
-    audio con ese nombre (la reunion se guardaba por su nombre de fichero); calcular(audio, h) -> (vector, segundos)
-    de ese hablante (en la app, la huella de «Recordar», en un subproceso). En cada audio, el hablante es el que su
-    sidecar asigna a esa persona. Lo que no se encuentra sale de «rehacer» sin huella: la persona sigue con su nombre y
-    vuelve a tener huella con el siguiente «Recordar». Devuelve {"rehechas": n, "sin_audio": n, "fallidas": n}; una que
-    falla al calcular (sin memoria, cancelada) se queda por rehacer para la proxima vez."""
+    """Rehace con el modelo de ahora las huellas que dejo la migracion (Voices._migrar).
+    buscar(reunion) -> rutas de audio con ese nombre (la reunion se guardaba por su nombre de fichero);
+    calcular(audio, h, sidecar) -> (vector, segundos) de ese hablante (en la app, la huella de «Recordar», en un
+    subproceso); sidecar es lo leido al elegir h: quien llama puede comprobar que su "creado" no ha cambiado (si se
+    volvio a identificar, h ya es otra voz) y devolver (None, None).
+    El hablante es el que su sidecar asigna a mano a esa persona (hablante_de). Una que no se encuentra se queda por
+    rehacer (no se pierde nada: se vuelve a buscar la proxima vez); una que falla al calcular, tambien. La misma reunion
+    dos veces da una sola huella. Devuelve {"rehechas": n, "sin_audio": n, "fallidas": n}; no lanza."""
     cancelled = cancelled or (lambda: False)
     out = {"rehechas": 0, "sin_audio": 0, "fallidas": 0}
-    for pid, item in v.pendientes():
-        if cancelled():
-            break
-        reunion = item.get("reunion") or ""
-        hecho = False
-        for audio in (buscar(reunion) if reunion else []) or []:
-            data = read_sidecar(sidecar_path(audio)) or {}
-            h = next((k for k, info in (data.get("hablantes") or {}).items() if info.get("persona") == pid), None)
-            if h is None:
+    hechas = set()
+    try:
+        for pid, item in v.pendientes():
+            if cancelled():
+                break
+            reunion = item.get("reunion") or ""
+            if (pid, reunion) in hechas:  # la misma reunion otra vez: ya tiene esa huella
+                v.rehecha(pid, reunion, None)
                 continue
-            try:
-                vec, secs = calcular(audio, h)
-            except Exception as e:
-                log(f"   huella por rehacer ({reunion}, {h}): {e.__class__.__name__}")
-                out["fallidas"] += 1
-                hecho = None
-                break
-            if vec is not None:
-                v.rehecha(pid, reunion, vec, secs)
-                out["rehechas"] += 1
-                hecho = True
-                break
-        if hecho is False:
-            v.rehecha(pid, reunion, None)
-            out["sin_audio"] += 1
-    if any(out.values()):
+            estado = "sin_audio"
+            for audio in (buscar(reunion) if reunion else []) or []:
+                data = read_sidecar(sidecar_path(audio)) or {}
+                h = hablante_de(data, pid, item.get("segundos"))
+                if h is None:
+                    continue
+                try:
+                    vec, secs = calcular(audio, h, data)
+                    if vec is not None and len(vec) != DIM:
+                        raise ValueError(f"la huella no tiene {DIM} valores")
+                except Exception as e:  # sin memoria, cancelada, sin el audio: se queda por rehacer
+                    log(f"   huella por rehacer ({reunion}, {h}): {e.__class__.__name__}")
+                    estado = "fallidas"
+                    break
+                if vec is not None and v.rehecha(pid, reunion, vec, secs) is not None:  # OSError: fuera
+                    estado = "rehechas"
+                    hechas.add((pid, reunion))
+                    break
+            out[estado] += 1
+    except OSError as e:  # no se puede escribir voces.json: se para y se sigue la proxima vez
+        log(f"   huellas por rehacer: no se pudo escribir voces.json ({e.__class__.__name__})")
+    if out["rehechas"] or out["fallidas"]:
         log(f"   huellas rehechas con el modelo nuevo: {out}")
     return out
 
@@ -1379,6 +1450,8 @@ def main(argv=None):
     tmp = os.path.join(a.data, "tmp", f"voces-{os.getpid()}-{uuid.uuid4().hex[:8]}.pcm")
     samples = None
     try:
+        if not models_ready(a.data):  # p. ej. tras actualizar con otro modelo de huellas: «Recordar» antes que nada
+            ensure_models(a.data, progress)
         progress(stage="Leyendo audio…", frac=0.01)
         os.makedirs(os.path.dirname(tmp), exist_ok=True)
         if a.fingerprint:

@@ -21,10 +21,10 @@ Punto 36 de la revisión del 14/11/2026. Rama `motor-lote1`.
   las de prueba: 0,190 frente a 0,200; con el audio de Teams, 0,198 frente a 0,227 en la de 8 voces; 74 hablantes
   vistos para 64 personas, frente a 85. Quien habla poco sale como persona aparte con los dos, y con el nuevo se le
   atribuye menos a otro. Algo menos de memoria (830 MB frente a 918 con 2 h).
-- **Las huellas guardadas se rehacen.** Las del modelo anterior no se pueden comparar con las nuevas: al actualizar, cada
-  persona conserva su nombre y sus datos, y su huella se recalcula desde el audio de la reunión en que se guardó. Si
-  ese audio ya no está, se queda sin huella hasta el siguiente «Recordar». Mientras, no se reconoce a nadie por la voz:
-  mejor que reconocer mal.
+- **Las huellas guardadas dejan de usarse.** Las del modelo anterior no se pueden comparar con las nuevas: al
+  actualizar, cada persona conserva su nombre, «Soy yo» y su consentimiento, y vuelve a tener huella con el siguiente
+  «Recordar». Mientras, no se la reconoce por la voz: mejor que reconocer mal. Queda apuntado de qué reunión era cada
+  huella, para recalcularla desde su audio (falta que la app lo haga sola).
 - `scripts/banco_voces.py` monta ese banco y `scripts/eval_voces.py` mide con otro modelo (`--emb`).
 
 ### Tres idiomas a la vez, avisos con el icono de la app y el repaso en la nube por idioma (15/11/2026)
