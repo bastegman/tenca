@@ -19,7 +19,7 @@ import unittest
 from datetime import datetime, timedelta
 from unittest import mock
 
-from support import REPO, TempTree, bare_jobs, server  # noqa: F401  (support prepara sys.path)
+from support import REPO, TempTree, bare_jobs, server, codigo_del_servidor  # noqa: F401  (support prepara sys.path)
 import calendario  # noqa: E402
 import plan  # noqa: E402
 from test_calendario import Base, SerieItems, pywin32_fecha  # noqa: E402
@@ -596,8 +596,7 @@ class ServidorTests(TempTree):
                          {"idioma": "", "vocab": ""})
 
     def test_ruta_y_voces_sin_nombre(self):
-        with open(server.__file__, encoding="utf-8") as f:
-            src = f.read()
+        src = codigo_del_servidor()
         self.assertIn('"/api/hoy": a.hoy', src)
         self.assertIn('threading.Thread(target=self._agenda_watch, daemon=True, name="agenda-outlook").start()', src)
         lib = server.Library.__new__(server.Library)

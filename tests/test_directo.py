@@ -15,7 +15,8 @@ from unittest import mock
 
 import numpy as np
 
-from support import engines, live, server, wav_bytes, FakeJob  # noqa: F401  (support prepara sys.path)
+from support import (engines, live, server, wav_bytes,  # noqa: F401  (support prepara sys.path)
+                     FakeJob, codigo_del_servidor)
 
 SR = live.SR
 
@@ -465,8 +466,7 @@ class LiveTranslateApiTests(unittest.TestCase):
         self.assertFalse(job.translate)
         with self.assertRaises(server.ApiError):
             app.live_translate({"id": "nadie", "on": True})
-        with open(server.__file__, encoding="utf-8") as f:
-            self.assertIn("/api/live/traducir", f.read())
+        self.assertIn("/api/live/traducir", codigo_del_servidor())
 
 
 # ----------------------------------------------------------------------------- traduccion del directo

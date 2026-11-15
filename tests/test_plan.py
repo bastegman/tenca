@@ -9,7 +9,7 @@ import types
 import unittest
 from unittest import mock
 
-from support import TempTree, bare_jobs, server  # noqa: F401  (support prepara sys.path)
+from support import TempTree, bare_jobs, server, codigo_del_servidor  # noqa: F401  (support prepara sys.path)
 import plan  # noqa: E402
 from test_perfil import FakeRec, settings_store  # noqa: E402
 
@@ -636,8 +636,7 @@ class ServidorPlanTests(TempTree):
 
 class RutasPlanTests(unittest.TestCase):
     def test_rutas_en_el_servidor(self):
-        with open(server.__file__, encoding="utf-8") as f:
-            src = f.read()
+        src = codigo_del_servidor()
         self.assertIn('"/api/grabar/plan": a.grabar_plan_api', src)
         self.assertIn('"/api/grabar/recordar": a.grabar_recordar', src)
         # la tarjeta (grabar_plan_api), Ctrl+Alt+R, Hoy (B7) y «Ya ha empezado «X»» (rec_siguiente): el mismo cálculo

@@ -16,7 +16,7 @@ import types
 import unittest
 from unittest import mock
 
-from support import APP, server  # noqa: F401  (support prepara sys.path)
+from support import APP, server, codigo_del_servidor  # noqa: F401  (support prepara sys.path)
 import window  # noqa: E402
 from test_frontend import js_defs, read  # noqa: E402
 
@@ -249,8 +249,7 @@ class AvisoFlotanteTests(unittest.TestCase):
 
 
 def read_server():
-    with open(server.__file__, encoding="utf-8") as f:
-        return f.read()
+    return codigo_del_servidor()  # server.py y los modulos que salieron de el
 
 
 @unittest.skipUnless(shutil.which("node"), "node no instalado")

@@ -17,7 +17,8 @@ import types
 import unittest
 from unittest import mock
 
-from support import APP, TempTree, bare_jobs, engines, server  # noqa: F401  (support prepara sys.path)
+from support import (APP, TempTree, bare_jobs, engines,  # noqa: F401  (support prepara sys.path)
+                     server, codigo_del_servidor)
 from test_perfil import settings_store  # noqa: E402  (ayudante, no tests)
 
 NIETO = ("import subprocess, sys; "
@@ -314,7 +315,7 @@ class ArrancarConWindowsTests(unittest.TestCase):
         self.assertIn('id="sInicioWin"', js)
         self.assertIn("api('/api/inicio-windows')", js)
         self.assertIn("api('/api/inicio-windows', { activado: ini.checked })", js)
-        src = open(os.path.join(APP, "server.py"), encoding="utf-8").read()
+        src = codigo_del_servidor()
         self.assertIn('"/api/inicio-windows": lambda q: {"activado": inicio_windows_leer()}', src)
         self.assertIn('"/api/inicio-windows": lambda b: {"activado": inicio_windows_poner(b.get("activado") is True)}',
                       src)

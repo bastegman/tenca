@@ -12,7 +12,8 @@ import types
 import unittest
 from unittest import mock
 
-from support import APP, TempTree, bare_jobs, engines, server  # noqa: F401  (support prepara sys.path)
+from support import (APP, TempTree, bare_jobs, engines,  # noqa: F401  (support prepara sys.path)
+                     server, codigo_del_servidor)
 from test_perfil import settings_store  # noqa: E402  (ayudante, no tests)
 
 STATIC = os.path.join(APP, "static")
@@ -489,7 +490,7 @@ class ApiProcesadoTests(TempTree):
         self.assertEqual(server.agente_de(st.get())[1], {"tipo": "claude", "modelo": "sonnet"})
 
     def test_la_ruta_existe_y_el_diagnostico_dice_donde(self):
-        src = read_app("server.py")
+        src = codigo_del_servidor()
         self.assertIn('"/api/agente/comprobar": a.agente_comprobar', src)
         a = self.app(procesado="agente", agente_version="2.1.314")
         with mock.patch.object(engines.ClaudeCode, "find", return_value="/x/claude"), \

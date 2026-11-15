@@ -16,7 +16,7 @@ import urllib.error
 import urllib.request
 from unittest import mock
 
-from support import APP, FakeJob, bare_jobs, patched_paths, server
+from support import APP, FakeJob, bare_jobs, patched_paths, server, codigo_del_servidor
 
 import common  # noqa: E402
 import window  # noqa: E402
@@ -61,7 +61,7 @@ class NombreCentralizadoTests(unittest.TestCase):
         """Compatibilidad con las instalaciones y los datos existentes: DATA_DIR (AudiosApp), la cabecera X-Audios,
         /api/ping ("audios") y la pestaña «Notas» de cada reunión (es la función, no la marca)."""
         self.assertTrue(server.DATA_DIR.endswith("AudiosApp"))
-        src = read("server.py")
+        src = codigo_del_servidor()
         self.assertIn('self.headers.get("X-Audios") != "1"', src)
         # el ping sigue diciendo "audios" (y la version y, para cederle el primer plano, el pid)
         self.assertIn('{"app": "audios", "version": VERSION, "pid": os.getpid()}', src)

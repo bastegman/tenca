@@ -24,7 +24,8 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
-from support import APP, TempTree, bare_jobs, engines, server, wav_bytes  # noqa: F401  (prepara sys.path)
+from support import (APP, TempTree, bare_jobs, engines, server,  # noqa: F401  (prepara sys.path)
+                     wav_bytes, codigo_del_servidor)
 from test_perfil import settings_store  # noqa: E402  (ayudante, no tests)
 
 try:
@@ -701,7 +702,7 @@ class ServidorModelosTests(TempTree):
         self.assertFalse(por["medium"]["cached"])
 
     def test_rutas_registradas(self):
-        src = read_app("server.py")
+        src = codigo_del_servidor()
         for r in ('"/api/modelos": a.modelos_state', '"/api/modelos/descargar": a.modelos_descargar',
                   '"/api/modelos/cancelar": a.modelos_cancelar'):
             self.assertIn(r, src)

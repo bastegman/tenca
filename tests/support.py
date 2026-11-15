@@ -24,7 +24,7 @@ import live  # noqa: E402
 PATH_NAMES = ("ROOT", "APP_DIR", "STATIC_DIR", "EXPORT_DIR", "DATA_DIR")
 # server.py se partio en modulos el 15/11/2026: server.py (la fachada, con main() y App) y los que salieron de el.
 # Los tests que miran el codigo («la ruta X esta registrada», «main() hace Y») leen todos juntos.
-PARTES_DEL_SERVIDOR = ("server.py", "diagnostico.py", "inicio_windows.py", "rutas.py")
+PARTES_DEL_SERVIDOR = ("server.py",) + tuple(n + ".py" for n in server.PARTES)
 
 
 def codigo_del_servidor():

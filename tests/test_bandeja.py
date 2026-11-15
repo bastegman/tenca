@@ -22,6 +22,7 @@ from unittest import mock
 from support import APP, server
 import bandeja  # noqa: E402
 import inicio_windows  # noqa: E402
+import api  # noqa: E402
 import window  # noqa: E402
 
 
@@ -539,7 +540,7 @@ class ArrancarConWindowsTests(unittest.TestCase):
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         vistos = []
         try:
-            with mock.patch.object(server, "inicio_windows_poner", lambda v: vistos.append(v) or v):
+            with mock.patch.object(api, "inicio_windows_poner", lambda v: vistos.append(v) or v):
                 for cuerpo in ({"activado": "false"}, {"activado": 1}, {"activado": True}, {}):
                     req = urllib.request.Request(server.URL + "api/inicio-windows", data=json.dumps(cuerpo).encode(),
                                                  method="POST", headers={"X-Audios": "1", "Content-Type":

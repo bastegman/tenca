@@ -20,7 +20,8 @@ from unittest import mock
 
 import numpy as np
 
-from support import REPO, TempTree, server, engines, live
+from support import REPO, TempTree, server, engines, live, codigo_del_servidor
+import api  # noqa: E402
 import recording  # noqa: E402
 
 STATIC = os.path.join(REPO, "_app", "static")
@@ -236,7 +237,7 @@ class GrabacionAbiertaViejaTests(TempTree):
 class PeticionLentaTests(unittest.TestCase):
     def test_solo_las_que_pasan_del_tope(self):
         logs = []
-        with mock.patch.object(server, "log", logs.append):
+        with mock.patch.object(api, "log", logs.append):
             server.slow_request("GET", "/api/config", 0.4)
             server.slow_request("GET", "/api/config", 480.2)
             server.slow_request("POST", "/api/rec/start", 2.0)
@@ -244,7 +245,7 @@ class PeticionLentaTests(unittest.TestCase):
                                 "   petición lenta: POST /api/rec/start 2.0 s"])
 
     def test_el_despacho_la_mide(self):
-        src = read_app("server.py")
+        src = codigo_del_servidor()
         self.assertIn('slow_request("GET", u.path, time.time() - t0)', src)
         self.assertIn("slow_request('POST', u.path, time.time() - t0)", src)
 
@@ -278,7 +279,7 @@ class OtraVersionTests(unittest.TestCase):
             self.assertEqual(server.probe_running(), "otro")
 
     def test_el_ping_lleva_la_version(self):
-        src = read_app("server.py")
+        src = codigo_del_servidor()
         self.assertIn('"/api/ping": lambda q: {"app": "audios", "version": VERSION, "pid": os.getpid()}', src)
 
     def retirar(self, respuestas, puerto_libre, windows=True, pid=4242, python=True):

@@ -18,7 +18,8 @@ import xml.etree.ElementTree as ET
 import zipfile
 from unittest import mock
 
-from support import TempTree, bare_jobs, engines, live, server, srt_text  # noqa: F401  (support prepara sys.path)
+from support import (TempTree, bare_jobs, engines, live, server,  # noqa: F401  (support prepara sys.path)
+                     srt_text, codigo_del_servidor)
 import calendario  # noqa: E402
 import salidas  # noqa: E402
 from test_directo import (DirectoJob, FakeCloud, FakeRecorder, FakeSummarizer, FakeWorker,  # noqa: E402
@@ -801,7 +802,7 @@ class RutasPerfilTests(TempTree):
 
 class ConfigPerfilTests(unittest.TestCase):
     def test_config_lleva_el_perfil(self):
-        src = open(server.__file__, encoding="utf-8").read()
+        src = codigo_del_servidor()
         cfg = src[src.index("    def config(self, q):"):src.index("    def tree(self, q):")]
         self.assertIn('"perfil": perfil_de(st)', cfg)
         # y las rutas nuevas estan registradas
