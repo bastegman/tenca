@@ -52,9 +52,13 @@ function renderVoicesBar(a) {
       <span class="sp"></span><button class="btn sm" data-act="voz-identify">${I.voice}Identificar voces</button>`;
   }
   // con el bloque abierto y algo escrito en él, no se repinta (los trabajos refrescan la barra cada pocos segundos)
-  const qh = $('#qhBloque', el);
-  if (qh && S.qhAbierto === a.path && (qh.contains(document.activeElement) || qh.dataset.sucio || qh.dataset.busy)) return;
+  // si es la misma identificación (mismo `creado`) y sin trabajo de voces, no se repinta con algo escrito; si las voces
+  // se han vuelto a identificar, sí: sus filas podrían ser ya otras voces (revisión 1, P0-1)
+  const qh = $('#qhBloque', el), misma = qh && s && qh.dataset.creado === String(s.creado ?? '');
+  if (qh && misma && !j && S.qhAbierto === a.path && (qh.contains(document.activeElement) || qh.dataset.sucio || qh.dataset.busy)) return;
+  const borrador = misma ? qhBorrador(qh) : null;  // lo escrito en las demás filas no se pierde al guardar una (P1-2)
   el.innerHTML = html ? `<div class="card voz-bar${S.qhAbierto === a.path ? ' abierto' : ''}">${html}</div>` : '';
+  if (borrador && $('#qhBloque', el)) qhReponer($('#qhBloque', el), borrador);
   if (S.qhIr && $('#qhBloque', el)) {
     S.qhIr = false;
     const b = $('#qhBloque', el);
@@ -64,6 +68,31 @@ function renderVoicesBar(a) {
 }
 
 /* ---------------------------------------------------------------- B8: el bloque «Quién habla» */
+function qhBorrador(b) {
+  const filas = {};
+  $$('.qh-fila', b).forEach(f => {
+    const n = $('[data-qh-nombre]', f);
+    filas[f.dataset.h] = { v: n ? n.value : null, ini: n ? n.defaultValue : null, rec: !!$('[data-qh-rec]', f)?.checked, sel: !!$('[data-qh-sel]', f)?.checked };
+  });
+  return { filas, con: !!$('#qhConsent', b)?.checked, guardada: S.qhGuardada || null };
+}
+function qhReponer(b, d) {
+  $$('.qh-fila', b).forEach(f => {
+    const x = d.filas[f.dataset.h];
+    if (!x || f.dataset.h === d.guardada) return;
+    const n = $('[data-qh-nombre]', f);
+    if (n && x.v !== x.ini) { n.value = x.v; b.dataset.sucio = '1'; }
+    if ($('[data-qh-rec]', f)) $('[data-qh-rec]', f).checked = x.rec;
+    $('[data-qh-sel]', f).checked = x.sel;
+  });
+  $('#qhConsent', b).checked = d.con;
+  $('.qh-consent', b).classList.toggle('hidden', !$$('[data-qh-rec]', b).some(x => x.checked));
+  $('[data-qh-unir]', b).disabled = $$('[data-qh-sel]', b).filter(x => x.checked).length < 2;
+  if (d.guardada) {  // tras guardar una, el foco a la siguiente sin nombre
+    S.qhGuardada = null;
+    ($$('[data-qh-nombre]', b).find(x => !x.value.trim()) || $('[data-qh-unir]', b))?.focus({ preventScroll: true });
+  }
+}
 /* todas las voces, de la que más habla a la que menos, cada una con su nombre (si lo tiene) */
 function qhFilas(s) {
   const personas = s.personas || [];
@@ -77,7 +106,8 @@ function qhFilas(s) {
    y las personas ya guardadas, sin los que ya tienen voz en esta reunión */
 function qhSugerencias(a, s, filas) {
   const usados = new Set(filas.map(f => fold(f.nombre)).filter(Boolean));
-  const part = String((a.props || {}).participantes || '').split(/[,;]/).map(x => x.trim()).filter(Boolean);
+  const lista = String((a.props || {}).participantes || ''), sep = lista.includes(';') ? ';' : ',';
+  const part = lista.split(sep).map(x => x.trim()).filter(Boolean);
   const out = [], vistos = new Set();
   for (const n of [...part, ...(s.personas || []).filter(p => !p.es_usuario).map(p => p.nombre)]) {
     const k = fold(n);
@@ -88,7 +118,7 @@ function qhSugerencias(a, s, filas) {
 function qhBloqueHtml(a, s) {
   const filas = qhFilas(s), sug = qhSugerencias(a, s, filas);
   const de = sug.origen === 'outlook' ? 'de la cita de Outlook' : sug.origen === 'teams' ? 'de Teams' : 'de la reunión';
-  return `<div class="qh" id="qhBloque" role="group" aria-label="Quién habla">
+  return `<div class="qh" id="qhBloque" role="group" aria-label="Quién habla" data-creado="${esc(String(s.creado ?? ''))}">
     ${sug.citas.length ? `<div class="qh-sug"><span class="muted">Asistentes ${de}:</span>${sug.citas.map(n => `<button type="button" class="tag-chip qh-chip" data-qh-sug="${esc(n)}" title="Ponerlo en la voz que estás nombrando">${esc(n)}</button>`).join('')}</div>` : ''}
     <div class="qh-lista" role="list">${filas.map(f => `<div class="qh-fila" role="listitem" data-h="${esc(f.h)}">
       <input type="checkbox" data-qh-sel aria-label="Elegir ${esc(spkLabel(f.h))} para juntarla con otras">
@@ -118,18 +148,24 @@ function qhMuestra(h) {
   });
   return best;
 }
-let qhParar = null;
+/* la parada de «Oír»: al llegar al final de la muestra; se olvida si el audio cambia de reunión o de sitio (revisión 1,
+   P1-4: un temporizador de 5 s pausaba lo que se pusiera a sonar después) */
+let qhOyendo = null;
+audio.addEventListener('timeupdate', () => {
+  const o = qhOyendo;
+  if (!o) return;
+  if (S.playing !== o.path || audio.currentTime < o.t - 1 || audio.currentTime > o.fin + 1.5) { qhOyendo = null; return; }
+  if (audio.currentTime >= o.fin) { qhOyendo = null; audio.pause(); }
+});
 async function qhGuardarFila(a, fila, bloque) {
   const h = fila.dataset.h, s = S.spk, i = spkInfo(h) || {};
   const nombre = $('[data-qh-nombre]', fila).value.trim();
   if (!nombre) return toast('Escribe un nombre');
   const rec = $('[data-qh-rec]', fila).checked, con = $('#qhConsent', bloque).checked;
-  if (rec && !con) {
-    $('.qh-consent', bloque).classList.remove('hidden');
-    return toast('Para guardar la huella marca la casilla de consentimiento', 'err');
-  }
   const cur = i.persona ? (s.personas || []).find(p => p.id === i.persona) : null;
-  const r = await api('/api/voces/persona', spkNameBody(a, h, cur, nombre, { recordar: rec, consentimiento: con, creado: s.creado }));
+  // el `creado` con el que se pintó el bloque: si las voces se han vuelto a identificar, el servidor lo rechaza
+  const r = await api('/api/voces/persona', spkNameBody(a, h, cur, nombre, { recordar: rec, consentimiento: con, creado: bloque.dataset.creado || s.creado }));
+  S.qhGuardada = h;
   return rec ? `🗣 ${esc(nombre)}: huella guardada (${r.huellas})` : `🗣 ${esc(nombre)} en esta reunión`;
 }
 async function qhAccion(e) {
@@ -149,14 +185,18 @@ async function qhAccion(e) {
   if (e.target.closest('[data-qh-oir]') && fila) {
     const m = qhMuestra(fila.dataset.h);
     if (!m) return toast('No sé en qué minuto habla esta voz: hace falta la transcripción con tiempos (.srt)');
-    clearTimeout(qhParar);
     loadAudio(a, m.t, true);
-    qhParar = setTimeout(() => { if (S.playing === a.path && !audio.paused) audio.pause(); }, 5000);
+    qhOyendo = { path: a.path, t: m.t, fin: m.t + Math.min(5, Math.max(1, m.d)) };
     return;
   }
   if (e.target.closest('[data-qh-guardar]') && fila) {
     if (bloque.dataset.busy) return;
     const rec = $('[data-qh-rec]', fila).checked;
+    if (!$('[data-qh-nombre]', fila).value.trim()) return toast('Escribe un nombre');
+    if (rec && !$('#qhConsent', bloque).checked) {  // antes de «Guardando…»: sin consentimiento no se manda nada
+      $('.qh-consent', bloque).classList.remove('hidden');
+      return toast('Para guardar la huella marca la casilla de consentimiento', 'err');
+    }
     ocupado(rec ? 'Guardando la huella de voz…' : 'Guardando…');
     try { const msg = await qhGuardarFila(a, fila, bloque); if (!msg || typeof msg !== 'string') return libre(); await fin(msg); } catch (err) { libre(); toast(esc(err.message), 'err'); }
     return;
@@ -167,10 +207,11 @@ async function qhAccion(e) {
     if (hs.length < 2) return;
     const con = hs[0];  // la que más habla (la lista va por tiempo): las demás se juntan en ella
     ocupado('Juntando…');
+    let hechas = 0;
     try {
-      for (const h of hs.slice(1)) await api('/api/hablantes/unir', spkJoinBody(a, h, con, s.creado));
+      for (const h of hs.slice(1)) { await api('/api/hablantes/unir', spkJoinBody(a, h, con, bloque.dataset.creado || s.creado)); hechas++; }
       await fin(`${hs.length} voces juntadas en ${esc(spkLabel(con))}`);
-    } catch (err) { await fin(); toast(esc(err.message), 'err'); }
+    } catch (err) { await fin(); toast(`${hechas ? `Se juntaron ${hechas + 1} de ${hs.length}. ` : ''}${esc(err.message)}`, 'err'); }
   }
 }
 main.addEventListener('click', e => { if (e.target.closest('#qhBloque')) qhAccion(e); });
@@ -189,9 +230,9 @@ main.addEventListener('keydown', e => {
 function spkPopCerrar() {
   const p = $('.spk-pop');
   if (!p || p.dataset.busy) return false;
-  const h = p.dataset.h;
+  const ancla = p._ancla;
   closeSpkPop();
-  if (h) $(`.spk[data-spk="${CSS.escape(h)}"]`)?.focus();
+  if (ancla && ancla.isConnected) ancla.focus({ preventScroll: true });
   return true;
 }
 
@@ -244,7 +285,7 @@ function openSpeakerPop(h, anchor) {
   const other = cur && !cur.es_usuario, doubtOther = i.provisional && other, merge = i.persona && !i.usuario;
   const pop = document.createElement('div');
   pop.className = 'spk-pop';
-  pop.dataset.h = h;
+  pop._ancla = anchor;
   pop.innerHTML = `<div class="sp-h">${esc(spkLabel(h))} <span class="muted">· ${fmtSecs(i.segundos || 0)} de voz${i.score != null ? ` · parecido ${String(Math.round(i.score * 100))} %` : ''}${i.breve ? ' · habla poco' : ''}</span></div>
     ${doubtOther ? `<div class="notice info">Parece <b>${esc(cur.nombre)}</b>, pero no es seguro. Si lo es, pulsa <b>Confirmar</b> (se guarda esta voz como otra huella suya).</div>` : ''}
     ${i.usuario && i.provisional ? '<div class="notice info">Parece tu voz, pero no es seguro. Si eres tú, pulsa <b>Soy yo</b>; si no, escribe su nombre.</div>' : ''}

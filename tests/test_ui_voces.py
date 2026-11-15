@@ -244,9 +244,10 @@ class VocesEnNavegadorTests(unittest.TestCase):
         ctx = self.browser.new_context(bypass_csp=True, viewport={"width": 1280, "height": 800})
         self.addCleanup(ctx.close)
         pg = ctx.new_page()
-        errores, red = [], []
+        errores, red, personas = [], [], []
         pg.on("pageerror", lambda e: errores.append(f"pageerror: {e}"))
         pg.on("response", lambda r: red.append(f"{r.status} {r.url}") if r.status >= 400 else None)
+        pg.on("request", lambda r: personas.append(r.post_data) if "/api/voces/persona" in r.url else None)
         pg.goto(f"{self.base}/?t={self.token}", wait_until="networkidle")
         pg.wait_for_selector("#main h1", timeout=15000)
         pg.wait_for_function("p => S.audios && S.audios.get(p)", arg=rel, timeout=10000)
@@ -268,7 +269,8 @@ class VocesEnNavegadorTests(unittest.TestCase):
         self.assertEqual(pg.input_value(fila + " [data-qh-nombre]"), "Ana Prueba")
         pg.check(fila + " [data-qh-rec]")
         pg.click(fila + " [data-qh-guardar]")
-        pg.wait_for_selector("#qhBloque .qh-consent:not(.hidden)", timeout=5000)
+        pg.wait_for_function("document.querySelector('#toasts').textContent.includes('consentimiento')", timeout=5000)
+        self.assertEqual(personas, [])  # no ha salido ninguna petición
         hs = self.api("/api/hablantes?path=" + urllib.request.quote(rel))["hablantes"]
         self.assertIsNone(hs["h2"]["persona"])
         pg.uncheck(fila + " [data-qh-rec]")
@@ -276,6 +278,7 @@ class VocesEnNavegadorTests(unittest.TestCase):
         pg.wait_for_function("document.querySelector(\"#txBody .spk[data-spk='h2']\").textContent === 'Ana Prueba'",
                              timeout=10000)
         self.assertTrue(pg.is_visible("#qhBloque"))  # sigue abierto tras guardar
+        self.assertEqual([json.loads(b)["consentimiento"] for b in personas], [False])
         # «Son la misma persona»: dos voces de una vez
         pg.check("#qhBloque .qh-fila[data-h='h1'] [data-qh-sel]")
         self.assertTrue(pg.is_disabled("#qhBloque [data-qh-unir]"))
@@ -285,6 +288,21 @@ class VocesEnNavegadorTests(unittest.TestCase):
         hs = self.api("/api/hablantes?path=" + urllib.request.quote(rel))["hablantes"]
         self.assertEqual(sorted(hs), ["h1", "h2", "h3"])
         self.assertEqual(hs["h1"]["segundos"], 20.0)  # sus tramos y los de h4
+        # lo escrito en una fila no se pierde al guardar otra, y el foco va a la siguiente sin nombre
+        pg.fill("#qhBloque .qh-fila[data-h='h1'] [data-qh-nombre]", "Borrador")
+        pg.fill("#qhBloque .qh-fila[data-h='h3'] [data-qh-nombre]", "Luis Prueba")
+        pg.click("#qhBloque .qh-fila[data-h='h3'] [data-qh-guardar]")
+        pg.wait_for_function("document.querySelector(\"#txBody .spk[data-spk='h3']\").textContent === 'Luis Prueba'",
+                             timeout=10000)
+        self.assertEqual(pg.input_value("#qhBloque .qh-fila[data-h='h1'] [data-qh-nombre]"), "Borrador")
+        # si las voces se vuelven a identificar, el bloque se repinta con las nuevas (no guarda en la voz de antes)
+        sc = os.path.join(self.root, "R quien" + voices.SIDECAR_EXT)
+        d = voices.read_sidecar(sc)
+        d["creado"] = "2026-11-15T11:00:00"
+        voices.write_sidecar(sc, d)
+        pg.evaluate("() => { S.spk = null; return loadSpeakers(curAudio()); }")
+        nuevo = "document.querySelector('#qhBloque').dataset.creado === '2026-11-15T11:00:00'"
+        pg.wait_for_function(nuevo, timeout=5000)
         # Escape cierra el globo de una etiqueta
         pg.click("#txBody .spk[data-spk='h3']")
         pg.wait_for_selector(".spk-pop", timeout=5000)
@@ -310,7 +328,7 @@ class VocesEnNavegadorTests(unittest.TestCase):
             pg.evaluate("p => { location.hash = '#/a/' + encodeURIComponent(p); }", rel)
             pg.wait_for_selector("#aSum .sumview p", timeout=15000)
             y = pg.evaluate("Math.round(document.querySelector('#aSum .sumview p').getBoundingClientRect().top)")
-            self.assertLess(y, h - 60, (w, y))
+            self.assertLess(y, h * 0.8, (w, y))  # antes: 805 y 932
             autor = pg.inner_text("#aSum .sum-autor")
             self.assertIn("por Claude (claude-sonnet-4-5) el 12 nov 2026 a las 16:09", autor)
             self.assertNotIn("no carga tu portátil", pg.inner_text("#aTabs"))

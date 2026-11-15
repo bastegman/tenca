@@ -1175,7 +1175,7 @@ fieldset.ct-opciones { margin-top: 16px; }
 .reunion-page #aVoz .voz-bar { margin: 12px 0 0; }
 .page.reunion-page.dual { max-width: 1500px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 28px; align-items: start; }
 .page.dual > * { grid-column: 1 / -1; }
-.page.dual > #aSum { grid-column: 1; grid-row: span 2; position: sticky; top: 0; max-height: calc(100vh - 80px); overflow: auto; padding-top: 14px; }
+.page.dual > #aSum { grid-column: 1; grid-row: span 2; position: sticky; top: 0; max-height: calc(100vh - 56px - 96px); overflow: auto; padding-top: 14px; }
 .page.dual > #aVoz, .page.dual > #aTx { grid-column: 2; }
 .page.dual > #aTx { padding-top: 0; }
 @media (prefers-reduced-motion: reduce) { .pdet > summary::before { transition: none; } }
@@ -1185,7 +1185,7 @@ fieldset.ct-opciones { margin-top: 16px; }
 .lat-btn + .brand { width: 226px; }  /* 270 - el botón: la caja de búsqueda sigue alineada con el contenido */
 body.lat-off .layout, body.lat-sobre .layout { grid-template-columns: minmax(0, 1fr); }
 body.lat-off .sidebar { display: none; }
-body.lat-sobre .sidebar { position: fixed; top: 56px; left: 0; bottom: 0; width: 300px; z-index: 60; background: var(--panel); box-shadow: var(--shadow); }
+body.lat-sobre .sidebar { position: fixed; top: 56px; left: 0; bottom: 0; width: 300px; z-index: 45; background: var(--panel); box-shadow: var(--shadow); }
 
 /* ---------------------------------------------------------------- B8: «Quién habla», dentro de la página (punto 21) */
 .voz-bar.abierto { align-items: flex-start; }

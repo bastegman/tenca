@@ -300,14 +300,18 @@ class HoyLlenoTests(Base):
         pg.keyboard.press("Escape")
         pg.click(".hoy-revisar [data-k='voces']")
         pg.wait_for_function("location.hash.startsWith('#/a/') && location.hash.includes('Revisi')", timeout=5000)
-        pg.click("[data-nav='home']")
+        # por debajo de 1.000 px el lateral va plegado (B5): a Hoy, por el logo
+        self.assertFalse(pg.is_visible("[data-nav='home']"))
+        pg.click(".brand")
         pg.wait_for_selector("#hoyAhora .ha-titulo:has-text('Comité de seguimiento')", timeout=10000)
         # «ver resumen» de la última vez abre esa reunión
         pg.click("[data-act='hoy-ultima']")
         pg.wait_for_function("location.hash.startsWith('#/a/') && location.hash.includes('Comit')", timeout=5000)
         # Calendario (donde se buscaban «las siguientes reuniones», msg 1380): las citas de Outlook que vienen
+        pg.click("#btnSide")  # el lateral, encima del contenido
         pg.click("[data-nav='c']")
         pg.wait_for_selector(".cday .cev.outlook:has-text('Comité de seguimiento')", timeout=10000)
+        self.assertFalse(pg.is_visible("[data-nav='c']"))  # se cierra solo al navegar
         self.captura(pg, "calendario_900x600")
         self.sin_errores()
 

@@ -1030,7 +1030,7 @@ function renderAudioHead(a, force) {
       <div class="pacts"><button class="btn primary" data-act="play" data-path="${esc(a.path)}">${I.play}${S.playing === a.path && !audio.paused ? 'Pausa' : 'Reproducir'}</button>${visible}
         <span class="pmas"><button class="btn pmas-btn" type="button" data-act="mas" aria-haspopup="menu" aria-expanded="false" aria-label="Más acciones" title="Más acciones">⋯</button><span class="pmenu hidden" role="menu" aria-label="Más acciones">${menu}</span></span></div></div>
     ${interrumpidaHtml(a)}
-    <details class="pdet"${S.detAbierto || localStorage.getItem('detalles') === '1' ? ' open' : ''}><summary>Detalles${sinConfirmar ? ' <span class="muted">· participantes sin confirmar</span>' : ''}</summary>${propsHtml(a)}</details>
+    <details class="pdet"${S.detPara === a.path || localStorage.getItem('detalles') === '1' ? ' open' : ''}><summary>Detalles${sinConfirmar ? ' <span class="muted">· participantes sin confirmar</span>' : ''}</summary>${propsHtml(a)}</details>
     ${docs.length ? `<div class="related">${docs.map(d => `<a href="${href('d', d.path)}">${I.doc}${esc(nfc(d.name))}</a>`).join('')}</div>` : ''}`;
   fillTagList();
   const box = $('#aBox');
@@ -1067,7 +1067,8 @@ main.addEventListener('click', e => {
     if (abrir) $('[role="menuitem"]', m)?.focus();
   } else if (b.dataset.act === 'det-proy') {
     const d = $('#aHead .pdet');
-    if (d) { d.open = true; $('.pws', d)?.focus(); }
+    // abierto para esta reunión, sin recordarlo para las demás (revisión 1, P1-6)
+    if (d) { S.detPara = curAudio()?.path || null; S.detProg = true; d.open = true; $('.pws', d)?.focus(); }
   } else if (b.closest('.pmenu')) pmenuCerrar(false);  // la acción la hace el manejador de siempre (data-act)
 });
 main.addEventListener('keydown', e => {
@@ -1081,7 +1082,8 @@ document.addEventListener('mousedown', e => { if (!e.target.closest('#aHead .pma
 // «Detalles» abierto o cerrado se recuerda (toggle no burbujea: en captura)
 main.addEventListener('toggle', e => {
   if (!e.target.classList || !e.target.classList.contains('pdet')) return;
-  S.detAbierto = e.target.open;
+  if (S.detProg) { S.detProg = false; return; }  // lo abrió el proyecto de la cabecera, no tú
+  if (!e.target.open) S.detPara = null;
   localStorage.setItem('detalles', e.target.open ? '1' : '0');
 }, true);
 
@@ -1095,13 +1097,19 @@ function latEstado() {
   document.body.classList.toggle('lat-sobre', estrecha && abierto);
   $('#btnSide')?.setAttribute('aria-expanded', String(abierto));
 }
-function latAlternar() {
+function latAlternar(teclado) {
   if (LAT_MQ.matches) S.latAbierto = !S.latAbierto;
   else localStorage.setItem('lateral', document.body.classList.contains('lat-off') ? '1' : '0');
   latEstado();
+  if (teclado === true && !document.body.classList.contains('lat-off')) $('#sideNav a')?.focus();  // con el teclado, al lateral
 }
+// encima del contenido, cualquier enlace o botón del lateral lo cierra (Buscar o la reunión en la que ya estás no
+// cambian la ruta: se quedaba tapando el diálogo; revisión 1, P1-7)
+document.addEventListener('click', e => {
+  if (S.latAbierto && LAT_MQ.matches && e.target.closest('.sidebar a, .sidebar [data-go], .sidebar #btnNewFolder')) { S.latAbierto = false; latEstado(); }
+});
 LAT_MQ.addEventListener('change', () => { S.latAbierto = false; latEstado(); });
-$('#btnSide')?.addEventListener('click', latAlternar);
+$('#btnSide')?.addEventListener('click', () => latAlternar(false));
 window.addEventListener('hashchange', () => { if (S.latAbierto) { S.latAbierto = false; latEstado(); } });
 document.addEventListener('mousedown', e => {
   if (S.latAbierto && LAT_MQ.matches && !e.target.closest('.sidebar, #btnSide')) { S.latAbierto = false; latEstado(); }
@@ -1891,15 +1899,18 @@ document.addEventListener('keydown', e => {
   if (e.ctrlKey && e.altKey && k === 'r') { e.preventDefault(); toggleRec(); return; }  // si Windows no dejo registrar el atajo global
   if ((e.ctrlKey || e.metaKey) && k === 'p' && !e.altKey) { e.preventDefault(); if ($('#modal').classList.contains('hidden')) openPalette(); return; }  // paleta, como Notion
   if ((e.ctrlKey || e.metaKey) && k === 'k' && !e.altKey) { e.preventDefault(); const g = $('#gq'); if (g && $('#modal').classList.contains('hidden')) { g.focus(); g.select(); } return; }  // la caja de búsqueda de arriba (su kbd dice Ctrl K)
-  // Ctrl+\ pliega o abre el lateral (en un teclado español, «\» va con AltGr: Ctrl+Alt para el navegador)
-  if ((e.ctrlKey || e.metaKey) && (e.key === '\\' || e.code === 'Backslash')) { e.preventDefault(); latAlternar(); return; }
+  // Ctrl+\ pliega o abre el lateral. Nunca con Alt/AltGr: en un teclado español «\» se escribe con AltGr (que el
+  // navegador puede dar como Ctrl+Alt) y no debe comerse la barra al escribir; ahí vale Ctrl+º, la misma tecla
+  // (revisión 1, P1-5)
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.getModifierState?.('AltGraph')
+      && (e.key === '\\' || e.code === 'Backslash' || e.code === 'Backquote')) { e.preventDefault(); latAlternar(true); return; }
   if ((e.ctrlKey || e.metaKey) && k === 'f' && $('#tq')) { e.preventDefault(); $('#tq').focus(); $('#tq').select(); return; }
   if (e.key === 'Escape') {
-    if (cerrarSobre(false)) return;
+    if (cerrarSobre(false)) return;  // la confirmación de encima, sola (Ajustes sigue debajo)
+    if (!$('#modal').classList.contains('hidden')) return closeModal(false);  // el diálogo, antes que el lateral
     if (pmenuCerrar(true)) return;  // «⋯» de la reunión
     if (typeof spkPopCerrar === 'function' && spkPopCerrar()) return;  // el globo de un hablante (voces.js)
-    if (S.latAbierto && LAT_MQ.matches) { S.latAbierto = false; latEstado(); $('#btnSide')?.focus(); return; }  // la confirmación de encima, sola (Ajustes sigue debajo)
-    if (!$('#modal').classList.contains('hidden')) return closeModal(false);
+    if (S.latAbierto && LAT_MQ.matches) { S.latAbierto = false; latEstado(); $('#btnSide')?.focus(); return; }
     if (!$('#jobsPanel').classList.contains('hidden')) return $('#jobsPanel').classList.add('hidden');
     if (typing) el.blur();
     return;
