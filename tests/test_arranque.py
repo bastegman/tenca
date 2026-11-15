@@ -422,7 +422,7 @@ class InterfazNoMudaTests(unittest.TestCase):
         self.assertIn("if (!S.config) return;", js[i:i + 200])
 
     def test_el_toast_de_la_grabacion_dice_segundos(self):
-        src = read_app("server.py")
+        src = codigo_del_servidor()
         self.assertIn("f'{int(seg)} s' if seg < 60 else f'{round(seg / 60)} min'", src)
 
 
@@ -519,6 +519,6 @@ class GrabacionArrancadaTests(TempTree):
         self.assertFalse(any(l.startswith("● Grabando") for l in logs))
 
     def test_el_atajo_deja_el_error_en_el_log(self):
-        src = read_app("server.py")
+        src = codigo_del_servidor()
         self.assertIn('log(f"   no se pudo grabar (Ctrl+Alt+R): {e.msg}")', src)
         self.assertIn('''(f" · {r['aviso']}" if r.get("aviso") else "")''', src)

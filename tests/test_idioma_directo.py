@@ -24,7 +24,8 @@ import types
 import unittest
 from unittest import mock
 
-from support import TempTree, bare_jobs, engines, live, server  # noqa: F401  (support prepara sys.path)
+from support import (TempTree, bare_jobs, engines, live,  # noqa: F401  (support prepara sys.path)
+                     server, codigo_del_servidor)
 import plan  # noqa: E402
 from test_directo import (CFG2, Clock, DirectoJob, FakeCloud, FakeRecorder, FakeRequests, FakeResponse,  # noqa: E402
                           FakeSummarizer, FakeWorker, energy_vad, synth)
@@ -787,12 +788,10 @@ class ServidorIdiomaTests(TempTree):
                 mock.patch.object(server, "log"):
             self.assertTrue(jobs._final_pass(job))
         self.assertEqual(nuevo.idioma_repaso, "en-pt")
-        with open(server.__file__, encoding="utf-8") as f:
-            self.assertIn("job.language = job.idioma_repaso or None", f.read())
+        self.assertIn("job.language = job.idioma_repaso or None", codigo_del_servidor())
 
     def test_start_live_pone_el_destino_de_la_reunion(self):
-        with open(server.__file__, encoding="utf-8") as f:
-            src = f.read()
+        src = codigo_del_servidor()
         i = src.index("    def start_live(self, rel, preset=None, auto=False):")
         self.assertIn("job.translate_to = traduccion_destino(rel, st)", src[i:i + 2500])
 

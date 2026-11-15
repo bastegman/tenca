@@ -13,7 +13,7 @@ import types
 import unittest
 from unittest import mock
 
-from support import TempTree, bare_jobs, server, srt_text  # noqa: F401  (support prepara sys.path)
+from support import TempTree, bare_jobs, server, srt_text, codigo_del_servidor  # noqa: F401  (support prepara sys.path)
 
 
 def settings_store(tmp, **extra):
@@ -680,8 +680,7 @@ class MigracionTests(TempTree):
         st.update(server.migrate_main_folders)
         self.assertEqual(server.Store(os.path.join(self.data_dir, "settings.json"), server.DEFAULT_SETTINGS).get()
                          ["project_folders"], {"Alfa": "Alfa"})
-        with open(server.__file__, encoding="utf-8") as f:
-            src = f.read()
+        src = codigo_del_servidor()
         # en App.__init__, una vez y despues de cargar las vinculadas (sus rutas internas)
         donde = src.index('        self._load_links()\n        if not self.settings.get().get("carpetas_v"):')
         self.assertLess(donde, src.index("    def rec_toggle(self, b):"))

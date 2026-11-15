@@ -10,7 +10,8 @@ import types
 import unittest
 from unittest import mock
 
-from support import TempTree, bare_jobs, patched_paths, server  # noqa: F401  (support prepara sys.path)
+from support import (TempTree, bare_jobs, patched_paths,  # noqa: F401  (support prepara sys.path)
+                     server, codigo_del_servidor)
 import salidas  # noqa: E402
 from test_perfil import settings_store  # noqa: E402
 
@@ -95,9 +96,8 @@ class RaizConOtroNombreTests(TempTree):
         doc = {"props": {"proyecto": raiz["project"], "workstream": raiz["name"]}, "stem": "2026-11-09 Comité"}
         folder, _ = salidas.dest_path({"path": out, "format": "md", "by_project": True}, doc)
         self.assertEqual(folder, os.path.join(out, "Chuleta"))
-        with open(server.__file__, encoding="utf-8") as f:
-            self.assertIn('props = {"proyecto": v["project"], "workstream": v["name"], "vocabulario": v["id"]}',
-                          f.read())
+        self.assertIn('props = {"proyecto": v["project"], "workstream": v["name"], "vocabulario": v["id"]}',
+                      codigo_del_servidor())
 
     def test_ajustes_que_dejo_4553b9c(self):
         """El estado que deja la versión anterior (4553b9c): carpeta e idioma del proyecto de la raíz guardados como

@@ -59,7 +59,7 @@ class ProcesadoDeTests(unittest.TestCase):
         """None hasta que arranca la app: asi una instalacion anterior con API key sigue en la nube."""
         self.assertIsNone(server.DEFAULT_SETTINGS["procesado"])
         self.assertIsNone(server.DEFAULT_SETTINGS["agente"])  # None: un "agente": null a mano no da el fichero por roto
-        self.assertIn("if self.settings.get().get(\"procesado\") not in PROCESADOS:", read_app("server.py"))
+        self.assertIn("if self.settings.get().get(\"procesado\") not in PROCESADOS:", codigo_del_servidor())
 
 
 # ----------------------------------------------------------------------------- Claude Code (engines)

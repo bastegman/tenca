@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 from unittest import mock
 
-from support import TempTree, server  # noqa: F401  (support prepara sys.path)
+from support import TempTree, server, codigo_del_servidor  # noqa: F401  (support prepara sys.path)
 import calendario  # noqa: E402
 
 
@@ -393,8 +393,7 @@ class RutasTests(CarpetaTests):
         self.assertEqual(server.VOCAB_LINKS, {rel[2:]: {"name": "Mis listas", "path": self.ext}})
         self.assertEqual(self.app._vocab_links_public(), [{"rel": rel, "name": "Mis listas", "path": self.ext}])
         self.assertEqual(self.pares(), [("Mis listas", "General")])
-        with open(server.__file__, encoding="utf-8") as f:
-            src = f.read()
+        src = codigo_del_servidor()
         cfg = src[src.index("    def config(self, q):"):src.index("    def tree(self, q):")]
         self.assertIn('"vocab_links": self._vocab_links_public()', cfg)
         init = src[src.index("class App:"):src.index("    def rec_toggle(self, b):")]

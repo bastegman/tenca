@@ -16,7 +16,7 @@ import urllib.error
 import urllib.request
 from unittest import mock
 
-from support import APP, FakeJob, bare_jobs, patched_paths, server, codigo_del_servidor
+from support import APP, FakeJob, bare_jobs, patched_paths, server, codigo_del_servidor, PARTES_DEL_SERVIDOR
 
 import common  # noqa: E402
 import window  # noqa: E402
@@ -42,19 +42,20 @@ class NombreCentralizadoTests(unittest.TestCase):
     def test_server_sin_literales_sueltos(self):
         """Ni «Notas» ni «Chuleta» (nombres anteriores) ni «Tenca» como literal en server.py: el nombre sale de
         common.APP_NAME. Solo se permiten en docstrings."""
-        tree = ast.parse(read("server.py"))
-        docs = set()
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.Module, ast.FunctionDef, ast.ClassDef, ast.AsyncFunctionDef)):
-                body = node.body
-                if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
-                    docs.add(id(body[0].value))
         sueltos = []
-        for node in ast.walk(tree):
-            if not (isinstance(node, ast.Constant) and isinstance(node.value, str)) or id(node) in docs:
-                continue
-            if re.search(r"Notas|Chuleta|Tenca", node.value):
-                sueltos.append((node.lineno, node.value))
+        for parte in PARTES_DEL_SERVIDOR:  # server.py y los modulos que salieron de el (15/11/2026)
+            tree = ast.parse(read(parte))
+            docs = set()
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.Module, ast.FunctionDef, ast.ClassDef, ast.AsyncFunctionDef)):
+                    body = node.body
+                    if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
+                        docs.add(id(body[0].value))
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.Constant) and isinstance(node.value, str)) or id(node) in docs:
+                    continue
+                if re.search(r"Notas|Chuleta|Tenca", node.value):
+                    sueltos.append((parte, node.lineno, node.value))
         self.assertEqual(sueltos, [])
 
     def test_lo_que_no_cambia_con_el_nombre(self):
@@ -283,7 +284,7 @@ class ServidorHttpTests(unittest.TestCase):
     def test_config_lleva_app_name(self):
         """/api/config es el camino por el que app.js recibe el nombre (y si hay ventana propia) y los datos de
         «Acerca de»."""
-        src = read("server.py")
+        src = codigo_del_servidor()
         self.assertIn('"app_name": APP_NAME, "window": WINDOW is not None', src)
         self.assertIn('"acerca": {"licencia": license_name(), "repo": REPO_URL, "datos": DATA_DIR, '
                       '"donar": DONAR_URL,\n                           "tenca": TENCA_URL}', src)
@@ -487,13 +488,17 @@ class LogSinConsolaTests(unittest.TestCase):
 
     def test_arranque_sin_print(self):
         """Con pythonw print() no falla pero se pierde: el arranque y el apagado solo hablan por el log."""
-        tree = ast.parse(read("server.py"))
         nombres = ("main", "shutdown", "fatal", "schedule_shutdown", "ask_running_to_show", "show_running")
-        for fn in (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name in nombres):
-            calls = [c for c in ast.walk(fn) if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
-                     and c.func.id == "print"]
-            self.assertEqual(calls, [], fn.name)
-        src = read("server.py")
+        vistas = set()
+        for parte in PARTES_DEL_SERVIDOR:  # server.py y los modulos que salieron de el (15/11/2026)
+            tree = ast.parse(read(parte))
+            for fn in (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name in nombres):
+                vistas.add(fn.name)
+                calls = [c for c in ast.walk(fn) if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+                         and c.func.id == "print"]
+                self.assertEqual(calls, [], fn.name)
+        self.assertEqual(vistas, set(nombres))  # todas siguen en alguna parte: sin ninguna el test no mira nada
+        src = codigo_del_servidor()
         self.assertIn("fatal(f\"No se puede usar el puerto {PORT}", src)
         self.assertIn("MessageBoxW", read("common.py"))
 

@@ -25,7 +25,7 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
-from support import server  # noqa: F401  (prepara sys.path con _app)
+from support import server, codigo_del_servidor  # noqa: F401  (prepara sys.path con _app)
 import calendario  # noqa: E402
 from test_reunion import FakeApp, FakeItem, FakeItems, FakeNamespace, reset_calendario  # noqa: E402
 
@@ -874,7 +874,7 @@ class AppTests(Base):
         self.assertEqual(a.settings.get()["outlook_asistentes"], "pregunta")
 
     def test_el_init_de_la_app_lo_carga(self):
-        src = open(os.path.join(os.path.dirname(calendario.__file__), "server.py"), encoding="utf-8").read()
+        src = codigo_del_servidor()
         self.assertIn('calendario.ASISTENTES["estado"] = self.settings.get().get("outlook_asistentes") or None', src)
         self.assertIn("calendario.al_cambiar = lambda v: self.settings.update(", src)
 

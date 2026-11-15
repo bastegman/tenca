@@ -13,7 +13,8 @@ import unittest
 import zipfile
 from unittest import mock
 
-from support import REPO, TempTree, bare_jobs, engines, server, srt_text, wav_bytes  # noqa: F401  (prepara sys.path)
+from support import (REPO, TempTree, bare_jobs, engines, server, srt_text,  # noqa: F401  (prepara sys.path)
+                     wav_bytes, codigo_del_servidor)
 import salidas  # noqa: E402
 from test_frontend import js_defs, read  # noqa: E402
 
@@ -558,8 +559,7 @@ class ReescrituraTests(TempTree):
 
 
 def read_server():
-    with open(server.__file__, encoding="utf-8") as f:
-        return f.read()
+    return codigo_del_servidor()
 
 
 # ----------------------------------------------------------------------------- P2-10

@@ -20,7 +20,7 @@ from unittest import mock
 
 import numpy as np
 
-from support import TempTree, engines, server
+from support import TempTree, engines, server, codigo_del_servidor
 
 import explicar  # noqa: E402
 import voices  # noqa: E402
@@ -152,7 +152,7 @@ class HilosTests(unittest.TestCase):
         self.assertIn(voices.hilos(), (2, 3, 4))
 
     def test_el_servidor_los_usa(self):
-        self.assertIn('"--threads", str(voices.hilos())', leer("server.py"))
+        self.assertIn('"--threads", str(voices.hilos())', codigo_del_servidor())
 
 
 # ----------------------------------------------------------------------------- decode_16k con dobles de PyAV
@@ -446,7 +446,7 @@ class PcmDeUnSubprocesoMuertoTests(TempTree):
         server.borrar_pcm_voces(999)  # sin nada suyo, nada
 
     def test_lo_llama_al_acabar_el_subproceso(self):
-        src = leer("server.py")
+        src = codigo_del_servidor()
         cuerpo = src[src.index("def _voices_subprocess"):src.index("def speaker_vector")]
         self.assertIn("borrar_pcm_voces(p.pid)", cuerpo.split("finally:")[-1])
 

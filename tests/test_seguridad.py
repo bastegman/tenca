@@ -26,7 +26,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
-from support import APP, REPO, TempTree, patched_paths, server
+from support import APP, REPO, TempTree, patched_paths, server, codigo_del_servidor
 
 import aviso  # noqa: E402
 
@@ -369,7 +369,7 @@ class FicheroDelTokenTests(unittest.TestCase):
         wb.assert_called_once_with("http://h:1/?t=abc")
 
     def test_la_ventana_abre_la_url_con_token(self):
-        src = read("server.py")
+        src = codigo_del_servidor()
         main = src[src.index("def main():"):]
         self.assertIn("Window(ui_url(), DATA_DIR", main)
         self.assertNotIn("Window(URL,", main)

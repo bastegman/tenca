@@ -17,7 +17,8 @@ import types
 import unittest
 from unittest import mock
 
-from support import REPO, TempTree, bare_jobs, engines, server, srt_text  # noqa: F401  (support prepara sys.path)
+from support import (REPO, TempTree, bare_jobs, engines, server,  # noqa: F401  (support prepara sys.path)
+                     srt_text, codigo_del_servidor)
 import salidas  # noqa: E402
 from test_perfil import FakeRec, settings_store  # noqa: E402  (ayudantes, no tests)
 
@@ -298,7 +299,7 @@ class ResumenAutomaticoTests(TempTree):
         self.assertIs(a.settings.get()["summary_auto_local"], True)
         a.save_settings({"summary": {"local": 0}})
         self.assertIs(a.settings.get()["summary_auto_local"], False)
-        self.assertIn('"local": bool(st.get("summary_auto_local"))', open(server.__file__, encoding="utf-8").read())
+        self.assertIn('"local": bool(st.get("summary_auto_local"))', codigo_del_servidor())
 
     def test_casilla_y_lo_que_se_envia(self):
         app = static("app.js")
@@ -312,8 +313,7 @@ class ResumenAutomaticoTests(TempTree):
             self.assertIn(s, app, s)
         self.assertNotIn("(envía el texto a ${esc(provName())})", app)
         # lo que dice la lista es lo que lleva meta en _run_summary (y nada más)
-        with open(server.__file__, encoding="utf-8") as f:
-            src = f.read()
+        src = codigo_del_servidor()
         meta = re.search(r"meta = \{(.*?)\}\n", src, re.S).group(1)
         self.assertEqual(re.findall(r'"(\w+)":', meta),
                          ["title", "date", "duration", "participants", "notes", "extra", "about"])
@@ -371,8 +371,7 @@ class AvisoResumenLocalTests(TempTree):
         a.settings.update(lambda d: d.update(aviso_resumen_local=True))
         a.save_settings({"summary": {"local": True}})  # activarlo tambien lo cierra
         self.assertIs(self.aviso(a), False)
-        with open(server.__file__, encoding="utf-8") as f:
-            self.assertIn('"aviso_local": bool(st.get("aviso_resumen_local"))', f.read())
+        self.assertIn('"aviso_local": bool(st.get("aviso_resumen_local"))', codigo_del_servidor())
 
     def test_la_interfaz_lo_ensena_en_inicio(self):
         app, hoy = static("app.js"), static("hoy.js")

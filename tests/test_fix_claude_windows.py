@@ -290,7 +290,7 @@ class ServidorComprobarTests(TempTree):
         self.assertIn("petición mínima 120.4 s", ultima)
 
     def test_el_log_de_los_agentes_se_conecta_al_arrancar(self):
-        src = open(os.path.join(APP, "server.py"), encoding="utf-8").read()
+        src = codigo_del_servidor()
         i = src.index("def main():")
         self.assertLess(src.index("engines.AgenteLocal.log = log", i), src.index("Handler.app = App()", i))
 

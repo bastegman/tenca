@@ -19,7 +19,7 @@ import unittest
 import urllib.request
 from unittest import mock
 
-from support import APP, server
+from support import APP, server, codigo_del_servidor
 import bandeja  # noqa: E402
 import inicio_windows  # noqa: E402
 import api  # noqa: E402
@@ -555,7 +555,7 @@ class ArrancarConWindowsTests(unittest.TestCase):
         self.assertEqual(vistos, [False, False, True, False])
 
     def test_main_lo_pone_al_dia_al_arrancar(self):
-        src = open(os.path.join(APP, "server.py"), encoding="utf-8").read()
+        src = codigo_del_servidor()
         main = src[src.index("def main():"):]
         self.assertRegex(main, r"tray=make_tray\(ico\)\)\n\s+inicio_windows_al_dia\(\)")
 

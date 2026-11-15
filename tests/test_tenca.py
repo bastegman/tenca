@@ -18,7 +18,7 @@ import unittest
 import zipfile
 from unittest import mock
 
-from support import APP, REPO, patched_paths, server
+from support import APP, REPO, patched_paths, server, codigo_del_servidor
 import common
 import inicio_windows
 from test_desinstalar import function_body, powershell, ps_text, run_ps_functions
@@ -593,7 +593,7 @@ class AjustesDelProyectoDeLaRaizTests(unittest.TestCase):
             self.assertIn('elif v and v["project"] in (st.get("project_langs") or {}):', f.read())
 
     def test_el_arranque_lo_migra(self):
-        src = open(os.path.join(APP, "server.py"), encoding="utf-8").read()
+        src = codigo_del_servidor()
         init = src[src.index("class App:"):src.index("self.library = Library(")]
         self.assertIn("self._migrar_nombre_raiz()", init)
         self.assertLess(init.index("self._load_links()"), init.index("self._migrar_nombre_raiz()"))

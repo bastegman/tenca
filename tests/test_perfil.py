@@ -648,7 +648,7 @@ class JobsOutputsTests(TempTree):
 
     def test_los_ganchos_del_servidor(self):
         """Se escribe al terminar la transcripcion y el resumen, y se reescribe al guardar notas o transcripcion."""
-        src = open(server.__file__, encoding="utf-8").read()
+        src = codigo_del_servidor()
         after = src[src.index("def _after_transcribe"):src.index("def document_for")]
         self.assertIn("self.write_outputs(rel)", after)
         summ = src[src.index("def _run_summary"):src.index("def _cloud_ready")]
