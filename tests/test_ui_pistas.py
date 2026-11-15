@@ -1,0 +1,165 @@
+# -*- coding: utf-8 -*-
+"""El reproductor con una grabación en dos pistas, en un navegador real (Playwright + Chromium) con la app de verdad
+(punto 20 del review del 14/11/2026, pistas.js y pistas-worklet.js):
+
+- al darle a Reproducir a una grabación en dos pistas sale «Pistas» en el reproductor y el audio pasa por Web Audio:
+  lo que sale es la mezcla en mono (tu micro a la izquierda y el audio del PC a la derecha, sumados);
+- «Tú» a 0 deja solo a los demás, y «Los demás» a 0, solo tu micro; el ajuste se guarda;
+- un audio de antes (estéreo con la mezcla) suena tal cual y sin «Pistas»;
+- «Exportar audio mezclado» manda lo que se oye y dice dónde lo ha guardado.
+Capturas en NOTAS_ARTEFACTOS (ui-smoke.yml las sube). Se salta sin Playwright."""
+import json
+import os
+import struct
+import unittest
+import wave
+
+import numpy as np
+
+from support import APP  # noqa: F401  (prepara sys.path)
+import pistas  # noqa: E402
+
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:  # pragma: no cover - sin Playwright el test se salta
+    sync_playwright = None
+
+SR = 48000
+
+
+def tono(f, segundos=30.0, amp=0.2):
+    t = np.arange(int(segundos * SR)) / SR
+    return (np.sin(2 * np.pi * f * t) * amp).astype(np.float32)
+
+
+def escribir_doble(path, izq, der):
+    pcm = (np.stack([izq, der], axis=1) * 32767).astype("<i2").tobytes()
+    head = bytearray(pistas.cabecera(SR))
+    struct.pack_into("<I", head, 4, len(head) - 8 + len(pcm))
+    struct.pack_into("<I", head, len(head) - 4, len(pcm))
+    with open(path, "wb") as f:
+        f.write(bytes(head) + pcm)
+
+
+def escribir_antes(path, x):
+    with wave.open(path, "wb") as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(SR)
+        w.writeframes((np.stack([x, x], axis=1) * 32767).astype("<i2").tobytes())
+
+
+@unittest.skipUnless(sync_playwright, "playwright no instalado")
+class ReproductorPistasUI(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from test_ui_hoy import Servidor
+
+        def preparar(root):
+            os.makedirs(os.path.join(root, "Alfa"))
+            # izquierda (tu micro): 0,2 de pico; derecha (los demás): 0,1. RMS 0,141 y 0,071; la suma, 0,158
+            escribir_doble(os.path.join(root, "Alfa", "Dos pistas.wav"), tono(300), tono(900, amp=0.1))
+            escribir_antes(os.path.join(root, "Alfa", "De antes.wav"), tono(600))
+        cls.srv = Servidor(preparar)
+        cls.art = os.environ.get("NOTAS_ARTEFACTOS")
+        cls.pw = sync_playwright().start()
+        cls.browser = cls.pw.chromium.launch(args=["--autoplay-policy=no-user-gesture-required"])
+
+    @classmethod
+    def tearDownClass(cls):
+        for cerrar in (lambda: cls.browser.close(), lambda: cls.pw.stop(), lambda: cls.srv.cerrar()):
+            try:
+                cerrar()
+            except Exception:
+                pass
+
+    def pagina(self):
+        ctx = self.browser.new_context(bypass_csp=False, viewport={"width": 1400, "height": 900})
+        ctx.add_init_script("localStorage.setItem('procElegido', '1'); localStorage.setItem('avisoProbar', '1')")
+        self.addCleanup(ctx.close)
+        pg = ctx.new_page()
+        self.errores = []
+        pg.on("pageerror", lambda e: self.errores.append(f"pageerror: {e}"))
+        pg.on("console", lambda m: self.errores.append(f"console: {m.text}") if m.type == "error" else None)
+        pg.goto(f"{self.srv.base}/?t={self.srv.token}", wait_until="networkidle")
+        pg.wait_for_selector("#main h1", timeout=15000)
+        return pg
+
+    def captura(self, pg, nombre):
+        if self.art:
+            os.makedirs(self.art, exist_ok=True)
+            pg.screenshot(path=os.path.join(self.art, f"pistas-{nombre}.png"))
+
+    def reproducir(self, pg, rel):
+        pg.evaluate("p => { location.hash = '#/a/' + encodeURIComponent(p); }", rel)
+        boton = pg.wait_for_selector(f"[data-act='play'][data-path='{rel}']", timeout=15000)
+        boton.click()
+        pg.wait_for_function("p => S.playing === p && !audio.paused && audio.currentTime > 0.3", arg=rel,
+                             timeout=15000)
+
+    def estado(self, pg, espera_s=0.6):
+        pg.wait_for_timeout(int(espera_s * 1000))
+        pg.evaluate("() => Pistas.estado()")  # vacía los niveles: lo que se mide es lo de después
+        pg.wait_for_timeout(int(espera_s * 1000))
+        return pg.evaluate("() => Pistas.estado()")
+
+    def test_dos_pistas_se_oyen_mezcladas(self):
+        pg = self.pagina()
+        self.reproducir(pg, "Alfa/Dos pistas.wav")
+        pg.wait_for_selector("#player.pistas #pPistas", state="visible", timeout=10000)
+        st = self.estado(pg)
+        self.assertTrue(st["montado"] and st["doble"], st)
+        self.assertEqual((st["modo"], st["ctx"]), ("doble", "running"), st)
+        self.assertAlmostEqual(st["rms"]["izq"], 0.141, delta=0.01, msg=st)
+        self.assertAlmostEqual(st["rms"]["der"], 0.0707, delta=0.008, msg=st)
+        self.assertAlmostEqual(st["rms"]["sale"], 0.158, delta=0.012, msg=st)  # la suma, en mono
+        self.captura(pg, "reproductor")
+        # el panel: «Tú» a 0 → solo los demás; «Los demás» a 0 → solo tu micro
+        pg.click("#pPistas")
+        pg.wait_for_selector("#pistasPanel:not(.hidden) #ppTu", timeout=5000)
+        self.captura(pg, "panel")
+        pg.evaluate("() => { const r = document.querySelector('#ppTu'); r.value = 0; "
+                    "r.dispatchEvent(new Event('input')); }")
+        st = self.estado(pg)
+        self.assertAlmostEqual(st["rms"]["sale"], 0.0707, delta=0.008, msg=st)
+        self.assertEqual(json.loads(pg.evaluate("() => localStorage.getItem('pistas')"))["tu"], 0)
+        pg.evaluate("""() => { for (const [id, v] of [['#ppTu', 1], ['#ppDemas', 0]]) {
+            const r = document.querySelector(id); r.value = v; r.dispatchEvent(new Event('input')); } }""")
+        st = self.estado(pg)
+        self.assertAlmostEqual(st["rms"]["sale"], 0.141, delta=0.012, msg=st)
+        self.assertEqual(pg.text_content("#ppDemasV").strip(), "0 %")
+        # exportar: lo que se oye, a /api/audio/mezclado (la escritura del archivo la prueban test_dos_pistas)
+        pedidos = []
+
+        def falso(route, request):
+            pedidos.append(json.loads(request.post_data))
+            route.fulfill(status=200, content_type="application/json",
+                          body=json.dumps({"destino": "/x/Dos pistas (mezclado).wav",
+                                           "nombre": "Dos pistas (mezclado).wav", "segundos": 30.0}))
+        pg.route("**/api/audio/mezclado", falso)
+        pg.click("#ppExportar")
+        pg.wait_for_selector("#toasts :text('Dos pistas (mezclado).wav')", timeout=5000)
+        self.assertEqual(pedidos, [{"path": "Alfa/Dos pistas.wav", "tu": 1, "demas": 0, "eco": True}])
+        pg.keyboard.press("Escape")
+        pg.wait_for_selector("#pistasPanel", state="hidden", timeout=3000)
+        # un audio de antes: tal cual, sin «Pistas» (y la mezcla de las dos pistas no se le aplica)
+        self.reproducir(pg, "Alfa/De antes.wav")
+        pg.wait_for_function("() => !document.querySelector('#player').classList.contains('pistas')", timeout=5000)
+        self.assertFalse(pg.is_visible("#pPistas"))
+        st = self.estado(pg)
+        self.assertEqual(st["modo"], "normal", st)
+        self.assertAlmostEqual(st["rms"]["sale"], 0.141, delta=0.012, msg=st)
+        self.assertEqual(self.errores, [])
+
+    def test_un_audio_de_antes_no_monta_web_audio(self):
+        pg = self.pagina()
+        self.reproducir(pg, "Alfa/De antes.wav")
+        pg.wait_for_timeout(500)
+        st = pg.evaluate("() => Pistas.estado()")
+        self.assertEqual(st, {"montado": False, "doble": False})
+        self.assertFalse(pg.is_visible("#pPistas"))
+        self.assertEqual(self.errores, [])
+
+
+if __name__ == "__main__":
+    unittest.main()

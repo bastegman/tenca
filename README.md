@@ -228,6 +228,11 @@ El detalle de cada pantalla. `LEEME.txt`, el que va en el zip, cabe en una panta
   suma» en el medidor de ● Grabar). Si con altavoces el micro recoge la reunión, o una salida
   lleva tu micro, el medidor te lo dice con qué hacer (auriculares; quitar «Escuchar este
   dispositivo» en Sonido de Windows). Con auriculares no hace falta nada.
+- Dos pistas: la grabación guarda tu micro y el audio del PC por separado (canal izquierdo y
+  derecho del mismo WAV). Al escucharla en Tenca suenan mezclados; el botón «Pistas», abajo a la
+  derecha, deja subir o bajar «Tú» y «Los demás» y quitar el eco de los altavoces de tu micro
+  (no cambia el archivo). Para usarla en otro programa, «Exportar audio mezclado» deja en el
+  Escritorio un WAV normal: el original, abierto fuera, suena con tu voz en un oído.
 - Si estás en una llamada de Teams y no estás grabando, arriba aparece
   "📞 Teams en llamada · ● Tomar Notas".
 - Al detectar la llamada, abajo en el centro aparece un aviso pequeño con el nombre de la reunión y
@@ -334,7 +339,8 @@ El detalle de cada pantalla. `LEEME.txt`, el que va en el zip, cabe en una panta
   próxima vez (sale ya con su nombre; si no está segura pregunta «¿Nombre?»). Poner un nombre
   nunca cambia el de otra persona ni el tuyo: para corregir una errata en todas sus reuniones,
   marca «solo corrijo el nombre» (o cámbialo en Ajustes > Voces).
-- «Tú» sale de tu micro o de tu voz guardada. Si se equivoca, escribe el nombre de quien era o
+- «Tú» sale de tu micro (en las grabaciones de Tenca, de su pista: lo que tu micro recoge y no es
+  el eco de los altavoces) o de tu voz guardada. Si se equivoca, escribe el nombre de quien era o
   pulsa «No soy yo»; si eres tú y no sale, «Soy yo» (tu persona se llama «Yo» hasta que le
   cambies el nombre en Ajustes > Voces). También «Es…» / «Fusionar con…» (dos etiquetas eran la
   misma persona), «No es esta persona» y «Olvidar persona». «Volver a identificar» conserva lo

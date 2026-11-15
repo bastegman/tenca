@@ -10,6 +10,24 @@ nada de ningún proyecto concreto.
 empresa. Entre paréntesis va el número de cada hallazgo, el mismo que citan los commits; el informe de la auditoría no
 está en este repositorio. «Desarrollo y CI» es para quien mantiene el repositorio: no cambia nada en la app instalada.
 
+### La grabación, en dos pistas: tu micro y el audio del PC por separado (15/11/2026)
+
+Punto 20 de la revisión del 14/11/2026. Rama `dos-pistas`. Sin cambiar el directo ni el rendimiento de la grabadora.
+
+- **El WAV de la grabadora tiene el mismo formato y tamaño, pero cada canal lleva una cosa:** el izquierdo, tu micro;
+  el derecho, lo que suena en el PC (los demás). Cada uno con su nivelador, como antes. La marca va en la cabecera (un
+  comentario que también se ve en las propiedades del archivo). Su suma es la mezcla de siempre: el directo, la cola,
+  la nube y el repaso final leen exactamente lo mismo que antes. Los audios subidos y las grabaciones de antes, igual.
+- **«Tú», de tu micro.** La grabadora apunta cada cuarto de segundo si el micro lleva tu voz y no el eco de los
+  altavoces (con la puerta de eco que ya medía), alineado con el archivo. «Quién habla» separa por un lado a los demás
+  (con lo que suena en el PC) y por otro lo que recoge tu micro: en una reunión simulada de 6 voces, «Tú» encuentra el
+  92 % de tu voz (antes, 53-68 %) y los demás se confunden menos (error 0,20 frente a 0,24-0,32). Si alguien está a tu
+  lado en la sala, no se adivina quién eres (como antes). En una reunión presencial (el PC callado), como antes.
+- **El reproductor mezcla las dos pistas** y, con el botón «Pistas», deja subir o bajar «Tú» y «Los demás» y quitar el
+  eco de los altavoces de tu micro (por defecto, quitado): las voces de los demás ya no se oyen dos veces. No cambia
+  el archivo. **«Exportar audio mezclado»** guarda en el Escritorio un WAV normal con lo que oyes, para abrirlo con
+  otro programa (abierto fuera de Tenca, el de dos pistas suena con tu voz en un oído y los demás en el otro).
+
 ### «Quién habla» con otro modelo de huellas, medido en reuniones largas, en español y con audio de Teams (15/11/2026)
 
 Punto 36 de la revisión del 14/11/2026. Rama `motor-lote1`.

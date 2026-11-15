@@ -11,6 +11,8 @@ portátil de Bernardo acabó en «bad allocation»).
 3. Ejecuta `voices.py --diarize` con cada app en un proceso nuevo que, al acabar, mide su propio pico: en Windows,
    PeakPagefileUsage (memoria comprometida, la que se acaba en un «bad allocation») y PeakWorkingSetSize; en macOS,
    ri_lifetime_max_phys_footprint y ru_maxrss.
+   La misma reunión en dos pistas (la primera voz al micro, las demás a lo que suena, con la línea de «Tú»):
+   tampoco puede pasar de --tope, y tiene que salir «Tú» del micro y los demás de lo que suena.
 4. La huella de «Recordar» (`voices.py --fingerprint h1`, fix-lento, 10/11/2026) con la reunión en m4a, con cada app:
    la de ahora solo lee los tramos de la huella y tiene que tardar menos que la de antes, con la misma huella
    (coseno >= 0,99). La de antes decodificaba la reunión entera (40 s con 3 h en un Mac; minutos en un portátil).
@@ -113,6 +115,38 @@ def sintetizar(dir_, minutos):
         w.setsampwidth(2)
         w.setframerate(16000)
         w.writeframes(audio)
+    sintetizar.turnos, sintetizar.voces = pcm, len(voces)  # para dos_pistas
+    return path
+
+
+def dos_pistas(dir_, minutos):
+    """La misma reunión grabada en dos pistas (pistas.py, desde el 15/11/2026): los turnos de la primera voz al micro
+    (canal izquierdo) y los demás a lo que suena (derecho), y en su sidecar la línea de «Tú» de la grabadora (la
+    energía de la izquierda por pasos de 0,25 s, «desfase» 0). Devuelve la ruta del WAV."""
+    import numpy as np
+    sys.path.insert(0, os.path.join(REPO, "_app"))
+    import pistas
+    izq, der = [], []  # la primera voz «eres tú»
+    for i, t in enumerate(sintetizar.turnos):
+        x = np.frombuffer(t, "<i2")
+        z = np.zeros_like(x)
+        izq.append(x if i % sintetizar.voces == 0 else z)
+        der.append(z if i % sintetizar.voces == 0 else x)
+    ronda = np.stack([np.concatenate(izq), np.concatenate(der)], axis=1)
+    n = int(minutos * 60 * 16000)
+    x = np.concatenate([ronda] * (n // len(ronda) + 1))[:n]
+    path = os.path.join(dir_, "pistas.wav")
+    head = bytearray(pistas.cabecera(16000))
+    pcm = np.ascontiguousarray(x, "<i2").tobytes()
+    head[4:8] = (len(head) - 8 + len(pcm)).to_bytes(4, "little")
+    head[-4:] = len(pcm).to_bytes(4, "little")
+    with open(path, "wb") as f:
+        f.write(bytes(head) + pcm)
+    paso = 4000
+    e = np.sqrt(np.mean(x[:len(x) // paso * paso, 0].astype(np.float64).reshape(-1, paso) ** 2, axis=1))
+    bits = "".join("1" if v > 300 else "0" for v in e)
+    with open(os.path.join(dir_, "pistas.hablantes.json"), "w", encoding="utf-8") as f:
+        json.dump({"version": 1, "micro": {"paso": 0.25, "activo": bits, "desfase": 0.0, "fuente": "grabadora"}}, f)
     return path
 
 
@@ -147,8 +181,10 @@ def huella(app, audio, datos, side, etiqueta):
     return out
 
 
-def medir(app, audio, datos, salida, etiqueta):
+def medir(app, audio, datos, salida, etiqueta, sidecar=None):
     res, side = os.path.join(salida, f"{etiqueta}.json"), os.path.join(salida, f"{etiqueta}.hablantes.json")
+    if sidecar:  # el de la grabadora (la línea de «Tú»), como lo deja la app junto al audio
+        shutil.copy(sidecar, side)
     t0 = time.time()
     r = subprocess.run([sys.executable, "-c", HIJO, app, res, "--diarize", audio, "--out", side, "--data", datos,
                         "--threads", "2"], capture_output=True, timeout=3600)
@@ -159,7 +195,10 @@ def medir(app, audio, datos, salida, etiqueta):
         out = json.load(f)
     with open(side, encoding="utf-8") as f:
         d = json.load(f)
-    out.update(segundos=round(time.time() - t0), hablantes=sum(1 for h in d["hablantes"].values() if not h["breve"]))
+    out.update(segundos=round(time.time() - t0), hablantes=sum(1 for h in d["hablantes"].values() if not h["breve"]),
+               pistas=bool(d.get("pistas")),
+               por_pista={p: sum(1 for h in d["hablantes"].values() if not h["breve"] and h.get("pista") == p)
+                          for p in ("micro", "sistema")})
     proto = [json.loads(line) for line in r.stdout.decode("utf-8", "replace").splitlines() if line.startswith("{")]
     out["error"] = next((m["error"] for m in proto if m.get("type") == "error"), None)
     print(etiqueta, out, flush=True)
@@ -199,6 +238,10 @@ def medir_todo(a, trabajo):
             raise SystemExit(f"no se pudieron bajar los modelos de la de antes: {r.stderr[-500:]}")
         modelo_antes = r.stdout.strip().splitlines()[-1]
     out = {"minutos": a.minutos, "ahora": medir(os.path.join(REPO, "_app"), audio, datos, a.salida, "ahora")}
+    # la misma reunión en dos pistas (punto 20 del review del 14/11/2026): no puede gastar más memoria
+    dual = dos_pistas(trabajo, a.minutos)
+    out["ahora_pistas"] = medir(os.path.join(REPO, "_app"), dual, datos, a.salida, "ahora_pistas",
+                                sidecar=os.path.join(trabajo, "pistas.hablantes.json"))
     out["modelo_ahora"], out["modelo_antes"] = voices.MODEL_ID, modelo_antes
     if a.antes:
         out["antes"] = medir(os.path.abspath(a.antes), audio, datos, a.salida, "antes")
@@ -222,6 +265,15 @@ def medir_todo(a, trabajo):
         mal.append("la de ahora no gasta menos que la de antes")
     if a.tope and out["ahora"]["comprometida_mb"] > a.tope:
         mal.append(f"la de ahora pasa de {a.tope:.0f} MB")
+    dp = out["ahora_pistas"]
+    if dp["rc"] != 0 or dp["error"] or not dp["pistas"]:
+        mal.append(f"en dos pistas ha fallado o no se ha diarizado por pistas: {dp['error']} {dp['pistas']}")
+    elif dp["por_pista"]["micro"] != 1 or dp["por_pista"]["sistema"] < 1:
+        mal.append(f"en dos pistas, hablantes por canal raros: {dp['por_pista']}")
+    if a.tope and dp["comprometida_mb"] > a.tope:
+        mal.append(f"en dos pistas pasa de {a.tope:.0f} MB")
+    print("dos pistas:", dp["comprometida_mb"], "MB y", dp["segundos"], "s; la mezcla:",
+          out["ahora"]["comprometida_mb"], "MB y", out["ahora"]["segundos"], "s", flush=True)
     h1, h0 = out["huella_ahora"], out.get("huella_antes")
     if not h1["vector"]:
         mal.append(f"la huella de ahora ha fallado: {h1['error']}")

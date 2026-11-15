@@ -127,6 +127,7 @@ DIAG_LINES = (
     "🗣 persona olvidada",
     "🗣 voces activadas",
     "🗣 voces desactivadas",
+    "🎧 audio mezclado exportado ({n} min)",
     "   modelos de voces descargados",
     "   voces.json no se pudo leer ({e}); se aparta como voces.json.ilegible",
     # arranque, ajustes, grabadora, llamadas y apagado

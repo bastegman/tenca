@@ -26,8 +26,10 @@ from common import APP_NAME, ApiError, clean_name, log, log_exc
 from instancia import open_ui
 from listas import (LIVE_PRESETS, SIN_AUDIO, _con_o_sin, _norm_dir, _project_dir, ajustes_previstos, check_perfil,
                     find_vocab, list_vocab, perfil_de, perfil_folder, read_vocab, update_perfil)
+import pistas
+from paquete import desktop_dir
 from recording import Cortes, RecorderProcess, cue, disco_al_empezar, notify, teams_mic_estado
-from rutas import APP_DIR, BUILD, DATA_DIR, LINKS, in_app_dir, rel_of, root_name, safe
+from rutas import APP_DIR, BUILD, DATA_DIR, LINKS, alias_of, in_app_dir, rel_of, root_name, safe
 
 
 # Lo que rec_start espera a que la grabadora cree el WAV con su cabecera antes de escribir la del .md y arrancar el
@@ -595,6 +597,19 @@ class Grabar:
         r.status["mic_muted"] = mute  # para que la interfaz lo vea al momento
         log(f"   micro {'silenciado' if mute else 'reactivado'}")
         return {"mic_muted": mute}
+
+    def audio_mezclado(self, b):
+        """«Exportar audio mezclado» (reproductor, pistas.js): una grabación en dos pistas a un WAV normal en el
+        Escritorio, con lo que se oye (tú, los demás y el eco). La que se está grabando, no."""
+        abs_path = safe(alias_of(b.get("path")), "file")
+        r = self.rec
+        grabando = r.path if r and r.alive() else None
+        try:
+            out = pistas.exportar_peticion(abs_path, desktop_dir(), b, grabando=grabando)
+        except ValueError as e:
+            raise ApiError(str(e))
+        log(f"🎧 audio mezclado exportado ({out['segundos'] / 60:.1f} min)")
+        return out
 
     def rec_stop(self, b):
         with self.rec_lock:

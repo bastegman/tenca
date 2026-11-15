@@ -25,6 +25,8 @@ import time
 from time import perf_counter  # aparte de `time`: los tests le ponen un sleep falso
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import pistas
+
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 # Whisper en local con prioridad baja: Teams, Outlook… van primero y el portatil no da tirones
 BELOW_NORMAL = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
@@ -425,12 +427,31 @@ def _paquetes(c, s, av):
         yield from frames
 
 
-def decode_16k(path, start=0.0, cancelled=lambda: False, destino=None):
+def _remuestreo_16k(path, canal=None):
+    """(layout del remuestreo a 16 kHz s16, función del fotograma remuestreado a lo que se pide). Un WAV de la grabadora
+    en dos pistas (pistas.es_doble) se remuestrea en estéreo y, según `canal`: None, la suma (la mezcla de siempre: la
+    media de swresample la dejaría 6 dB más baja); 0 o 1, ese canal (0 = el micro, 1 = lo que suena); "ambos", (n, 2).
+    Cualquier otro audio, en mono como siempre (sin canales que elegir: `canal` no cambia nada)."""
+    import numpy as np
+    if not pistas.es_doble(path):
+        return "mono", lambda nd: nd.reshape(-1)
+    if canal is None:
+        return "stereo", lambda nd: pistas.a_mono_i16(nd.reshape(-1, 2))
+    if canal == "ambos":
+        return "stereo", lambda nd: nd.reshape(-1, 2)
+    k = int(canal)
+    return "stereo", lambda nd: np.ascontiguousarray(nd.reshape(-1, 2)[:, k])
+
+
+def decode_16k(path, start=0.0, cancelled=lambda: False, destino=None, canal=None):
     """Cualquier audio/video a int16 16 kHz mono, paquete a paquete (la mitad de memoria que float32). Con destino (un
     archivo abierto en binario), el audio se escribe ahí según se lee, sin guardarlo en memoria, y devuelve cuántas
-    muestras ha escrito (voices.load_audio_16k lo lee después con np.memmap)."""
+    muestras ha escrito (voices.load_audio_16k lo lee después con np.memmap). Un WAV en dos pistas: la suma, o el canal
+    que se pida (_remuestreo_16k; con "ambos", (n, 2) intercalado)."""
     import av
     import numpy as np
+    layout, post = _remuestreo_16k(path, canal)
+    ancho = 2 if canal == "ambos" and layout == "stereo" else 1
     skip, parts, leidos, relleno, pos, escritas = int(start * 16000), [], 0, 0, 0, 0
     tope, libre = int(AUDIO_MAX_S * 16000), int(SILENCIO_LIBRE_S * 16000)
 
@@ -458,7 +479,7 @@ def decode_16k(path, start=0.0, cancelled=lambda: False, destino=None):
             s = next((s for s in c.streams if s.type == "audio"), None)
             if s is None:
                 raise EngineError("El archivo no tiene pista de audio.")
-            rs = av.AudioResampler(format="s16", layout="mono", rate=16000)
+            rs = av.AudioResampler(format="s16", layout=layout, rate=16000)
             trama = int(TRAMA_MAX_S * 16000)
             for fr in itertools.chain(_paquetes(c, s, av), [None]):  # perezoso: no carga el archivo entero antes
                 if cancelled():
@@ -468,10 +489,10 @@ def decode_16k(path, start=0.0, cancelled=lambda: False, destino=None):
                     if n > trama and relleno + n > libre and relleno + n > leidos:
                         continue
                     relleno += n
-                    anadir(np.zeros(n, np.int16))
+                    anadir(np.zeros((n, 2) if ancho == 2 else n, np.int16))
                     continue
                 for o in rs.resample(fr):
-                    a = o.to_ndarray().reshape(-1)
+                    a = post(o.to_ndarray())
                     leidos += len(a)
                     anadir(a.copy())
     except (EngineError, Cancelled):
@@ -484,7 +505,7 @@ def decode_16k(path, start=0.0, cancelled=lambda: False, destino=None):
         raise EngineError("No se pudo leer el audio: ningún trozo se puede decodificar.")
     if destino is not None:
         return escritas
-    return np.concatenate(parts) if parts else np.zeros(0, np.int16)
+    return np.concatenate(parts) if parts else np.zeros((0, 2) if ancho == 2 else 0, np.int16)
 
 
 # Lo que se dice al subir un archivo que la cadena de arriba no puede transcribir (probar_audio)
@@ -508,7 +529,7 @@ class SinSalto(Exception):
     decodifica entero, como siempre."""
 
 
-def decode_rangos_16k(path, rangos, duracion, cancelled=lambda: False):
+def decode_rangos_16k(path, rangos, duracion, cancelled=lambda: False, canal=None):
     """Solo esos tramos [(inicio, fin) en segundos] de un audio, a int16 16 kHz mono: una lista en el orden dado. Salta
     a cada uno en vez de decodificar el archivo entero (la huella de una voz son <= 90 s; en una reunión de 3 h en m4a,
     decodificarla entera eran ~40 s en un Mac rápido y minutos en un portátil, con el usuario esperando a «Guardar»).
@@ -516,9 +537,12 @@ def decode_rangos_16k(path, rangos, duracion, cancelled=lambda: False):
     según decode_16k (la del sidecar): antes de nada se comprueba que los tiempos del archivo acaban ahí. SinSalto si
     no se puede (ver RANGOS_EXT) o si algo no cuadra: la duración (un hueco en los tiempos, algo dañado que se tira sin
     avisar), un salto que cae después del inicio, fotogramas sin tiempo, un paquete dañado o un tramo que sale corto
-    sin llegar al final del archivo."""
+    sin llegar al final del archivo. Un WAV en dos pistas: la suma, o el canal que se pida (como decode_16k)."""
     import av
     import numpy as np
+    if canal == "ambos":
+        raise ValueError("decode_rangos_16k: un canal o la suma")
+    layout, post = _remuestreo_16k(path, canal)
     if os.path.splitext(path)[1].lower() not in RANGOS_EXT:
         raise SinSalto("formato sin índice")
     try:
@@ -564,7 +588,7 @@ def decode_rangos_16k(path, rangos, duracion, cancelled=lambda: False):
                     continue
                 # 1 s antes: un salto «hacia atrás» cae en el fotograma (o la página) anterior a ese punto
                 c.seek(max(0, int((origen + a - 1.0) / s.time_base)), stream=s, backward=True, any_frame=False)
-                rs = av.AudioResampler(format="s16", layout="mono", rate=16000)
+                rs = av.AudioResampler(format="s16", layout=layout, rate=16000)
                 partes, pos, n, eof = [], None, 0, True
                 for pk in c.demux(s):
                     for fr in s.decode(pk):
@@ -575,7 +599,7 @@ def decode_rangos_16k(path, rangos, duracion, cancelled=lambda: False):
                             if pos > ini + 160:  # 10 ms de margen: el salto ha caído después del inicio
                                 raise SinSalto("el salto cae tarde")
                         for o in rs.resample(fr):
-                            x = o.to_ndarray().reshape(-1)
+                            x = post(o.to_ndarray())
                             partes.append(x.copy())
                             n += len(x)
                     if pos is not None and pos + n >= fin:
@@ -583,7 +607,7 @@ def decode_rangos_16k(path, rangos, duracion, cancelled=lambda: False):
                         break
                 if eof:  # el final del archivo: lo que quede en el resampler
                     for o in rs.resample(None):
-                        x = o.to_ndarray().reshape(-1)
+                        x = post(o.to_ndarray())
                         partes.append(x.copy())
                         n += len(x)
                 if pos is None:

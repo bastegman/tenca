@@ -145,6 +145,12 @@ def close_wav(path):
         f.write(struct.pack("<I", size - info["data_off"]))
 
 
+# Dos pistas (punto 20 del review del 14/11/2026): micro a la izquierda y lo que suena a la derecha (pistas.py). El
+# directo, la cola y la nube leen la suma, que es la mezcla de antes.
+PISTAS = True
+PASO_TU = 0.25  # recorder.PasosTu.PASO (pistas.PASO)
+
+
 # Espacio en disco al empezar a grabar (punto 1 del review del 14/11/2026: no se miraba en ningun sitio). El WAV ocupa
 # 691 MB por hora (48 kHz, estereo, 16 bits); recorder.py lo vuelve a mirar cada 30 s mientras graba.
 WAV_BYTES_S = 48000 * 4
@@ -208,6 +214,7 @@ class RecorderProcess:
     TIMELINE_S = 30.0  # la linea de tiempo del micro (la de «Tú») se guarda cada 30 s, no solo al parar
     _on_end, stopping, fatal, avisado, disco_avisado, tl_busy, tl_at = None, False, None, False, False, False, 0.0
     apuntado = False  # el servidor ya apunto el corte (rec_status deja de dar «cortada» provisional)
+    tu = None  # la linea de «Tú» de la grabadora (bytearray; None en los objetos que los tests montan con __new__)
     visto = None  # time.monotonic() del ultimo estado: si deja de llegar, la grabadora esta atascada (sin_estado_s)
 
     def __init__(self, path, mic, sys_dev, app_dir, data_dir):
@@ -215,6 +222,7 @@ class RecorderProcess:
         self.stopping, self.fatal, self._on_end = False, None, None
         self.avisado, self.end_lock = False, threading.Lock()
         self.levels = []  # (t, mic dB, sys dB) cada 0,25 s: cuando hablo yo (para etiquetar «Tu», sin biometria)
+        self.tu = bytearray()  # la linea de «Tú» que manda la grabadora («tu»/«tu_i»), ya alineada con el archivo
         # fuente callada (aviso de la franja del directo): con cada estado; en_llamada lo pone el vigilante de llamadas
         self.callada, self.en_llamada = directo_avisos.Callada(log=log), False
         self.disco_avisado, self.tl_at, self.tl_busy = False, time.monotonic(), False
@@ -223,7 +231,7 @@ class RecorderProcess:
             self.log_off = os.path.getsize(self.log_path)
         except OSError:
             self.log_off = 0
-        args = [path] if path else ["--monitor"]
+        args = [path, *(["--pistas"] if PISTAS else [])] if path else ["--monitor"]
         err = open(self.log_path, "ab")
         self.p = subprocess.Popen([sys.executable, "-u", os.path.join(app_dir, "recorder.py"), *args,
                                    "--mic", mic or "default", "--sys", sys_dev or "default"],
@@ -301,7 +309,7 @@ class RecorderProcess:
 
     def _guardar_timeline(self):
         try:
-            tl = voices.mic_timeline(self.levels[:])
+            tl = self.timeline()
             if tl and self.path and os.path.isfile(self.path):
                 voices.write_micro(voices.sidecar_path(self.path), tl)
         except Exception:
@@ -323,6 +331,13 @@ class RecorderProcess:
     def note_levels(self, st):
         if not self.path or not isinstance(st, dict) or st.get("t") is None:
             return
+        bits, i = st.get("tu"), st.get("tu_i")
+        if isinstance(bits, str) and bits and isinstance(i, int) and 0 <= i < 10 ** 7 and set(bits) <= {"0", "1"}:
+            if self.tu is None:
+                self.tu = bytearray()
+            if len(self.tu) < i:  # una linea perdida: lo que falta, sin voz
+                self.tu.extend(b"0" * (i - len(self.tu)))
+            self.tu[i:i + len(bits)] = bits.encode("ascii")
         mic = (st.get("mic") or {}).get("db") if isinstance(st.get("mic"), dict) else None
         if mic is None or st.get("mic_muted"):
             return
@@ -330,8 +345,12 @@ class RecorderProcess:
         self.levels.append((st["t"], mic, sysdb))
 
     def timeline(self):
-        """{"paso", "activo"} de la grabacion (None si no se grabo el micro)."""
-        return voices.mic_timeline(self.levels) if self.levels else None
+        """{"paso", "activo"} de la grabacion (None si no se grabo el micro). Con la linea de la grabadora (desde el
+        15/11/2026), esa: sale de la decision bloque a bloque de su nivelador (su voz y no el eco, con la puerta de eco)
+        y va con el archivo («desfase» 0). Si no (una grabadora anterior), la de los niveles, como antes."""
+        if self.tu:
+            return {"paso": PASO_TU, "activo": self.tu.decode("ascii"), "desfase": 0.0, "fuente": "grabadora"}
+        return voices.mic_timeline(self.levels[:]) if self.levels else None
 
     def alive(self):
         return not self.ended and self.p.poll() is None

@@ -1696,6 +1696,7 @@ function loadAudio(a, t, autoplay = true) {
     savePos();
     S.playing = a.path;
     audio.src = '/media?path=' + enc(a.path);
+    if (typeof Pistas !== 'undefined') Pistas.cargar(a.path);  // grabada en dos pistas: se mezcla al oírla (pistas.js)
     audio.defaultPlaybackRate = audio.playbackRate = S.rate;
     const saved = parseFloat(localStorage.getItem('pos:' + a.path));
     const start = t != null ? t : (saved > 5 ? saved : 0);

@@ -241,6 +241,7 @@ class Handler(BaseHTTPRequestHandler):
                   "/api/voces/olvidar": a.voices_forget, "/api/voces/reasignar": a.voices_reassign,
                   "/api/hablantes/unir": a.speakers_join,
                   "/api/voces/exportar": a.voices_export,
+                  "/api/audio/mezclado": a.audio_mezclado,
                   "/api/apagar": a.apagar, "/api/mostrar": a.mostrar, "/api/ocultar": a.ocultar,
                   "/api/acerca/abrir": a.acerca_abrir, "/api/calendario/activar": a.calendario_activar,
                   "/api/movil/abrir": a.movil_abrir, "/api/movil/datos": a.movil_datos,

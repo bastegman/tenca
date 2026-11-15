@@ -24,6 +24,7 @@ import numpy as np
 
 import directo_avisos
 import engines
+import pistas
 from common import log
 
 SR = 16000
@@ -158,6 +159,8 @@ def wav_info(path):
             if tag == 0xFFFE and off + 34 <= len(head):  # WAVE_FORMAT_EXTENSIBLE
                 tag = struct.unpack("<H", head[off + 32:off + 34])[0]
             info.update(tag=tag, channels=ch, rate=rate, byte_rate=br, block_align=ba, bits=bits)
+        elif cid == b"LIST" and pistas.MARCA in head[off + 8:off + 8 + n]:  # grabacion propia en dos pistas
+            info["pistas"] = info.get("channels") == 2 and info.get("bits") == 16 and info.get("tag") == 1
         elif cid == b"data":
             if "rate" not in info or not info["byte_rate"]:
                 return None
@@ -183,6 +186,8 @@ def to_mono(raw, info):
         x = (((b[:, 0] | (b[:, 1] << 8) | (b[:, 2] << 16)) << 8) >> 8).astype(np.float32) / 8388608.0
     else:
         raise engines.EngineError(f"Formato WAV no soportado ({bits} bits)")
+    if ch == 2 and info.get("pistas"):  # micro + lo que suena: la suma es la mezcla de antes (no la media)
+        return pistas.a_mono(x.reshape(-1, 2))
     if ch > 1:
         x = x.reshape(-1, ch).mean(axis=1)
     return x
