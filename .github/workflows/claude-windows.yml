@@ -37,6 +37,7 @@ on:
       - "_app/paquete.py"
       - "_app/rutas.py"
       - "_app/trabajos.py"
+      - "_app/pendientes.py"
       - "scripts/e2e/claude_windows.py"
       - ".github/workflows/claude-windows.yml"
 

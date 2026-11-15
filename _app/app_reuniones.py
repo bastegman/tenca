@@ -10,6 +10,7 @@ import time
 import webbrowser
 
 import engines
+import pendientes
 import voices
 from ajustes import agente_de, procesado_de, proveedor_elegido
 from api import WINDOW, captura_estado
@@ -216,15 +217,10 @@ class Reuniones:
         p = os.path.splitext(abs_path)[0] + ".resumen.md"
         if not os.path.isfile(p):
             return {"exists": False, "ready": self.jobs.summary_ready()}
-        text, meta = read_text(p), {}
-        lines = text.split("\n")
-        if lines and lines[0].strip() == "---":
-            end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), 0)
-            for l in lines[1:end]:
-                k, _, v = l.partition(":")
-                meta[k.strip()] = v.strip()
-            text = "\n".join(lines[end + 1:]).strip()
-        return {"exists": True, "text": text, "meta": meta, "ready": self.jobs.summary_ready()}
+        # desde: la línea del fichero en la que empieza `text` (las casillas de la vista del resumen marcan la tarea
+        # por su línea con POST /api/pendientes/hecha; «Mis pendientes», punto 28)
+        meta, text, desde = pendientes.separar_cabecera(read_text(p))
+        return {"exists": True, "text": text, "meta": meta, "desde": desde, "ready": self.jobs.summary_ready()}
 
     def summarize(self, b):
         with self._move_lock():

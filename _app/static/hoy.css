@@ -3,13 +3,14 @@
    revisar» y «Esta semana»: lo que pide algo de ti va antes que un mes de citas). En un fichero aparte para no tocar
    app.css, que cambian otras ramas a la vez */
 .page.hoy { max-width: 1260px; }
-.hoy-grid { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: "ahora" "rev" "agenda" "sem"; gap: 0 28px; }
+.hoy-grid { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: "ahora" "rev" "pend" "agenda" "sem"; gap: 0 28px; }
 .hoy-ahora-box { grid-area: ahora; min-width: 0; }
 .hoy-agenda { grid-area: agenda; min-width: 0; }
 .hoy-rev { grid-area: rev; min-width: 0; }
 .hoy-sem { grid-area: sem; min-width: 0; }
+.hoy-pend { grid-area: pend; min-width: 0; }
 @media (min-width: 1380px) {
-  .hoy-grid { grid-template-columns: minmax(0, 1fr) 320px; grid-template-rows: auto auto 1fr; grid-template-areas: "ahora agenda" "rev agenda" "sem agenda"; align-items: start; }
+  .hoy-grid { grid-template-columns: minmax(0, 1fr) 320px; grid-template-rows: auto auto auto 1fr; grid-template-areas: "ahora agenda" "rev agenda" "pend agenda" "sem agenda"; align-items: start; }
   .hoy-agenda > h2:first-child { margin-top: 18px; }
 }
 
@@ -62,6 +63,31 @@
   .hr-dia:empty { display: none; }
   .hr-dia { grid-column: 1 / -1; }
 }
+
+/* Mis pendientes (punto 28): las tareas abiertas de los resúmenes, con su casilla */
+.mp-h { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin: 30px 0 12px; }
+.mp-h h2 { margin: 0 auto 0 0; }
+.mp-filtro { display: flex; gap: 4px; }
+.mp-filtro .btn.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-line); }
+.mp-fila { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: start; gap: 12px; padding: 10px 16px; border-top: 1px solid var(--line); }
+.mp-box { width: 18px; height: 18px; margin-top: 2px; padding: 0; border: 1.5px solid var(--line-2); border-radius: 5px; background: var(--panel, transparent); color: var(--accent); display: grid; place-items: center; cursor: pointer; }
+.mp-box:hover { border-color: var(--accent); }
+.mp-box:focus-visible { box-shadow: var(--ring); outline: none; }
+.mp-box.on { border-color: var(--accent); background: var(--accent-soft); cursor: default; }
+.mp-box svg { width: 13px; height: 13px; }
+.mp-n { font-size: 14px; overflow-wrap: anywhere; }
+.mp-sub { color: var(--muted); font-size: 12.5px; margin-top: 2px; overflow-wrap: anywhere; }
+.mp-sub a { color: var(--muted); }
+.mp-sub a:hover { color: var(--accent); text-decoration: underline; }
+.mp-sub .mp-min { color: var(--accent); font-variant-numeric: tabular-nums; }
+.mp-fila.hecha .mp-n { color: var(--muted); text-decoration: line-through; }
+.mp-mas { margin-top: 8px; }
+.mp-nada { display: flex; align-items: center; gap: 7px; margin-top: 16px; color: var(--muted); font-size: 13px; }
+.mp-nada svg { width: 15px; height: 15px; }
+/* la casilla de una tarea en la vista del resumen (notas.js): se pulsa y marca la línea del .resumen.md */
+.sumview li.todo .todo-box { border: 0; background: none; padding: 0 2px 0 0; font: inherit; color: inherit; cursor: pointer; }
+.sumview li.todo .todo-box:hover { color: var(--accent); }
+.sumview li.todo .todo-box:disabled { cursor: progress; opacity: .6; }
 
 /* la agenda de Outlook */
 .ag-estado { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--panel-2); border: 1px dashed var(--line-2); color: var(--ink-2); font-size: 13px; margin-bottom: 10px; }

@@ -377,6 +377,25 @@ function linkStamps(html) {  // [12:34] -> enlace que salta a ese minuto del aud
   return html.replace(/\[((?:\d+:)?\d{1,2}:\d{2})\]/g, (m, t) => `<a class="tsl" data-ts="${t}" title="Escuchar desde aquí">${m}</a>`);
 }
 const stampSecs = t => t.split(':').reduce((acc, x) => acc * 60 + +x, 0);
+/* Las tareas del resumen («- [ ] Responsable: tarea», «1. [x] …») se pueden marcar (review del 14/11/2026, punto 28):
+   la casilla manda la línea del .resumen.md (la del cuerpo + S.sum.desde) y su texto a POST /api/pendientes/hecha, como
+   «Mis pendientes» en Hoy. Cada línea de tarea lleva una marca (\uE000n\uE001, n = su línea en el cuerpo) que md()
+   deja pasar tal cual: así la casilla es la de esa línea y no la n-ésima de la lista (una tarea que md() no pinta como
+   lista no descuadra las demás). Solo «-», «*» y «1.»: las que md() pinta como lista y el servidor cuenta como tarea. */
+const SUM_TAREA = /^(\s*(?:[-*]|\d+[.)])[ \t]+)\[([ xX])\][ \t]*(\S.*?)[ \t]*$/;
+function sumHtml(text) {
+  const src = String(text || '').split('\n').map((l, k) => {
+    const m = l.match(SUM_TAREA);
+    return m ? `${m[1]}[${m[2]}] \uE000${k}\uE001${m[3]}` : l;
+  }).join('\n');
+  return linkStamps(md(src)
+    .replace(/<li>\[([ xX])\]\s?\uE000(\d+)\uE001/g, (x, c, k) => {
+      const hecha = c !== ' ';
+      return `<li class="todo${hecha ? ' done' : ''}"><button type="button" class="todo-box" data-act="sum-tarea" data-l="${k}" aria-pressed="${hecha}" title="${hecha ? 'Marcar como sin hacer' : 'Marcar como hecha'}">${hecha ? '☑' : '☐'}</button> `;
+    })
+    .replace(/<li>\[ \]\s?/g, '<li class="todo">☐ ').replace(/<li>\[x\]\s?/gi, '<li class="todo done">☑ ')
+    .replace(/\uE000\d+\uE001/g, ''));
+}
 
 /* ---------------------------------------------------------------- «Copiar para correo» */
 /* El resumen como acta para un correo o un chat: en HTML (Outlook y Teams lo pegan con formato) y en texto limpio, de
@@ -509,7 +528,7 @@ function renderSummary(a) {
       ${j || azure ? '' : `<button class="btn sm" data-act="summarize" data-path="${esc(a.path)}" title="Vuelve a hacerlo (por ejemplo, tras corregir la transcripción o añadir notas)">${I.refresh}Regenerar</button>`}
     </div>
     ${azure ? azureNote : ''}
-    <div class="card docview sumview">${linkStamps(md(s.text).replace(/<li>\[ \]\s?/g, '<li class="todo">☐ ').replace(/<li>\[x\]\s?/gi, '<li class="todo done">☑ '))}</div>`;
+    <div class="card docview sumview">${sumHtml(s.text)}</div>`;
 }
 main.addEventListener('click', async e => {
   const ts = e.target.closest('#aSum .tsl');
@@ -531,6 +550,19 @@ main.addEventListener('click', async e => {
   } else if (act.dataset.act === 'sum-copy' && S.sum) {
     const r = actaCorreo(S.sum.text, actaInfo(a && a.path === S.sum.path ? a : S.audios.get(S.sum.path), S.config?.summary?.lang));
     copyRich(r.html, r.text, 'Copiado para correo: pégalo en Outlook o en Teams');
+  }
+  else if (act.dataset.act === 'sum-tarea' && a && S.sum && S.sum.path === a.path) {
+    const k = +act.dataset.l, m = (S.sum.text.split('\n')[k] || '').match(SUM_TAREA);
+    if (!m) return;
+    const hecha = m[2] === ' ';
+    act.disabled = true;
+    try {
+      await api('/api/pendientes/hecha', { path: a.path, i: k + (S.sum.desde || 0), texto: m[3], hecha });
+      if (typeof PEND !== 'undefined') PEND.at = 0;  // Hoy › Mis pendientes, al volver, lo relee
+      S.sum = null;
+      await loadSummary(a);
+      toast(hecha ? '☑ Tarea hecha' : '☐ Tarea sin hacer');
+    } catch (err) { toast(esc(err.message), 'err'); act.disabled = false; }
   }
   else if (act.dataset.act === 'sum-to-notes' && a && S.sum) {
     const r = await api('/api/notes?path=' + enc(a.path));

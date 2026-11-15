@@ -20,6 +20,7 @@ import uuid
 import engines
 import explicar
 import live
+import pendientes
 import salidas
 import voices
 from ajustes import NUBE_OFF, agente_de, moved_rel, procesado_de
@@ -800,7 +801,12 @@ class Jobs:
             prov = proveedor_resumen(st)  # el mismo st que eligió el Summarizer
             head = (f"---\nmodelo: {model}\n" + (f"proveedor: {prov}\n" if prov else "")
                     + f"generado: {time.strftime('%Y-%m-%d %H:%M')}\n---\n\n")
-            save_text(base + ".resumen.md", head + text.strip() + "\n", "utf-8")
+            # sin perder lo marcado como hecho en el anterior (punto 28): leerlo y escribir el nuevo, con el candado
+            # de «marcar» (pendientes.LOCK): una tarea marcada entretanto no se pisa
+            with pendientes.LOCK:
+                text = self._con_lo_hecho(base + ".resumen.md", text.strip())
+                save_text(base + ".resumen.md", head + text.strip() + "\n", "utf-8")
+            pendientes.CACHE.olvidar(base + ".resumen.md")
             job.status, job.progress, job.stage = "done", 1.0, "Resumen listo"
             log(f"✔ {job.name}  resumen listo ({(time.time() - job.started):.0f} s, {model})")
             self.write_outputs(job.path)  # destinos de salida: el documento con el resumen
@@ -814,6 +820,18 @@ class Jobs:
         finally:
             job.finished = time.time()
             self.library.at = 0
+
+    @staticmethod
+    def _con_lo_hecho(path, text):
+        """El resumen nuevo con las tareas que estaban hechas en el anterior (pendientes.conservar_hechas; «Mis
+        pendientes», punto 28). Se llama con pendientes.LOCK. Sin anterior, o sin poder leerlo, el nuevo tal cual."""
+        if not os.path.isfile(path):
+            return text
+        try:
+            return pendientes.conservar_hechas(read_text(path), text)
+        except Exception:  # nunca a costa del resumen: el nuevo tal cual, como antes
+            log_exc()
+            return text
 
     def _cloud_ready(self):
         """La nube se puede usar ahora: elegida en Ajustes («API externa») y con su endpoint. Lo comprueban tambien
