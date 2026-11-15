@@ -187,6 +187,11 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         antes = pg.evaluate("api('/api/config')")["procesado"]
         pg.evaluate("abrirConfigurar()")
         pg.wait_for_selector(".dialog.wz h2:has-text('¿Dónde se procesan tus reuniones?')", timeout=5000)
+        # el botón de radio, a la izquierda y en la línea del título de su opción, no solo encima (punto 45 del review)
+        cajas = pg.evaluate("""() => [...document.querySelectorAll('.dialog.wz .wz-opt')].map(o => {
+          const r = o.querySelector('input').getBoundingClientRect(), t = o.querySelector('.t').getBoundingClientRect();
+          return [r.right <= t.left, r.top + r.height / 2 > t.top && r.top + r.height / 2 < t.bottom]; })""")
+        self.assertEqual(cajas, [[True, True]] * 3, cajas)
         pg.check("input[name='wzModo'][value='agente']")
         self.assertIn("se envía a Anthropic", pg.inner_text(".dialog.wz"))
         pg.click("[data-wz='sig']")
@@ -1775,6 +1780,51 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         pg.keyboard.press("Escape")
         pg.wait_for_function("api('/api/config').then(c => c.summary.extra === 'Texto que falla r2')", timeout=8000)
         err, red = self.limpiar(errores, [r for r in red if "/api/settings" not in r])
+        self.assertEqual(err, [], (err, red))
+        self.assertEqual(red, [], red)
+
+    def test_reuniones_por_proyecto(self):
+        """Reuniones › Tabla (punto 43 del review): columna y filtro «Proyecto» en vez de «Carpeta»; fuera las columnas
+        sin datos y cada desplegable con su nombre accesible. Otros tests de la clase añaden reuniones al mismo
+        servidor: se mira la del montaje («Comité de prueba», de Proyecto › General)."""
+        pg, errores, red = self.pagina()
+        pg.goto(f"{self.base}/?t={self.token}", wait_until="networkidle")
+        pg.wait_for_selector("#main h1:has-text('Hoy')", timeout=15000)
+        # lo de antes, en este navegador: una carpeta que no la contiene y un proyecto que ya no existe
+        guardado = "{folder: 'Otra carpeta', proy: 'Ya no existe', group: 'folder', estado: 'Revisada'}"
+        pg.evaluate(f"localStorage.setItem('tbl', JSON.stringify({guardado}))")
+        pg.reload(wait_until="networkidle")
+        pg.wait_for_selector("#main h1:has-text('Hoy')", timeout=15000)
+        pg.click("[data-nav='r']")
+        fila = "#main .db-table tbody tr[data-path*='Comité de prueba']"
+        pg.wait_for_selector(fila, timeout=10000)
+        cab = pg.eval_on_selector_all("#main .db-table thead th", "ths => ths.map(t => t.textContent)")
+        datos = pg.evaluate("""() => [allAudios().some(a => ((a.props || {}).etiquetas || []).length),
+                                     allAudios().some(a => (a.props || {}).estado)]""")
+        esperadas = ["Nombre", "Fecha", "Duración", "Proyecto"] + (["Etiquetas"] if datos[0] else []) \
+            + (["Estado"] if datos[1] else []) + ["Transcripción"]
+        self.assertEqual(cab, esperadas)
+        self.assertEqual(pg.text_content(fila + " td:nth-child(4)").strip(), "Proyecto › General")
+        js = "els => els.map(e => [e.dataset.tbl, e.getAttribute('aria-label') || ''])"
+        nombres = dict(pg.eval_on_selector_all("#main .db-tools select, #main .db-tools input", js))
+        self.assertEqual(nombres["q"], "Filtrar reuniones")
+        self.assertEqual(nombres["proy"], "Proyecto")
+        self.assertNotIn("folder", nombres)  # con proyectos, el filtro de carpeta se va
+        self.assertTrue(all(nombres.values()), nombres)
+        # lo guardado de antes (carpeta, proyecto que no existe) ya no filtra, y «por carpeta» pasa a «por proyecto»
+        self.assertEqual(pg.input_value("[data-tbl='proy']"), "*")
+        self.assertEqual(pg.input_value("[data-tbl='group']"), "proy")
+        js = "tds => tds.map(t => t.firstChild.textContent.trim())"
+        grupos = pg.eval_on_selector_all("#main .db-table tr.grp td", js)
+        self.assertIn("Proyecto", grupos)
+        pg.select_option("[data-tbl='proy']", "")
+        pg.wait_for_selector(fila, state="detached", timeout=5000)
+        pg.select_option("[data-tbl='proy']", "Proyecto")
+        pg.wait_for_selector(fila, timeout=5000)
+        celdas = pg.eval_on_selector_all("#main .db-table tbody tr[data-path] td:nth-child(4)",
+                                         "tds => tds.map(t => t.textContent.trim())")
+        self.assertTrue(celdas and all(c.startswith("Proyecto ›") for c in celdas), celdas)
+        err, red = self.limpiar(errores, red)
         self.assertEqual(err, [], (err, red))
         self.assertEqual(red, [], red)
 

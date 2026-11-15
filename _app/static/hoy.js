@@ -491,7 +491,7 @@ function hoyElegirProyecto(a) {
 }
 async function hoyAccion(k, a) {
   if (k === 'transcribir' || k === 'continuar') return submitTx([a.path], S.config.preset in S.presetsById ? S.config.preset : 'rapido', null, k === 'continuar');
-  if (k === 'voces') { S.tab = 'tx'; return go('a', a.path); }
+  if (k === 'voces') { S.tab = 'tx'; S.irQuien = a.path; return go('a', a.path); }  // al bloque «Quién habla» (B8)
   if (k === 'proyecto') return hoyElegirProyecto(a);
   if (k === 'resumir') {
     try { await api('/api/summarize', { path: a.path }); toast('Resumiendo…'); pollJobs(true); } catch (err) { toast(esc(err.message), 'err'); }

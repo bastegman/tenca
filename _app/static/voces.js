@@ -30,20 +30,220 @@ function renderVoicesBar(a) {
   const j = vozJobFor(a.path), s = S.spk && S.spk.path === a.path ? S.spk : null;
   const last = S.jobs.filter(x => x.path === a.path && x.kind === 'voces').pop();
   const on = S.config.voices && S.config.voices.enabled;
+  if (S.irQuien === a.path && s && !s.exists) S.irQuien = null;  // sin voces: «Ponles nombre» no tiene bloque al que ir
   let html = '';
   if (j) {
     html = `<span class="vz-st">${I.voice}${esc(j.status === 'queued' ? 'En cola para identificar voces' : j.stage)}${j.status === 'running' ? ` (${Math.round(j.progress * 100)} %)` : ''}</span>
       <span class="sp"></span><button class="btn ghost sm danger" data-act="cancel-job" data-id="${j.id}">Cancelar</button>`;
   } else if (s && s.exists) {
+    // B8 (punto 21 del review): el bloque «Quién habla» se despliega aquí mismo, en la página, sin diálogo ni
+    // ventana; plegado es esta línea
+    const sinNombre = qhFilas(s).filter(f => !f.nombre).length;
+    if (S.irQuien === a.path) { S.qhAbierto = a.path; S.irQuien = null; S.qhIr = true; }
+    const abierto = S.qhAbierto === a.path;
     html = `<span class="vz-st">${I.voice}Voces: ${s.n} ${s.n === 1 ? 'persona' : 'personas'} · ${s.known} reconocida${s.known === 1 ? '' : 's'}${Object.values(s.hablantes || {}).some(x => x.usuario && !x.provisional) ? ' · Tú' : ''}</span>
-      <span class="muted">· clic en una etiqueta para poner nombre</span><span class="sp"></span>
+      <button class="btn sm${sinNombre && !abierto ? ' primary' : ''}" type="button" data-act="qh-abrir" aria-expanded="${abierto}" aria-controls="qhBloque">${abierto ? 'Plegar' : sinNombre ? `Ponles nombre (${sinNombre})` : 'Quién habla'}</button>
+      <span class="sp"></span>
       ${S.tx && S.tx.kind === 'srt' ? `<button class="btn ghost sm" data-act="voz-export" title="Guarda <reunión>.hablantes.txt junto al audio">${I.text}Exportar con hablantes</button>` : ''}
-      ${on ? `<button class="btn ghost sm" data-act="voz-identify" title="Repetir la identificación">${I.refresh}Volver a identificar</button>` : ''}`;
+      ${on ? `<button class="btn ghost sm" data-act="voz-identify" title="Repetir la identificación">${I.refresh}Volver a identificar</button>` : ''}
+      ${abierto ? qhBloqueHtml(a, s) : ''}`;
   } else if (on && (a.txt || a.srt) && !a.recording && !jobFor(a.path)) {
     html = `${last && last.status === 'error' ? `<span class="vz-st err">No se pudieron identificar las voces: ${esc(last.aviso?.frase || last.error || '')}</span>` : '<span class="muted">' + I.voice + 'Quién habla: aún sin identificar</span>'}
       <span class="sp"></span><button class="btn sm" data-act="voz-identify">${I.voice}Identificar voces</button>`;
   }
-  el.innerHTML = html ? `<div class="card voz-bar">${html}</div>` : '';
+  // con el bloque abierto y algo escrito en él, no se repinta (los trabajos refrescan la barra cada pocos segundos)
+  // si es la misma identificación (mismo `creado`) y sin trabajo de voces, no se repinta con algo escrito; si las voces
+  // se han vuelto a identificar, sí: sus filas podrían ser ya otras voces (revisión 1, P0-1)
+  const qh = $('#qhBloque', el), misma = qh && s && qh.dataset.creado === String(s.creado ?? '');
+  // mientras se vuelven a leer las voces (S.spk a null tras guardar o juntar), un refresco de trabajos no quita el
+  // bloque abierto: se perdería lo escrito en las demás filas (revisión 2, N6)
+  if (qh && !s && !j && S.qhAbierto === a.path) return;
+  if (qh && misma && !j && S.qhAbierto === a.path && (qh.contains(document.activeElement) || qh.dataset.sucio || qh.dataset.busy)) return;
+  const borrador = misma ? qhBorrador(qh) : null;  // lo escrito en las demás filas no se pierde al guardar una (P1-2)
+  el.innerHTML = html ? `<div class="card voz-bar${S.qhAbierto === a.path ? ' abierto' : ''}">${html}</div>` : '';
+  if (borrador && $('#qhBloque', el)) qhReponer($('#qhBloque', el), borrador);
+  if (S.qhIr && $('#qhBloque', el)) {
+    S.qhIr = false;
+    const b = $('#qhBloque', el);
+    $('.voz-bar', el).scrollIntoView({ block: 'start' });
+    ($('[data-qh-nombre]:not([value]), [data-qh-nombre][value=""]', b) || $('[data-qh-nombre]', b))?.focus({ preventScroll: true });
+  }
+}
+
+/* ---------------------------------------------------------------- B8: el bloque «Quién habla» */
+function qhBorrador(b) {
+  const filas = {};
+  $$('.qh-fila', b).forEach(f => {
+    const n = $('[data-qh-nombre]', f);
+    filas[f.dataset.h] = { v: n ? n.value : null, ini: n ? n.defaultValue : null, rec: !!$('[data-qh-rec]', f)?.checked, sel: !!$('[data-qh-sel]', f)?.checked };
+  });
+  return { filas, con: !!$('#qhConsent', b)?.checked, guardada: S.qhGuardada || null };
+}
+function qhReponer(b, d) {
+  $$('.qh-fila', b).forEach(f => {
+    const x = d.filas[f.dataset.h];
+    if (!x || f.dataset.h === d.guardada) return;
+    const n = $('[data-qh-nombre]', f);
+    if (n && x.v !== x.ini) { n.value = x.v; b.dataset.sucio = '1'; }
+    if ($('[data-qh-rec]', f)) $('[data-qh-rec]', f).checked = x.rec;
+    $('[data-qh-sel]', f).checked = x.sel;
+  });
+  $('#qhConsent', b).checked = d.con;
+  $('.qh-consent', b).classList.toggle('hidden', !$$('[data-qh-rec]', b).some(x => x.checked));
+  $('[data-qh-unir]', b).disabled = $$('[data-qh-sel]', b).filter(x => x.checked).length < 2;
+  if (d.guardada) {  // tras guardar una, el foco a la siguiente sin nombre
+    S.qhGuardada = null;
+    ($$('[data-qh-nombre]', b).find(x => !x.value.trim()) || $('[data-qh-unir]', b))?.focus({ preventScroll: true });
+  }
+}
+/* todas las voces, de la que más habla a la que menos, cada una con su nombre (si lo tiene) */
+function qhFilas(s) {
+  const personas = s.personas || [];
+  return Object.entries(s.hablantes || {}).filter(([h]) => h !== 'varios')
+    .sort((x, y) => (y[1].segundos || 0) - (x[1].segundos || 0)).map(([h, i]) => {
+      const p = i.persona ? personas.find(x => x.id === i.persona) : null;
+      return { h, i, persona: p, tu: !!(i.usuario && !i.provisional), nombre: i.usuario && !i.provisional ? 'Tú' : p && !i.provisional ? p.nombre : '' };
+    });
+}
+/* nombres para sugerir: los participantes de la reunión (los de la cita de Outlook se guardan ahí, como sugeridos)
+   y las personas ya guardadas, sin los que ya tienen voz en esta reunión */
+function qhSugerencias(a, s, filas) {
+  const usados = new Set(filas.map(f => fold(f.nombre)).filter(Boolean));
+  const lista = String((a.props || {}).participantes || ''), sep = lista.includes(';') ? ';' : ',';
+  const part = lista.split(sep).map(x => x.trim()).filter(Boolean);
+  const out = [], vistos = new Set();
+  for (const n of [...part, ...(s.personas || []).filter(p => !p.es_usuario).map(p => p.nombre)]) {
+    const k = fold(n);
+    if (!vistos.has(k) && !usados.has(k)) { vistos.add(k); out.push(n); }
+  }
+  return { todas: out, citas: part.filter(n => !usados.has(fold(n))), origen: (a.props || {}).participantes_origen };
+}
+function qhBloqueHtml(a, s) {
+  const filas = qhFilas(s), sug = qhSugerencias(a, s, filas);
+  const de = sug.origen === 'outlook' ? 'de la cita de Outlook' : sug.origen === 'teams' ? 'de Teams' : 'de la reunión';
+  return `<div class="qh" id="qhBloque" role="group" aria-label="Quién habla" data-creado="${esc(String(s.creado ?? ''))}">
+    ${sug.citas.length ? `<div class="qh-sug"><span class="muted">Asistentes ${de}:</span>${sug.citas.map(n => `<button type="button" class="tag-chip qh-chip" data-qh-sug="${esc(n)}" title="Ponerlo en la voz que estás nombrando">${esc(n)}</button>`).join('')}</div>` : ''}
+    <div class="qh-lista" role="list">${filas.map(f => `<div class="qh-fila" role="listitem" data-h="${esc(f.h)}">
+      <input type="checkbox" data-qh-sel aria-label="Elegir ${esc(spkLabel(f.h))} para juntarla con otras">
+      <span class="qh-quien">${spkChip(f.h)}<span class="qh-t muted">${fmtSecs(f.i.segundos || 0)}${f.i.breve ? ' · habla poco' : ''}</span></span>
+      <button type="button" class="btn sm ghost qh-oir" data-qh-oir aria-label="Oír 5 segundos de ${esc(spkLabel(f.h))}" title="Oír unos 5 segundos de esta voz">${I.play}Oír</button>
+      ${f.tu ? `<span class="qh-yo muted">Tú <small>(para cambiarlo, clic en la etiqueta)</small></span>`
+        : `<input class="input qh-nombre" data-qh-nombre value="${esc(f.nombre)}" placeholder="¿Quién es?" list="qhSugs" autocomplete="off" spellcheck="false" aria-label="Nombre de ${esc(spkLabel(f.h))}">
+      <label class="chk qh-rec"><input type="checkbox" data-qh-rec> Recordar</label>
+      <button type="button" class="btn sm" data-qh-guardar>Guardar</button>`}
+    </div>`).join('')}</div>
+    <datalist id="qhSugs">${sug.todas.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+    <label class="chk sub qh-consent hidden"><input type="checkbox" id="qhConsent"> Tengo el consentimiento de las personas que marco con «Recordar» para guardar su huella de voz en este PC</label>
+    <div class="qh-pie"><button type="button" class="btn sm" data-qh-unir disabled>Son la misma persona</button>
+      <span class="muted qh-ayuda">Marca dos o más voces que la app ha separado y júntalas en una.</span></div>
+    <div class="sp-estado hidden" role="status" aria-live="polite"></div>
+  </div>`;
+}
+/* oír ~5 s de una voz: su frase más larga de la transcripción (who[] dice quién dice cada frase) */
+function qhMuestra(h) {
+  const tx = S.tx, who = typeof whoFor === 'function' ? whoFor(tx) : null;
+  if (!tx || !who) return null;
+  let best = null;
+  tx.segs.forEach((g, k) => {
+    if (who[k] !== h) return;
+    const d = (g.end ?? g.start) - (g.start ?? 0);
+    if (!best || d > best.d) best = { t: g.start ?? 0, d };
+  });
+  return best;
+}
+/* la parada de «Oír»: al llegar al final de la muestra; se olvida si el audio cambia de reunión o de sitio (revisión 1,
+   P1-4: un temporizador de 5 s pausaba lo que se pusiera a sonar después) */
+let qhOyendo = null;
+audio.addEventListener('timeupdate', () => {
+  const o = qhOyendo;
+  if (!o) return;
+  if (S.playing !== o.path || audio.currentTime < o.t - 1 || audio.currentTime > o.fin + 1.5) { qhOyendo = null; return; }
+  if (audio.currentTime >= o.fin) { qhOyendo = null; audio.pause(); }
+});
+// un salto a otro sitio (otra frase, el reproductor) mientras suena la muestra: ya no es la muestra (revisión 2, N5)
+audio.addEventListener('seeking', () => { if (qhOyendo && Math.abs(audio.currentTime - qhOyendo.t) > 0.25) qhOyendo = null; });
+async function qhGuardarFila(a, fila, bloque) {
+  const h = fila.dataset.h, s = S.spk, i = spkInfo(h) || {};
+  const nombre = $('[data-qh-nombre]', fila).value.trim();
+  if (!nombre) return toast('Escribe un nombre');
+  const rec = $('[data-qh-rec]', fila).checked, con = $('#qhConsent', bloque).checked;
+  const cur = i.persona ? (s.personas || []).find(p => p.id === i.persona) : null;
+  // el `creado` con el que se pintó el bloque: si las voces se han vuelto a identificar, el servidor lo rechaza
+  const r = await api('/api/voces/persona', spkNameBody(a, h, cur, nombre, { recordar: rec, consentimiento: con, creado: bloque.dataset.creado || s.creado }));
+  S.qhGuardada = h;
+  // el consentimiento vale para ese guardado: la siguiente persona con «Recordar» lo pide otra vez (revisión 2, N4)
+  if (rec) $('#qhConsent', bloque).checked = false;
+  return rec ? `🗣 ${esc(nombre)}: huella guardada (${r.huellas})` : `🗣 ${esc(nombre)} en esta reunión`;
+}
+async function qhAccion(e) {
+  const bloque = e.target.closest('#qhBloque'), a = curAudio(), s = S.spk;
+  if (!bloque || !a || !s || s.path !== a.path) return;
+  const fila = e.target.closest('.qh-fila'), estado = $('.sp-estado', bloque);
+  const ocupado = txt => { bloque.dataset.busy = '1'; $$('button, input', bloque).forEach(x => { x.dataset.was = x.disabled ? '1' : ''; x.disabled = true; }); estado.textContent = txt; estado.classList.remove('hidden'); };
+  const libre = () => { delete bloque.dataset.busy; $$('button, input', bloque).forEach(x => { x.disabled = x.dataset.was === '1'; }); estado.classList.add('hidden'); };
+  const fin = async msg => { delete bloque.dataset.busy; delete bloque.dataset.sucio; if (bloque.contains(document.activeElement)) document.activeElement.blur(); S.spk = null; await loadSpeakers(a); if (msg) toast(msg); };
+  const sug = e.target.closest('[data-qh-sug]');
+  if (sug) {
+    const campo = S.qhCampo && bloque.contains(S.qhCampo) ? S.qhCampo : $$('[data-qh-nombre]', bloque).find(x => !x.value.trim());
+    if (!campo) return toast('Todas las voces tienen ya un nombre');
+    campo.value = sug.dataset.qhSug; bloque.dataset.sucio = '1'; campo.focus();
+    return;
+  }
+  if (e.target.closest('[data-qh-oir]') && fila) {
+    if (!S.tx || S.tx.path !== a.path) return toast('Un momento: aún se está cargando la transcripción');
+    const m = qhMuestra(fila.dataset.h);
+    if (!m) return toast('No sé en qué minuto habla esta voz: hace falta la transcripción con tiempos (.srt)');
+    loadAudio(a, m.t, true);
+    qhOyendo = { path: a.path, t: m.t, fin: m.t + Math.min(5, Math.max(1, m.d)) };
+    return;
+  }
+  if (e.target.closest('[data-qh-guardar]') && fila) {
+    if (bloque.dataset.busy) return;
+    const rec = $('[data-qh-rec]', fila).checked;
+    if (!$('[data-qh-nombre]', fila).value.trim()) return toast('Escribe un nombre');
+    if (rec && !$('#qhConsent', bloque).checked) {  // antes de «Guardando…»: sin consentimiento no se manda nada
+      $('.qh-consent', bloque).classList.remove('hidden');
+      return toast('Para guardar la huella marca la casilla de consentimiento', 'err');
+    }
+    ocupado(rec ? 'Guardando la huella de voz…' : 'Guardando…');
+    try { const msg = await qhGuardarFila(a, fila, bloque); if (!msg || typeof msg !== 'string') return libre(); await fin(msg); } catch (err) { libre(); toast(esc(err.message), 'err'); }
+    return;
+  }
+  if (e.target.closest('[data-qh-unir]')) {
+    if (bloque.dataset.busy) return;
+    const hs = $$('.qh-fila', bloque).filter(f => $('[data-qh-sel]', f).checked).map(f => f.dataset.h);
+    if (hs.length < 2) return;
+    const con = hs[0];  // la que más habla (la lista va por tiempo): las demás se juntan en ella
+    ocupado('Juntando…');
+    // tras juntar, ninguna queda marcada: la voz que queda no se iría con la siguiente unión (revisión 2, N1)
+    $$('[data-qh-sel]', bloque).forEach(x => { x.checked = false; });
+    let hechas = 0;
+    try {
+      for (const h of hs.slice(1)) { await api('/api/hablantes/unir', spkJoinBody(a, h, con, bloque.dataset.creado || s.creado)); hechas++; }
+      await fin(`${hs.length} voces juntadas en ${esc(spkLabel(con))}`);
+    } catch (err) { await fin(); toast(`${hechas ? `Se juntaron ${hechas + 1} de ${hs.length}. ` : ''}${esc(err.message)}`, 'err'); }
+  }
+}
+main.addEventListener('click', e => { if (e.target.closest('#qhBloque')) qhAccion(e); });
+main.addEventListener('focusin', e => { if (e.target.matches && e.target.matches('#qhBloque [data-qh-nombre]')) S.qhCampo = e.target; });
+main.addEventListener('input', e => { const b = e.target.closest && e.target.closest('#qhBloque'); if (b && e.target.matches('[data-qh-nombre]')) b.dataset.sucio = '1'; });
+main.addEventListener('change', e => {
+  const b = e.target.closest && e.target.closest('#qhBloque');
+  if (!b) return;
+  if (e.target.matches('[data-qh-rec]')) b.querySelector('.qh-consent').classList.toggle('hidden', !$$('[data-qh-rec]', b).some(x => x.checked));
+  if (e.target.matches('[data-qh-sel]')) $('[data-qh-unir]', b).disabled = $$('[data-qh-sel]', b).filter(x => x.checked).length < 2;
+});
+main.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.matches && e.target.matches('#qhBloque [data-qh-nombre]')) { e.preventDefault(); e.target.closest('.qh-fila').querySelector('[data-qh-guardar]')?.click(); }
+});
+/* Escape cierra el globo de un hablante (app.js lo llama; uno guardándose no se cierra) */
+function spkPopCerrar() {
+  const p = $('.spk-pop');
+  if (!p || p.dataset.busy) return false;
+  const ancla = p._ancla;
+  closeSpkPop();
+  if (ancla && ancla.isConnected) ancla.focus({ preventScroll: true });
+  return true;
 }
 
 /* trabajos de voces: al terminar, recargar las etiquetas de la reunión abierta (lo llama onJobs de app.js) */
@@ -95,6 +295,7 @@ function openSpeakerPop(h, anchor) {
   const other = cur && !cur.es_usuario, doubtOther = i.provisional && other, merge = i.persona && !i.usuario;
   const pop = document.createElement('div');
   pop.className = 'spk-pop';
+  pop._ancla = anchor;
   pop.innerHTML = `<div class="sp-h">${esc(spkLabel(h))} <span class="muted">· ${fmtSecs(i.segundos || 0)} de voz${i.score != null ? ` · parecido ${String(Math.round(i.score * 100))} %` : ''}${i.breve ? ' · habla poco' : ''}</span></div>
     ${doubtOther ? `<div class="notice info">Parece <b>${esc(cur.nombre)}</b>, pero no es seguro. Si lo es, pulsa <b>Confirmar</b> (se guarda esta voz como otra huella suya).</div>` : ''}
     ${i.usuario && i.provisional ? '<div class="notice info">Parece tu voz, pero no es seguro. Si eres tú, pulsa <b>Soy yo</b>; si no, escribe su nombre.</div>' : ''}
@@ -200,6 +401,14 @@ function openSpeakerPop(h, anchor) {
 main.addEventListener('click', async e => {
   const chip = e.target.closest('.spk');
   if (chip) { e.preventDefault(); e.stopPropagation(); openSpeakerPop(chip.dataset.spk, chip); return; }
+  if (e.target.closest('[data-act="qh-abrir"]')) {
+    const a0 = curAudio();
+    if (!a0) return;
+    S.qhAbierto = S.qhAbierto === a0.path ? null : a0.path;
+    if (S.qhAbierto) S.qhIr = true;
+    renderVoicesBar(a0);
+    return;
+  }
   const act = e.target.closest('[data-act]');
   if (!act || !main.contains(act)) return;
   const a = curAudio();

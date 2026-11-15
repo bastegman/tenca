@@ -177,7 +177,210 @@ registros). Si la app está grabando, no toca nada. Sin ventana: `QuietUninstall
 que no borra `AudiosApp` salvo con `-BorrarDatos`); registro en `%TEMP%\tenca-desinstalar.log`. Python y sus
 librerías se quedan.
 
-El manual completo está en `LEEME.txt`.
+El uso diario, pantalla a pantalla, está en «Manual de uso».
+
+## Manual de uso
+
+El detalle de cada pantalla. `LEEME.txt`, el que va en el zip, cabe en una pantalla: instalar, abrir, grabar, dónde queda todo y si algo falla.
+
+### Al configurar una API externa
+
+- La API key te la da el proveedor en su web. De modelo, `whisper-large-v3` (el más preciso) si lo tiene; en «Modelo del directo» puedes poner otro más rápido. El asistente lo prueba al final.
+
+### Uso diario
+
+- Abre con el acceso directo "Tenca" (ya sin ventana negra). Mientras está abierta, Tenca
+  tiene su icono en la bandeja del sistema, junto al reloj (la primera vez Windows lo pone en
+  los iconos ocultos, la flecha ^: arrástralo junto al reloj si lo quieres siempre a la vista).
+  Si cierras la ventana, la app sigue ahí (Ctrl+Alt+R sigue funcionando): un clic en el icono o
+  el acceso directo la vuelven a abrir. Para salir del todo: clic derecho en el icono > Salir
+  (o ⚙ Ajustes > Ayuda > Apagar Tenca). En ese menú también está "Arrancar con Windows".
+- La app abre en "Hoy": arriba, la reunión en la que estás (de Teams o de tu calendario de
+  Outlook) con su proyecto y su idioma, que puedes cambiar, y "Grabar", que empieza ya; si la
+  reunión se repite, lo que quedó abierto la última vez. Debajo, lo que pide algo de ti (sin
+  transcribir, voces sin nombre, sin proyecto…), cada cosa con su botón, y lo de esta semana.
+  Con el calendario activado (Ajustes > Calendario y Teams), también tu agenda del próximo mes
+  (y en "Calendario"), donde puedes "Preparar" una reunión: su proyecto, su idioma y su
+  contexto se usarán al grabarla. La agenda se lee en segundo plano y no sale del PC.
+- Al parar una grabación, si ya ha empezado otra reunión, Tenca la propone: "Ya ha empezado
+  «X» · Grabar · Ahora no" (en Hoy, en las demás páginas y en el aviso flotante). "Grabar" la
+  graba con su proyecto y su idioma (y lo que hayas preparado). Nunca graba sola.
+- ● Grabar abre una tarjeta que dice qué va a pasar: la reunión (el nombre de Teams, de tu
+  calendario o el que escribas, con tus reuniones recientes como sugerencia), el proyecto y,
+  debajo, "Así se va a grabar": dónde se guarda, idioma, vocabulario, quién transcribe, quién
+  resume y el audio, cada línea con de dónde sale (esta reunión, el proyecto o Ajustes).
+  "Cambiar" pregunta si es solo para esta reunión, para todas las del proyecto o para todas.
+  Ctrl+Alt+R (desde cualquier programa) graba con eso mismo sin preguntar, y vuelve a pulsarlo
+  para parar.
+- ¿Ya tienes el audio (del móvil, de WhatsApp, de otra grabadora)? Pulsa "Subir audio", arriba,
+  o arrástralo a la ventana: se guarda como una reunión más, con su proyecto y su fecha, y se
+  transcribe solo. Si un archivo no se puede leer, lo dice y no guarda nada.
+- ¿Está en el móvil? "Subir audio" > "Desde el móvil": eliges el proyecto y sale un código QR.
+  Escanéalo con la cámara del móvil, elige las grabaciones en la página que se abre y entran
+  solas. Hace falta que el móvil y el PC estén en la misma wifi y que Windows la tenga como
+  privada (Configuración > Red e Internet > Wi-Fi > tu red > Privada); en una pública o en la
+  de la empresa no se ofrece. El audio va directo del móvil al PC, sin pasar por internet. Cada
+  código vale 10 minutos y para un solo móvil. La primera vez, Windows pregunta si dejas usar la
+  red (puede decir "Python"): marca "Redes privadas" y pulsa "Permitir". En el iPhone, las Notas
+  de voz y los audios de WhatsApp se guardan antes en Archivos (Compartir > Guardar en Archivos).
+- Voces dobles: si una salida solo repite a otra (un dispositivo virtual, el «espejo» de un
+  driver), la grabadora lo detecta sola en unos segundos y no suma la copia («igual que …: no se
+  suma» en el medidor de ● Grabar). Si con altavoces el micro recoge la reunión, o una salida
+  lleva tu micro, el medidor te lo dice con qué hacer (auriculares; quitar «Escuchar este
+  dispositivo» en Sonido de Windows). Con auriculares no hace falta nada.
+- Si estás en una llamada de Teams y no estás grabando, arriba aparece
+  "📞 Teams en llamada · ● Tomar Notas".
+- Al detectar la llamada, abajo en el centro aparece un aviso pequeño con el nombre de la reunión y
+  "● Grabar": púlsalo para empezar sin salir de Teams (se cierra solo a los 20 s o con ✕).
+- Al grabar, la app propone el nombre, el proyecto y los participantes a partir de la ventana de
+  la reunión de Teams, de tus reuniones recientes y, si lo activas en Ajustes > Calendario y
+  Teams, de tu calendario de Outlook (clásico); sin calendario también funciona. El proyecto
+  sale de las veces anteriores que grabaste esa reunión, del título o de la última grabación,
+  siempre con el motivo a la vista. Todo se lee en tu PC. Los participantes que propone se
+  quedan en las notas de esa reunión, marcados como sugeridos, y no van al resumen con IA ni a
+  las copias en otras carpetas hasta que los confirmas en su página ("Confirmar"). El nombre que
+  propone (el asunto de la cita o el título de la reunión de Teams), si lo aceptas, es el nombre
+  de la grabación: va como título con el resumen y a las copias en otras carpetas.
+- Al parar, termina de transcribir. Si fue en la nube (lo normal en cuanto la conectas), hace
+  también el resumen solo. Lo transcrito en local (si eliges un modelo local para el directo o
+  para la cola) se resume con "Resumir esta reunión", o también solo si lo activas en Ajustes >
+  Procesado > Resumen con IA (entonces su texto va al proveedor de la nube). Cada reunión tiene
+  pestañas Resumen / Transcripción / Notas; la transcripción se puede corregir en su página.
+  "Copiar para correo" (en la pestaña Resumen) copia el resumen como acta con formato:
+  título, fecha, asistentes confirmados y el resumen, sin los minutos. Al pegarlo en Outlook
+  o en Teams sale con negritas y listas; en el Bloc de notas, como texto limpio.
+- Ctrl+P busca en todas las reuniones. Puedes arrastrar a la ventana audios que ya tengas
+  (mp3, m4a, wav, mp4…) y moverlos entre carpetas.
+- Si grabas con OBS, configúralo para que guarde en la carpeta de Tenca: la app lo detecta y
+  transcribe en directo mientras graba.
+- Cada grabación va en su propia carpeta, "AAAA-MM-DD Nombre", dentro de la carpeta principal
+  de su proyecto (sin asignar, la del proyecto: la que tiene su carpeta Vocabulario; si sus
+  listas vienen de una carpeta conectada, la que le asignes en Ajustes > Proyectos o con
+  "Usarlo en" al grabar). Lo grabado antes se queda donde está. Mover o renombrar la reunión
+  mueve su carpeta entera. En pleno directo, "Se guarda en ... · Cambiar" elige otra carpeta: la
+  grabación sigue y, cuando terminan el directo, el repaso y el resumen, la reunión entera se
+  mueve sola (hasta entonces se puede deshacer; si cierras Tenca antes, se mueve al volver a
+  abrirla). "Una carpeta por reunión" se apaga en Ajustes > Al grabar.
+- ⚙ Ajustes guarda cada cambio al momento, con "Guardado ✓" junto a lo que cambias: no hay
+  botón "Guardar" (abajo solo está "Cerrar"). Para cambiar dónde se procesan tus reuniones,
+  Ajustes > Procesado > "Cambiar…" abre el asistente, que lo aplica al terminar.
+- ⚙ Ajustes abre en "Al grabar": arriba, "Así se graba ahora una reunión de [proyecto]", lo
+  mismo que usarán ● Grabar y Ctrl+Alt+R (cambia con lo que elijas); debajo,
+  las reglas: la carpeta de las reuniones sin proyecto, el idioma por defecto (se detecta solo;
+  "Español + inglés", "Español + portugués" e "Inglés + portugués" son para reuniones que
+  mezclan dos), el proyecto al grabar, un contexto de una o dos frases (de qué va, quién
+  participa), el micrófono y el audio del PC, el texto en directo y "Llamada detectada" (te
+  avisa si estás en una llamada y no grabas; el aviso flotante con "Grabar" está en Calendario y
+  Teams). Con un idioma fijo, lo que se diga en otro se traduce a ese: si la reunión puede
+  cambiar de idioma, mejor una mezcla o "Detectar".
+- En la página de la reunión, idioma y contexto se cambian sobre la marcha. El idioma vale al
+  momento: el trozo que se estaba transcribiendo se repite y lo escrito en el último minuto se
+  rehace en el idioma nuevo (el aviso dice en cuántos segundos se verá); lo corregido a mano no se
+  rehace. El repaso final, si lo hay, tiene en cuenta los dos idiomas. El contexto, desde el
+  siguiente trozo. El resumen también tiene en cuenta el contexto.
+- Con el directo en la nube, "Traducir al [español / inglés]" traduce lo último que se dice en
+  una columna a la derecha. Recuerda el idioma elegido para cada reunión (la primera vez, el
+  del resumen si es español o inglés). La traducción es una ayuda para seguir la reunión: no
+  se guarda.
+- Al compartir pantalla (Teams, Zoom, Meet), Tenca y su aviso "Grabar" no salen en lo que ven
+  los demás: ven lo que haya detrás. Tú los sigues viendo. Tampoco sale en tus capturas de pantalla: para enseñarla en
+  una demo o hacerle una captura, quítalo en Ajustes > Calendario y Teams > "Al compartir
+  pantalla" (vale al momento). Necesita Windows 10 versión 2004 o posterior.
+- Ajustes > Proyectos: una tabla con la carpeta y el idioma de cada proyecto y workstream, los
+  que se usarán al grabar. En negro, lo asignado; en gris, lo heredado: sin carpeta asignada,
+  la del proyecto (la que tiene su carpeta Vocabulario); sin idioma, el de Al grabar. Con "Editar",
+  eliges la carpeta y el idioma en la fila (también la carpeta de cada workstream). Debajo,
+  las carpetas fuera de Tenca y las copias en otras carpetas. Las listas de vocabulario están en
+  Ajustes > Vocabulario.
+- Copias en otras carpetas (en Ajustes > Proyectos): carpetas donde cada reunión se guarda además como
+  documento (.md con propiedades, resumen, notas y transcripción; .txt; o Word .docx), por
+  ejemplo un vault de Obsidian o la carpeta de documentos del proyecto en OneDrive, con
+  subcarpeta por proyecto si quieres. No vale la carpeta de Tenca, una carpeta vinculada ni una
+  carpeta con grabaciones: los documentos chocarían con las notas de cada reunión. Se escribe al
+  terminar y al guardar cambios; el audio y los originales no se mueven, y nunca se pisa un
+  archivo ajeno ni uno que hayas cambiado allí (lo que no se ha podido escribir sale como aviso
+  en ese mismo apartado). Los participantes sin confirmar no van. Al borrar una reunión, sus
+  documentos que nadie haya cambiado allí van también a la papelera.
+- Vocabulario por proyecto y workstream: en Ajustes > Vocabulario (o en ● Grabar > Proyecto)
+  creas un proyecto y sus workstreams, cada uno con su lista de nombres, siglas y productos
+  separados por comas (los más importantes primero). Al grabar eliges el workstream y Whisper los
+  escribe bien. Whisper solo lee unos 45 términos: el propio editor te dice cuáles se quedan
+  fuera. Si ya tienes tus listas en una carpeta (en OneDrive, por ejemplo), "Usar las listas
+  de una carpeta…" la conecta: cada .txt es un workstream (términos separados por comas o uno
+  por línea) y se lee en vivo al grabar, sin copiarlo. Valen los .txt sueltos (el proyecto
+  es el nombre de la carpeta), una subcarpeta Vocabulario o una carpeta por proyecto con su
+  Vocabulario dentro. Quitarla no borra nada. Un archivo "solo en línea" de OneDrive se
+  salta con aviso: clic derecho > "Mantener siempre en este dispositivo". Para las listas
+  de un compañero o de otra copia, "Copiar listas de otra carpeta…" las copia sin pisar
+  las tuyas.
+- Aprende de tus correcciones: si corriges un nombre o una sigla en una transcripción
+  («orbalia» → «Orvalia»), al pulsar "Listo" te propone, encima del texto, añadirlo al vocabulario
+  de esa reunión o a otra lista (también a tu carpeta de listas; si no puede escribir en ella,
+  te dice por qué). Las erratas y los cambios de redacción no cuentan. Lo que confirmas va también
+  a tu diccionario personal: en las próximas reuniones de ese proyecto cambia sola lo que escribió
+  Whisper, solo en frases que nadie ha tocado, subrayado en el texto y con "Deshacer" en cada
+  reunión (desmarca la casilla si no lo quieres). El diccionario está en Ajustes > Vocabulario, con
+  "cambiar" y "quitar". Nada se aprende sin tu clic, el audio no se toca (lo que escribió Whisper
+  se guarda aparte: "Restaurar original") y nada sale del PC.
+
+### Quién habla (opcional)
+
+- Ajustes ⚙ → «Voces (opcional)» → activar. Se descargan dos modelos (unos 47 MB, una sola vez)
+  y, al terminar cada transcripción, la app separa las voces en segundo plano (unos 2 s por
+  minuto de reunión, sin molestar). En la transcripción cada cambio de voz empieza párrafo con
+  una etiqueta: «Persona 1», «Persona 2», «Tú» (tu micro), «varios» (hablan a la vez).
+- Clic en la etiqueta: escribe quién es. Si ya hay alguien con ese nombre, es esa persona; si
+  no, se crea. Marca «Recordar en próximas reuniones» para que la app reconozca esa voz la
+  próxima vez (sale ya con su nombre; si no está segura pregunta «¿Nombre?»). Poner un nombre
+  nunca cambia el de otra persona ni el tuyo: para corregir una errata en todas sus reuniones,
+  marca «solo corrijo el nombre» (o cámbialo en Ajustes > Voces).
+- «Tú» sale de tu micro o de tu voz guardada. Si se equivoca, escribe el nombre de quien era o
+  pulsa «No soy yo»; si eres tú y no sale, «Soy yo» (tu persona se llama «Yo» hasta que le
+  cambies el nombre en Ajustes > Voces). También «Es…» / «Fusionar con…» (dos etiquetas eran la
+  misma persona), «No es esta persona» y «Olvidar persona». «Volver a identificar» conserva lo
+  que ya hayas corregido a mano. Si en Ajustes > Voces tu fila lleva ⚠, puede guardar la voz de
+  otra persona: pulsa «Olvidar» en ella y vuelve a marcarte con «Soy yo» y «Recordar».
+- El resumen con IA usa esos nombres (responsables y participantes), «Copiar texto» copia la
+  transcripción con el nombre de quien habla y «Exportar con hablantes» guarda
+  `<grabación>.hablantes.txt` junto al audio. El .txt y el .srt no cambian.
+- Privacidad: las voces se separan y se reconocen en tu PC, y las huellas no salen de él. Los
+  nombres que pongas van con la transcripción: al resumen con IA (si lo usas) y a las copias en
+  otras carpetas. Por reunión se guarda `<grabación>.hablantes.json` junto al audio (tramos y
+  «Persona N», sin datos de voz). Las huellas de voz que decidas recordar van a
+  %LOCALAPPDATA%\AudiosApp\voces.json, cifrado con tu cuenta de Windows, fuera de OneDrive,
+  máximo 5 por persona, y se borran con «Olvidar». Una huella de voz es un dato biométrico:
+  guárdala solo con el consentimiento de esa persona (la casilla te lo recuerda; el
+  consentimiento es responsabilidad tuya). Si no activas la opción no se descarga ni se guarda
+  nada.
+
+### Si usas Groq: límites de su plan gratuito
+
+Orientativos; los vigentes, en `console.groq.com/settings/limits`.
+
+- Transcripción: unas 2 horas de audio por hora y 8 horas de audio al día.
+- Resumen: unas 7 reuniones de 1 hora al día.
+
+### Si algo falla
+
+- INSTALAR.bat se puede volver a ejecutar sin problema.
+- Si tu empresa no deja añadir programas a Aplicaciones instaladas, el instalador lo avisa y
+  Tenca funciona igual; para quitarla: clic derecho en _app\desinstalar.ps1 > "Ejecutar con
+  PowerShell".
+- Registro del desinstalador: %TEMP%\tenca-desinstalar.log.
+- Si el acceso directo no abre nada, ABRIR TENCA.bat arranca la app con una ventana de consola
+  donde se ven los mensajes (ciérrala para apagar).
+- Para pedir ayuda: ⚙ Ajustes > Ayuda > "Copiar diagnóstico" copia solo datos técnicos: la
+  versión, el sistema, el motor y el modelo y, de las últimas líneas del registro, lo fijo de
+  cada mensaje con sus cifras y códigos de error. Los nombres de reuniones, carpetas y personas
+  y las rutas salen como `<texto>`, y las claves no van. Revísalo antes de pegarlo y no lo
+  publiques en un sitio público. Los registros (server.log y los demás) sí llevan nombres y
+  rutas: no los compartas tal cual.
+- Si sale "Sesión no válida", abre Tenca con su acceso directo: la dirección 127.0.0.1
+  guardada en el navegador no vale sola.
+- Si no consigue descargar las librerías, suele ser el proxy de la red: prueba con otra red
+  (p. ej. compartiendo datos del móvil) o pide a IT acceso a pypi.org.
+- Registros para revisar errores: %LOCALAPPDATA%\AudiosApp (server.log, worker-*.log,
+  recorder.log, voces.log e instalar.log).
 
 ## Privacidad
 

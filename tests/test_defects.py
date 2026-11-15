@@ -274,7 +274,7 @@ class Defecto7Configuracion(unittest.TestCase):
     def test_modelo_de_nube_por_defecto_el_mas_preciso(self):
         self.assertEqual(server.DEFAULT_SETTINGS["cloud"]["model"], "whisper-large-v3")
         self.assertIn("whisper-large-v3", engines.PROVIDERS["groq"]["models"])
-        self.assertIn("whisper-large-v3", self.read("LEEME.txt"))
+        self.assertIn("whisper-large-v3", self.read("README.md"))  # el detalle, en el README (punto 45)
 
     def test_modelo_de_resumen_dudoso_marcado(self):
         src = self.read("_app", "engines.py")
