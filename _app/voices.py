@@ -870,6 +870,8 @@ class Voices:
             if item is None:
                 return len(p.get("huellas") or [])
             pend.remove(item)
+            if vector is not None:  # con su huella, las demas de esa misma reunion sobran: daria la misma voz otra vez
+                pend[:] = [x for x in pend if x.get("reunion") != reunion]  # (una vuelta despues de un corte)
             if not pend:
                 p.pop("rehacer", None)
             if vector is not None:
@@ -1101,22 +1103,29 @@ def buscar_por_nombre(raices, extensiones=AUDIO_EXT):
 
 def hablante_de(data, pid, segundos=None):
     """El hablante del sidecar que el usuario puso a mano como esa persona (el de «Recordar»), no uno que la app solo
-    propuso (por voz, por el micro o provisional). Si hay varios, el de segundos mas cercanos a los de la huella."""
+    propuso (por voz, por el micro o provisional). Si hay varios, el de segundos mas cercanos a los de la huella.
+    Un sidecar de antes del 07/11/2026 no dice que se puso a mano (no lleva «origen» en ningun hablante): ahi solo vale
+    el unico hablante de esa persona con los segundos de la huella (los de su voz al pulsar «Recordar», ±0,5 s); si se
+    volvio a identificar despues, ya no casan y no se elige ninguno."""
     hablantes = (data or {}).get("hablantes") if isinstance(data, dict) else None
     if not isinstance(hablantes, dict):
         return None
-    cands = [(k, i) for k, i in hablantes.items() if isinstance(i, dict) and i.get("persona") == pid
-             and i.get("origen") == "manual" and not i.get("provisional")]
-    if not cands:
-        return None
-    if len(cands) == 1:
-        return cands[0][0]
 
     def num(x):
         try:
             return float(x)
         except (TypeError, ValueError):
             return 0.0
+    cands = [(k, i) for k, i in hablantes.items() if isinstance(i, dict) and i.get("persona") == pid
+             and i.get("origen") == "manual" and not i.get("provisional")]
+    if not cands and segundos and not any(isinstance(i, dict) and "origen" in i for i in hablantes.values()):
+        cands = [(k, i) for k, i in hablantes.items() if isinstance(i, dict) and i.get("persona") == pid
+                 and not i.get("provisional") and abs(num(i.get("segundos")) - num(segundos)) <= 0.5]
+        return cands[0][0] if len(cands) == 1 else None
+    if not cands:
+        return None
+    if len(cands) == 1:
+        return cands[0][0]
     return min(cands, key=lambda c: abs(num(c[1].get("segundos")) - num(segundos)))[0]
 
 

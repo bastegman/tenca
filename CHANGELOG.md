@@ -34,6 +34,30 @@ Puntos 5, 30, 32, 33 y 60 de la revisión del 14/11/2026. Rama `motor-lote2a`.
 - **Ajustes › Ayuda › Acerca de › «Buscar versión nueva».** Una consulta a GitHub al pulsarlo, nunca sola: dice si hay
   una versión publicada más nueva que la tuya, con el enlace a su página.
 
+### Las huellas de voz se rehacen solas al actualizar, y lo que faltaba enganchar al servidor (15/11/2026)
+
+Rama `enganches`: lo que las ramas anteriores de esta revisión dejaron preparado y esperaba al servidor ya partido.
+
+- **Al actualizar, cada persona vuelve a reconocerse por la voz sin hacer nada.** Las huellas del modelo anterior se
+  rehacen con el de ahora desde el audio de las reuniones en que se pulsó «Recordar», en segundo plano y unos segundos
+  después de abrir la app. Nunca mientras se graba, hay un directo o una llamada, o se transcribe o se identifican
+  voces: espera, y si empieza a grabarse mientras calcula una, la corta y la repite al terminar. Si el usuario corrige
+  ese hablante mientras tanto, se queda con lo corregido. Si faltan los modelos, los baja primero. Lo que no encuentra (una reunión borrada o renombrada) se queda apuntado y la
+  persona sigue con su nombre: vuelve a tener huella con el siguiente «Recordar». Los nombres, «Soy yo» y el
+  consentimiento no se tocan. En «Copiar diagnóstico» sale cuántas se han rehecho.
+- **Español + inglés + portugués**, ya en el desplegable de idioma y en todo el servidor (la reunión, «Preparar» en Hoy,
+  Ajustes y el repaso final de un directo que pasó por los tres idiomas).
+- **El repaso final en la nube corta en cada cambio de idioma del directo** y manda cada tramo con el suyo.
+- **Un fallo inesperado** responde siempre con la frase y el texto técnico aparte, también para el aviso flotante y
+  los scripts. La ✕ de «Ya ha empezado «X»» ya no deja una traza en `server.log`.
+- **«No es de ningún proyecto» se guarda en la reunión** (su `.md`), no solo en este PC: vale en otra ventana, tras
+  mover la reunión y en otro PC con la misma carpeta. Lo que se contestó antes se pasa a la reunión al abrir Hoy.
+- **«Actualizar» en la agenda durante una llamada** lo sabe por el servidor, que es quien deja de leer Outlook (antes,
+  la interfaz lo deducía y no veía todas las llamadas).
+- **«Oír» una voz** suena con unos segundos en que solo habla ella, de lo que separó «Quién habla», aunque la
+  transcripción no tenga tiempos.
+- **El aviso del resumen dice quién lo hizo** («por Groq», «por tu cuenta de Claude»…), que queda en su cabecera.
+
 ### «Quién habla» con otro modelo de huellas, medido en reuniones largas, en español y con audio de Teams (15/11/2026)
 
 Punto 36 de la revisión del 14/11/2026. Rama `motor-lote1`.
@@ -48,7 +72,7 @@ Punto 36 de la revisión del 14/11/2026. Rama `motor-lote1`.
 - **Las huellas guardadas dejan de usarse.** Las del modelo anterior no se pueden comparar con las nuevas: al
   actualizar, cada persona conserva su nombre, «Soy yo» y su consentimiento, y vuelve a tener huella con el siguiente
   «Recordar». Mientras, no se la reconoce por la voz: mejor que reconocer mal. Queda apuntado de qué reunión era cada
-  huella, para recalcularla desde su audio (falta que la app lo haga sola).
+  huella, para recalcularla desde su audio (desde la rama `enganches`, la app lo hace sola al arrancar).
 - `scripts/banco_voces.py` monta ese banco y `scripts/eval_voces.py` mide con otro modelo (`--emb`).
 
 ### Tres idiomas a la vez, avisos con el icono de la app y el repaso en la nube por idioma (15/11/2026)
@@ -56,7 +80,7 @@ Punto 36 de la revisión del 14/11/2026. Rama `motor-lote1`.
 Puntos 54, 57 y 35 de la revisión del 14/11/2026. Rama `motor-lote1`.
 
 - **Español + inglés + portugués.** Nueva mezcla `es-en-pt`: en el PC se detecta el idioma de cada bloque solo entre
-  esos tres; en la nube, con una frase de ejemplo en los tres. Falta ponerla en el desplegable de idioma.
+  esos tres; en la nube, con una frase de ejemplo en los tres (en el desplegable desde la rama `enganches`).
 - **Los avisos de Windows salen con el icono y el nombre de la app** cuando está el icono de la bandeja, en vez de
   firmados por «Windows PowerShell». Sin icono, como antes. En Windows 11 ese globo no se queda en el Centro de
   notificaciones.
@@ -65,8 +89,8 @@ Puntos 54, 57 y 35 de la revisión del 14/11/2026. Rama `motor-lote1`.
   trozo salen enteros en inglés (0 de 16 frases en español); cortando en el cambio, 20 de 20. Con una mezcla fijada
   (o la que deja un cambio de idioma en el directo), trozos de ~1,5 min en vez de 10: más peticiones, el mismo audio
   por hora. Además, el directo apunta desde dónde vale cada idioma y el repaso sabe cortar ahí y mandar cada tramo con
-  el suyo (lo que el directo rehízo al cambiar, hasta ~1 min antes del clic, como la mezcla de los dos); falta
-  pasárselo desde el servidor.
+  el suyo (lo que el directo rehízo al cambiar, hasta ~1 min antes del clic, como la mezcla de los dos); el servidor
+  se lo pasa desde la rama `enganches`.
 
 ### Errores que se leen y «Para revisar» que se vacía (15/11/2026)
 

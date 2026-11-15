@@ -544,6 +544,9 @@ def main():
     threading.Thread(target=Handler.app.transcripts.warm, args=(Handler.app.library,), daemon=True).start()
     # el modelo local del directo, cargado antes de que empiece la primera reunion (sin bloquear la interfaz)
     threading.Thread(target=Handler.app.jobs.preload, daemon=True, name="preload").start()
+    # las huellas de voz de un modelo anterior (al actualizar), rehechas con el de ahora desde sus reuniones, en segundo
+    # plano y sin grabar a la vez (app_voces.Voces.rehacer_huellas)
+    threading.Thread(target=Handler.app.rehacer_huellas_al_arrancar, daemon=True, name="rehacer-huellas").start()
     SERVER = srv
     _compartir("SERVER")
     for line in ("=" * 64, f"  {APP_NAME.upper()}  ·  {URL}", f"  Carpeta: {ROOT}",

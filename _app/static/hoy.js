@@ -58,8 +58,9 @@ function hoyFaltan(min) {
 const hoySumJob = path => { for (let i = S.jobs.length - 1; i >= 0; i--) { const j = S.jobs[i]; if (j.path === path && j.kind === 'summary') return j; } return null; };
 const hoySumError = path => hoySumJob(path)?.status === 'error';
 /* «No es de ningún proyecto» (review del 14/11/2026, punto 38): una respuesta, como elegir uno, que quita la fila. Va al
-   servidor como propiedad de la reunión (sin_proyecto) y se apunta aquí, en localStorage, que es lo que vale mientras
-   el servidor no la guarde (hoy no la guarda: NOTE_KEYS). */
+   servidor como propiedad de la reunión (sin_proyecto, en su .md), que es lo que manda. En localStorage solo queda lo
+   que el servidor aún no ha guardado (falló al mandarlo, o se contestó con una versión que no lo guardaba): se le
+   manda al abrir Hoy y se borra de aquí (hoyMigrarSinProy). */
 const HOY_SIN_PROY = 'tenca.sinProyecto';
 function hoySinProySet() {
   if (!HOY.sinProy) { try { HOY.sinProy = new Set(JSON.parse(localStorage.getItem(HOY_SIN_PROY) || '[]')); } catch { HOY.sinProy = new Set(); } }
@@ -70,6 +71,25 @@ function hoyApuntarSinProy(path, si) {
   const s = hoySinProySet();
   if (si) s.add(path); else s.delete(path);
   try { localStorage.setItem(HOY_SIN_PROY, JSON.stringify([...s].slice(-500))); } catch { /* sin almacenamiento */ }
+}
+/* lo apuntado aquí, al servidor, una vez por apertura: si la reunión ya lo tiene o ya tiene proyecto, solo se borra de
+   aquí; si no está en la lista (se movió o se borró), se queda */
+async function hoyMigrarSinProy(audios) {
+  const s = hoySinProySet();
+  if (HOY.sinProyMigrado || !s.size || !audios.length) return;
+  HOY.sinProyMigrado = true;
+  for (const path of [...s]) {
+    const a = audios.find(x => x.path === path);
+    if (!a) continue;
+    if (!(a.props || {}).sin_proyecto && !(a.props || {}).workstream) {
+      try {
+        const r = await api('/api/notes', { path, props: { sin_proyecto: 'sí' } });
+        if (!(r.props || {}).sin_proyecto) continue;  // un servidor que no lo guarda: sigue valiendo lo de aquí
+        a.props = r.props; a.notes_mtime = r.mtime;
+      } catch { continue; }  // se intenta la próxima vez
+    }
+    hoyApuntarSinProy(path, false);
+  }
 }
 /* Lo que pide una reunión, en orden: lo que no deja leerla primero (error, a medias, sin transcribir), luego las voces,
    el resumen fallido y el proyecto. El botón es el del primero. null si no pide nada o si está en marcha (la cola y el
@@ -442,6 +462,7 @@ function hoyCalDia(key) {
 function viewHoy() {
   const all = allAudios(), now = new Date();
   if (!HOY.abierta) { HOY.abierta = true; hoyCargar(false, true, true); } else if (!HOY.datos || hoyViejo()) hoyCargar();
+  hoyMigrarSinProy(all);
   const revisar = all.length ? hoyRevisar(all, now) : [];
   const fuera = new Set(revisar.slice(0, HOY_REVISAR_MAX).map(r => r.a.path));
   main.innerHTML = `<div class="page hoy">
@@ -520,8 +541,9 @@ function hoyElegirProyecto(a) {
       if (b.dataset.m === 'no') return closeModal(false);
       if (b.dataset.m === 'ninguno') {
         b.disabled = true;
-        hoyApuntarSinProy(a.path, true);
-        await saveProps(a, { sin_proyecto: 'sí' });  // (si falla, ya lo ha dicho; aquí queda apuntado igual)
+        hoyApuntarSinProy(a.path, true);  // la fila se va ya; si el servidor lo guarda, se borra de aquí
+        const r = await saveProps(a, { sin_proyecto: 'sí' });  // (si falla, ya lo ha dicho; aquí queda apuntado)
+        if ((r?.props || {}).sin_proyecto) hoyApuntarSinProy(a.path, false);
         closeModal(true);
         toast(`«${esc(hoyTitulo(a))}» no es de ningún proyecto: ya no se pregunta`);
         if (S.route?.kind === 'home') viewHoy();

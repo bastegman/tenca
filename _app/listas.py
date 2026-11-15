@@ -328,7 +328,7 @@ def theme_vocab(props, abs_audio, changed=()):
 def vocab_info(v, language):
     """Para la interfaz: cuantos terminos hay y cuales no le caben a Whisper junto a la frase de estilo."""
     desc, terms = read_vocab(v["_abs"])
-    style = engines.STYLE_PROMPT["mix"] if language == "es-en" else engines.STYLE_PROMPT.get(language or "", "")
+    style = engines.style_for(language)
     text = ", ".join(terms)
     _, dropped = engines.build_prompt(style, text)
     return dict({k: x for k, x in v.items() if not k.startswith("_")}, desc=desc, terms=len(terms), text=text,
@@ -338,7 +338,7 @@ def vocab_info(v, language):
 
 def vocab_fit(text, language):
     """Lo mismo que vocab_info pero para una lista que se esta escribiendo (aun sin guardar)."""
-    style = engines.STYLE_PROMPT["mix"] if language == "es-en" else engines.STYLE_PROMPT.get(language or "", "")
+    style = engines.style_for(language)
     terms = engines.split_terms(text)
     joined = ", ".join(terms)
     return {"terms": len(terms), "tokens": engines.count_tokens(joined), "style_tokens": engines.count_tokens(style),
@@ -419,9 +419,9 @@ def perfil_vocab(st, sugerido=None):
 def idioma_repaso(usados):
     """Idioma del repaso final de un directo en el que se cambió el idioma de la reunión (msg 1150: empezó en inglés y
     pasó al portugués). Con el idioma del final para toda la grabación, lo dicho antes se pasaría a ese idioma; con
-    los dos que se usaron, la mezcla de esos dos si existe (en + pt → «en-pt») y si no, detectar (""). None: no
-    cambió (el de siempre, el de la reunión al terminar). usados: los idiomas fijados en la sesión, en orden (None =
-    detectar)."""
+    los que se usaron, su mezcla si existe (en + pt → «en-pt»; es + en + pt → «es-en-pt») y si no, detectar ("").
+    None: no cambió (el de siempre, el de la reunión al terminar). usados: los idiomas fijados en la sesión, en orden
+    (None = detectar)."""
     usados = list(usados or [])
     if len(usados) < 2:
         return None
@@ -432,9 +432,7 @@ def idioma_repaso(usados):
         sueltos.update(engines.PAIRS.get(u, (u,)))
     if len(sueltos) == 1:
         return next(iter(sueltos))
-    if len(sueltos) == 2:
-        return next((code for code, par in engines.PAIRS.items() if set(par) == sueltos), "")
-    return ""
+    return engines.mix_code(sueltos) or ""  # la mezcla de esos dos o de los tres (es-en-pt); si no la hay, detectar
 
 
 def idioma_de(props, st):

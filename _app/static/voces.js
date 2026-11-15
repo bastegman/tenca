@@ -190,8 +190,16 @@ async function qhAccion(e) {
     return;
   }
   if (e.target.closest('[data-qh-oir]') && fila) {
-    if (!S.tx || S.tx.path !== a.path) return toast('Un momento: aún se está cargando la transcripción');
-    const m = qhMuestra(fila.dataset.h);
+    // unos segundos de esa voz sola, de los tramos de su sidecar (el servidor; no hace falta el .srt). Si no contesta
+    // o las voces se han vuelto a identificar, la frase más larga de la transcripción
+    let m = null;
+    try {
+      const r = await api(`/api/hablantes/muestra?path=${encodeURIComponent(a.path)}&h=${encodeURIComponent(fila.dataset.h)}`, undefined, 4000);
+      if (r.fin > r.inicio && (!r.creado || !s.creado || r.creado === s.creado)) m = { t: r.inicio, d: r.fin - r.inicio };
+    } catch { /* la transcripción */ }
+    if (curAudio()?.path !== a.path) return;  // se ha cambiado de reunión mientras
+    if (!m && (!S.tx || S.tx.path !== a.path)) return toast('Un momento: aún se está cargando la transcripción');
+    m ||= qhMuestra(fila.dataset.h);
     if (!m) return toast('No sé en qué minuto habla esta voz: hace falta la transcripción con tiempos (.srt)');
     loadAudio(a, m.t, true);
     qhOyendo = { path: a.path, t: m.t, fin: m.t + Math.min(5, Math.max(1, m.d)) };
@@ -430,7 +438,7 @@ function vocesFieldsetHtml() {
   return `<fieldset><legend>${I.voice}Voces (opcional)</legend>
       <label style="display:flex;gap:8px;align-items:center;font-weight:500"><input type="checkbox" id="vzOn" ${v.enabled ? 'checked' : ''}> Reconocer quién habla en cada reunión (en este PC, sin enviar nada fuera)</label>
       <div id="vzModels" class="help" style="margin-top:4px"></div>
-      <div id="vzPeople" class="help" style="margin-top:6px">${v.enabled ? 'Cargando…' : 'Al activarlo se descargan dos modelos (≈47 MB, una sola vez) y, al terminar cada transcripción, un proceso de prioridad baja separa las voces (≈2 s por minuto de reunión). En la transcripción verás «Persona 1», «Persona 2»…: ponles nombre y, si tienes su consentimiento, pulsa «Recordar» para reconocerlas en las próximas reuniones.'}</div>
+      <div id="vzPeople" class="help" style="margin-top:6px">${v.enabled ? 'Cargando…' : 'Al activarlo se descargan dos modelos (≈35 MB, una sola vez) y, al terminar cada transcripción, un proceso de prioridad baja separa las voces (≈2 s por minuto de reunión). En la transcripción verás «Persona 1», «Persona 2»…: ponles nombre y, si tienes su consentimiento, pulsa «Recordar» para reconocerlas en las próximas reuniones.'}</div>
     </fieldset>`;
 }
 
@@ -466,7 +474,7 @@ function bindVocesSettings(d) {
     if (on) {
       e.target.checked = false;
       const ok = await ask('Reconocer quién habla', `<p>${APP_NAME} separará las voces de cada reunión <b>en este PC</b> (nada sale a internet) y, cuando tú lo pidas, guardará una <b>huella de voz</b> por persona para reconocerla en las próximas reuniones.</p>
-        <ul><li>Se descargan dos modelos (≈47 MB, una sola vez) a <code>%LOCALAPPDATA%\\AudiosApp\\models\\voces</code>.</li>
+        <ul><li>Se descargan dos modelos (≈35 MB, una sola vez) a <code>%LOCALAPPDATA%\\AudiosApp\\models\\voces</code>.</li>
         <li>Las huellas van a <code>%LOCALAPPDATA%\\AudiosApp\\voces.json</code>, cifrado con tu cuenta de Windows, fuera de OneDrive, y se pueden olvidar en cualquier momento.</li>
         <li>Una huella de voz es un <b>dato biométrico</b>: solo se guarda si marcas que tienes el consentimiento de esa persona. Ese consentimiento es responsabilidad tuya.</li></ul>`, 'Activar');
       if (!ok) return;  // (la confirmación va encima de Ajustes: lo escrito sigue ahí, también al activar)

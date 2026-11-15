@@ -776,7 +776,8 @@ class ServidorIdiomaTests(TempTree):
         self.assertEqual(server.idioma_repaso(["es-en", "en"]), "es-en")
         self.assertEqual(server.idioma_repaso(["en", "de"]), "")  # sin mezcla para ese par: detectar
         self.assertEqual(server.idioma_repaso([None, "pt"]), "")  # se detectaba: detectar
-        self.assertEqual(server.idioma_repaso(["es-en", "pt"]), "")  # tres idiomas: detectar
+        self.assertEqual(server.idioma_repaso(["es-en", "pt"]), "es-en-pt")  # los tres: su mezcla (punto 54)
+        self.assertEqual(server.idioma_repaso(["fr", "es-en"]), "")  # tres sin mezcla: detectar
         jobs = bare_jobs([])
         jobs.settings = types.SimpleNamespace(get=lambda: {"live_final_pass": True})
         jobs._cloud_ready = lambda: None

@@ -14,17 +14,24 @@ portátil de Bernardo acabó en «bad allocation»).
 4. La huella de «Recordar» (`voices.py --fingerprint h1`, fix-lento, 10/11/2026) con la reunión en m4a, con cada app:
    la de ahora solo lee los tramos de la huella y tiene que tardar menos que la de antes, con la misma huella
    (coseno >= 0,99). La de antes decodificaba la reunión entera (40 s con 3 h en un Mac; minutos en un portátil).
-5. Escribe DIR/voces_memoria.json y sale con 1 si la de ahora no baja de la de antes o pasa de --tope MB.
+5. Tras actualizar (con --antes): la app de antes guarda una persona con su huella de «Recordar» de esa reunión en su
+   voces.json; la de ahora arranca de verdad (server.py) con ese voces.json y, sin tocar nada, la huella se rehace
+   con el modelo de ahora desde el audio de la reunión (app_voces.rehacer_huellas): la misma que da «Recordar» con
+   la de ahora (coseno >= 0,99), con el nombre, «Soy yo» y el consentimiento de antes.
+6. Escribe DIR/voces_memoria.json y sale con 1 si la de ahora no baja de la de antes, pasa de --tope MB o no rehace
+   la huella guardada.
 Necesita sherpa-onnx, numpy, PyAV y requests (lo que instala INSTALAR.bat para «Quién habla»).
 """
 import argparse
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 import wave
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -147,6 +154,98 @@ def huella(app, audio, datos, side, etiqueta):
     return out
 
 
+# con la app de antes: una persona con su huella de «Recordar» (y la del usuario, sin huella), como en una instalación
+# de antes del cambio de modelo de huellas
+VOCES_DE_ANTES = r'''
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import voices
+v = voices.Voices(sys.argv[2])
+yo = v.create("Yo", es_usuario=True, consentimiento="2026-11-01T10:00:00")
+p = v.create("Persona Prueba", consentimiento="2026-11-01T10:00:00")
+v.remember(p["id"], json.loads(sys.argv[3]), 60.0, sys.argv[4], "2026-11-01T10:00:00")
+print(json.dumps({"persona": p["id"], "yo": yo["id"], "modelo": voices.MODEL_ID}))
+'''
+
+
+def tras_actualizar(antes, m4a, side, datos, trabajo, vec_antes, vec_ahora, espera=600):
+    """El paso 5: el voces.json de la de antes, la de ahora arrancada con él y la huella rehecha sola."""
+    import numpy as np
+    sys.path.insert(0, os.path.join(REPO, "_app"))
+    import voices
+    raiz, datos2 = os.path.join(trabajo, "Tenca"), os.path.join(trabajo, "datos_actualizado")
+    shutil.copytree(os.path.join(REPO, "_app"), os.path.join(raiz, "_app"),
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(os.path.join(datos, "models"), os.path.join(datos2, "models"))  # los modelos ya bajados
+    nombre = "2026-11-02 Proyecto.m4a"
+    shutil.copy(m4a, os.path.join(raiz, nombre))
+    voces_json = os.path.join(datos2, "voces.json")
+    r = subprocess.run([sys.executable, "-c", VOCES_DE_ANTES, os.path.abspath(antes), voces_json,
+                        json.dumps(vec_antes), nombre], capture_output=True, text=True, timeout=300)
+    if r.returncode != 0:
+        return {"error": f"la de antes no ha guardado la persona: {r.stderr[-800:]}"}
+    ids = json.loads(r.stdout.strip().splitlines()[-1])
+    with open(side, encoding="utf-8") as f:  # el sidecar de la reunión, con h1 puesto a mano (el de «Recordar»)
+        data = json.load(f)
+    data["hablantes"]["h1"].update(persona=ids["persona"], origen="manual", provisional=False)
+    with open(os.path.join(raiz, "2026-11-02 Proyecto.hablantes.json"), "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    with open(os.path.join(datos2, "settings.json"), "w", encoding="utf-8") as f:
+        json.dump({"voices_enabled": True}, f)
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    salida = open(os.path.join(trabajo, "server_actualizado.out"), "w", encoding="utf-8")
+    proc = subprocess.Popen([sys.executable, os.path.join(raiz, "_app", "server.py"), "--port", str(port), "--data",
+                             datos2, "--no-browser"], cwd=raiz, stdout=salida, stderr=subprocess.STDOUT,
+                            env=dict(os.environ, PYTHONIOENCODING="utf-8"))
+    t0, out = time.time(), {"modelo_antes": ids["modelo"], "modelo_ahora": voices.MODEL_ID}
+    try:
+        persona = None
+        while time.time() - t0 < espera and proc.poll() is None:
+            time.sleep(3)
+            try:
+                with open(os.path.join(datos2, "sesion.token"), encoding="utf-8") as f:
+                    token = f.read().strip()
+                req = urllib.request.Request(f"http://127.0.0.1:{port}/api/voces", headers={"X-Chuleta-Token": token})
+                with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=10) as resp:
+                    estado = json.load(resp)
+            except (OSError, ValueError):
+                continue
+            persona = next((p for p in estado.get("personas") or [] if p["id"] == ids["persona"]), None)
+            if persona and persona["huellas"] >= 1 and not persona["por_rehacer"]:
+                break
+        out.update(segundos=round(time.time() - t0, 1), persona=persona, server_vivo=proc.poll() is None)
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(20)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        salida.close()
+    v = voices.Voices(voces_json)  # lo que quedó escrito (DPAPI: el mismo usuario)
+    p = v.find(ids["persona"]) or {}
+    yo = v.find(ids["yo"]) or {}
+    huellas = p.get("huellas") or []
+    out.update(nombre=p.get("nombre"), consentimiento=p.get("consentimiento"), yo_es_usuario=yo.get("es_usuario"),
+               huellas=len(huellas), por_rehacer=len(p.get("rehacer") or []),
+               modelo_huella=huellas[0].get("modelo") if huellas else None)
+    if huellas and vec_ahora:
+        a, b = np.asarray(huellas[0]["vector"]), np.asarray(vec_ahora)
+        out["coseno_con_recordar_de_ahora"] = round(float(a @ b / np.linalg.norm(a) / np.linalg.norm(b)), 5)
+    try:
+        with open(os.path.join(datos2, "server.log"), encoding="utf-8", errors="replace") as f:
+            out["log"] = [line.rstrip() for line in f if "huella" in line or "voces.json" in line][-12:]
+    except OSError:
+        out["log"] = []
+    print("tras actualizar", {k: v for k, v in out.items() if k != "log"}, flush=True)
+    for line in out["log"]:
+        print("   ", line, flush=True)
+    return out
+
+
 def medir(app, audio, datos, salida, etiqueta):
     res, side = os.path.join(salida, f"{etiqueta}.json"), os.path.join(salida, f"{etiqueta}.hablantes.json")
     t0 = time.time()
@@ -173,6 +272,11 @@ def main():
     ap.add_argument("--antes", help="carpeta _app de la versión de antes (p. ej. la de fe29522)")
     ap.add_argument("--tope", type=float, default=None, help="MB de memoria comprometida que la de ahora no pasa")
     a = ap.parse_args()
+    for stream in (sys.stdout, sys.stderr):  # las líneas de server.log llevan iconos (🗣): en Windows, cp1252
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     a.salida = os.path.abspath(a.salida)  # el hijo cambia de carpeta: todas las rutas, absolutas (run 42692402938)
     os.makedirs(a.salida, exist_ok=True)
     # el audio (~105 MB con 55 min) y los modelos, fuera de --salida: si algo falla a medias, el artefacto de la CI
@@ -213,6 +317,9 @@ def medir_todo(a, trabajo):
             import numpy as np
             v1, v0 = np.asarray(v1), np.asarray(v0)
             out["huella_coseno"] = round(float(v1 @ v0 / np.linalg.norm(v1) / np.linalg.norm(v0)), 5)
+    if a.antes and out["huella_antes"]["vector"]:
+        out["tras_actualizar"] = tras_actualizar(a.antes, m4a, side, datos, trabajo, out["huella_antes"]["vector"],
+                                                 out["huella_ahora"]["vector"])
     with open(os.path.join(a.salida, "voces_memoria.json"), "w", encoding="utf-8") as f:
         json.dump(out, f, indent=1)
     mal = []
@@ -235,6 +342,21 @@ def medir_todo(a, trabajo):
             mal.append(f"la huella de ahora no es la de antes (coseno {out['huella_coseno']})")
         if len(h1["vector"]) != voices.DIM:
             mal.append(f"la huella de ahora no tiene {voices.DIM} valores")
+    ta = out.get("tras_actualizar")
+    if a.antes and not ta:
+        mal.append("no se ha probado la actualización: la huella de la de antes ha fallado")
+    elif ta:
+        if ta.get("error"):
+            mal.append(f"tras actualizar: {ta['error']}")
+        elif (ta.get("huellas"), ta.get("por_rehacer"), ta.get("modelo_huella")) != (1, 0, voices.MODEL_ID):
+            mal.append(f"tras actualizar la huella no se ha rehecho: {ta.get('huellas')} huellas, "
+                       f"{ta.get('por_rehacer')} por rehacer, modelo {ta.get('modelo_huella')}")
+        elif (ta.get("coseno_con_recordar_de_ahora") or 0) < 0.99:
+            mal.append(f"tras actualizar la huella no es la de «Recordar» ({ta.get('coseno_con_recordar_de_ahora')})")
+        quien = (ta.get("nombre"), ta.get("yo_es_usuario"), bool(ta.get("consentimiento")))
+        if quien != ("Persona Prueba", True, True):
+            mal.append(f"tras actualizar se ha perdido algo de la persona: {ta.get('nombre')}, "
+                       f"{ta.get('yo_es_usuario')}, {ta.get('consentimiento')}")
     for m in mal:
         print("ERROR:", m, flush=True)
     return 1 if mal else 0

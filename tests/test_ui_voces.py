@@ -391,8 +391,10 @@ class VocesEnNavegadorTests(unittest.TestCase):
         self.assertEqual(self.limpio(errores, red), ([], []))
 
     def test_oir_con_la_transcripcion_por_llegar_y_otra_frase(self):
-        """«Oír»: si la transcripción aún no ha llegado lo dice (no que falte el .srt; era el fallo de ui-smoke en la
-        CI), y pulsar otra frase mientras suena la muestra no la pausa (revisión 2, N5)."""
+        """«Oír»: la muestra la da el servidor (/api/hablantes/muestra, de los tramos del sidecar), también sin la
+        transcripción. Sin él (una respuesta que no llega), la frase más larga de la transcripción: si aún no ha
+        llegado lo dice (no que falte el .srt; era el fallo de ui-smoke en la CI). Pulsar otra frase mientras suena la
+        muestra no la pausa (revisión 2, N5)."""
         nombre = "R oir"
         base = os.path.join(self.root, nombre)
         with open(base + ".wav", "wb") as f:
@@ -415,6 +417,12 @@ class VocesEnNavegadorTests(unittest.TestCase):
                 retenidas.append(route)
         pg, errores, red = self.bloque(rel, antes=lambda p: p.route(lambda url: "/api/transcript?" in url, retiene))
         self.assertTrue(retenidas)
+        # con el servidor: su muestra (10,0-14,8, de los tramos), aunque la transcripción no haya llegado
+        pg.click("#qhBloque .qh-fila[data-h='h2'] [data-qh-oir]")
+        pg.wait_for_function("qhOyendo && qhOyendo.t === 10 && Math.abs(qhOyendo.fin - 14.8) < 1e-6", timeout=5000)
+        pg.evaluate("() => { audio.pause(); qhOyendo = null; }")
+        # sin él (la muestra no contesta: un servidor de antes, o colgado), la transcripción, que aún no ha llegado
+        pg.route("**/api/hablantes/muestra*", lambda route: route.abort())
         pg.click("#qhBloque .qh-fila[data-h='h2'] [data-qh-oir]")
         pg.wait_for_function("document.querySelector('#toasts').textContent.includes('cargando la transcripción')",
                              timeout=5000)
@@ -427,7 +435,8 @@ class VocesEnNavegadorTests(unittest.TestCase):
         pg.click("#qhBloque .qh-fila[data-h='h2'] [data-qh-oir]")
         pg.wait_for_function("audio.readyState >= 1 && audio.currentTime >= 10.2 && audio.currentTime < 14",
                              timeout=10000)
-        self.assertIsNotNone(pg.evaluate("qhOyendo"))
+        self.assertEqual(pg.evaluate("qhOyendo && qhOyendo.t"), 10.5)  # la frase de la transcripción
+        pg.unroute("**/api/hablantes/muestra*")
         # quieto (lo que tarde el clic no cuenta) y con la cuenta de pausas; la frase siguiente (15,0) cae dentro del
         # margen de la muestra (acaba en 14,5): antes, el salto contaba como «llegó al final» y la pausaba
         pg.evaluate("() => { audio.pause(); window.pausas = 0; const p = audio.pause.bind(audio); "
