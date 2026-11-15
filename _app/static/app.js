@@ -594,7 +594,7 @@ function route() {
   flushNotes();
   const prev = S.route;
   S.route = parseHash();
-  if (prev.kind !== S.route.kind || prev.path !== S.route.path) { main.scrollTop = 0; S.txOpen = false; S.notes = null; S.sum = null; S.tab = null; closePop(); closeSlash(); pushRecent(S.route.kind, S.route.path); }
+  if (prev.kind !== S.route.kind || prev.path !== S.route.path) { main.scrollTop = 0; S.txOpen = false; S.notes = null; S.sum = null; S.tab = S.irQuien && S.irQuien === S.route.path ? 'tx' : null; closePop(); closeSlash(); pushRecent(S.route.kind, S.route.path); }
   const r = S.route;
   if (r.kind === 'a' || r.kind === 'd' || r.kind === 'f') {
     let n = (r.kind === 'f' ? S.folders.get(r.path) : (S.audios.get(r.path) || S.docs.get(r.path)));
@@ -989,9 +989,10 @@ function viewLive(a) {
 
 function viewAudio(a) {
   S.viewMode = 'normal';
-  main.innerHTML = `<div class="page">
-    <div id="aHead"></div><div id="aJob"></div><div id="aVoz"></div><div id="aBox"></div>
-    <div id="aTabs"></div><section class="sum hidden" id="aSum"></section><section class="tx" id="aTx"></section><section class="notes hidden" id="aNotes"></section></div>`;
+  // B5 (punto 22 del review): «Quién habla» (#aVoz) va con la transcripción, debajo de las pestañas, y no empuja el resumen
+  main.innerHTML = `<div class="page reunion-page">
+    <div id="aHead"></div><div id="aJob"></div><div id="aBox"></div>
+    <div id="aTabs"></div><section class="sum hidden" id="aSum"></section><div id="aVoz"></div><section class="tx" id="aTx"></section><section class="notes hidden" id="aNotes"></section></div>`;
   S.tx = null; S.curIdx = -1; S.curEl = null; S.liveRev = undefined;
   if (typeof aprReset === 'function') aprReset();
   S.tq = S.route.params.get('q') || '';
@@ -1007,22 +1008,29 @@ function renderAudioHead(a, force) {
   // si se esta escribiendo el titulo o una propiedad, no se repinta (se perderia el cursor)
   const ae = document.activeElement;
   if (!force && el.contains(ae) && (ae.isContentEditable || /INPUT|SELECT/.test(ae.tagName))) return;
-  const st = statusOf(a), has = a.txt || a.srt;
+  if (!force && $('.pmenu:not(.hidden)', el)) return;  // con «⋯» abierto: repintar lo cerraría bajo el ratón
+  const st = statusOf(a), has = a.txt || a.srt, p = a.props || {}, job = jobFor(a.path);
   const docs = (a.parent?.docs || []);
+  /* B5 (punto 22 del review): la cabecera en dos líneas (título; fecha, duración, proyecto y estado con Reproducir y
+     «⋯») y el resto de la ficha en «Detalles», plegado. Así el resumen se ve sin bajar */
+  const proy = typeof tblProyTxt === 'function' ? tblProyTxt(a) : (p.workstream || '');
+  const visible = job ? '' : a.recording
+    ? `<button class="btn primary" data-act="live" data-path="${esc(a.path)}">${I.spark}Transcribir en directo</button>`
+    : has ? '' : `<button class="btn primary" data-act="tx-toggle">${I.spark}Transcribir</button>`;
+  const menu = [
+    !job && !a.recording && has ? `<button type="button" role="menuitem" data-act="tx-toggle">${I.spark}Volver a transcribir</button>` : '',
+    `<button type="button" role="menuitem" data-act="move" data-path="${esc(a.path)}">${I.move}Mover / renombrar</button>`,
+    `<button type="button" role="menuitem" data-act="reveal" data-path="${esc(a.path)}">${I.ext}Mostrar en carpeta</button>`,
+    a.txt ? `<button type="button" role="menuitem" data-act="open-txt" data-path="${esc(a.path)}">${I.text}Abrir .txt</button>` : '',
+    `<button type="button" role="menuitem" class="danger" data-act="delete" data-path="${esc(a.path)}" title="A la papelera de Windows">${I.trash}Eliminar</button>`].join('');
+  const sinConfirmar = p.participantes && p.participantes_origen;
   el.innerHTML = `${crumbs(a.folder)}${typeof destinoPendienteHtml === 'function' ? destinoPendienteHtml(a) : ''}
     ${titleRowHtml(a)}
+    <div class="pmeta-row"><div class="pmeta"><span>${esc(longTitle(a))}</span><span>${fmtDur(estDuration(a))}</span><button type="button" class="plink${proy ? '' : ' muted'}" data-act="det-proy" title="Cambiar el proyecto (en Detalles)">${esc(proy || 'Sin proyecto')}</button>${statusPill(a)}</div>
+      <div class="pacts"><button class="btn primary" data-act="play" data-path="${esc(a.path)}">${I.play}${S.playing === a.path && !audio.paused ? 'Pausa' : 'Reproducir'}</button>${visible}
+        <span class="pmas"><button class="btn pmas-btn" type="button" data-act="mas" aria-haspopup="menu" aria-expanded="false" aria-label="Más acciones" title="Más acciones">⋯</button><span class="pmenu hidden" role="menu" aria-label="Más acciones">${menu}</span></span></div></div>
     ${interrumpidaHtml(a)}
-    ${propsHtml(a)}
-    <div class="actions">
-      <button class="btn primary" data-act="play" data-path="${esc(a.path)}">${I.play}${S.playing === a.path && !audio.paused ? 'Pausa' : 'Reproducir'}</button>
-      ${jobFor(a.path) ? '' : a.recording
-        ? `<button class="btn primary" data-act="live" data-path="${esc(a.path)}">${I.spark}Transcribir en directo</button>`
-        : `<button class="btn${has ? '' : ' primary'}" data-act="tx-toggle">${I.spark}${has ? 'Volver a transcribir' : 'Transcribir'}</button>`}
-      <button class="btn" data-act="move" data-path="${esc(a.path)}">${I.move}Mover / renombrar</button>
-      <button class="btn" data-act="reveal" data-path="${esc(a.path)}">${I.ext}Mostrar en carpeta</button>
-      ${a.txt ? `<button class="btn" data-act="open-txt" data-path="${esc(a.path)}">${I.text}Abrir .txt</button>` : ''}
-      <button class="btn ghost danger" data-act="delete" data-path="${esc(a.path)}" title="A la papelera de Windows">${I.trash}Eliminar</button>
-    </div>
+    <details class="pdet"${S.detAbierto || localStorage.getItem('detalles') === '1' ? ' open' : ''}><summary>Detalles${sinConfirmar ? ' <span class="muted">· participantes sin confirmar</span>' : ''}</summary>${propsHtml(a)}</details>
     ${docs.length ? `<div class="related">${docs.map(d => `<a href="${href('d', d.path)}">${I.doc}${esc(nfc(d.name))}</a>`).join('')}</div>` : ''}`;
   fillTagList();
   const box = $('#aBox');
@@ -1038,6 +1046,67 @@ function renderAudioHead(a, force) {
       : txBox([a], has ? 'Volver a transcribir (entera)' : 'Transcribir esta grabación');
   }
 }
+
+/* «⋯» de la cabecera de la reunión (B5): un menú con lo poco usado. Escape o un clic fuera lo cierran */
+function pmenuCerrar(volver) {
+  const m = $('#aHead .pmenu:not(.hidden)');
+  if (!m) return false;
+  m.classList.add('hidden');
+  const b = $('#aHead [data-act="mas"]');
+  b?.setAttribute('aria-expanded', 'false');
+  if (volver) b?.focus();
+  return true;
+}
+main.addEventListener('click', e => {
+  const b = e.target.closest('#aHead [data-act]');
+  if (!b) { if (!e.target.closest('#aHead .pmenu')) pmenuCerrar(false); return; }
+  if (b.dataset.act === 'mas') {
+    const m = $('#aHead .pmenu'), abrir = m.classList.contains('hidden');
+    m.classList.toggle('hidden', !abrir);
+    b.setAttribute('aria-expanded', String(abrir));
+    if (abrir) $('[role="menuitem"]', m)?.focus();
+  } else if (b.dataset.act === 'det-proy') {
+    const d = $('#aHead .pdet');
+    if (d) { d.open = true; $('.pws', d)?.focus(); }
+  } else if (b.closest('.pmenu')) pmenuCerrar(false);  // la acción la hace el manejador de siempre (data-act)
+});
+main.addEventListener('keydown', e => {
+  const m = e.target.closest && e.target.closest('#aHead .pmenu');
+  if (!m) return;
+  const items = $$('[role="menuitem"]', m), i = items.indexOf(document.activeElement);
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus(); }
+  else if (e.key === 'Tab') pmenuCerrar(false);
+});
+document.addEventListener('mousedown', e => { if (!e.target.closest('#aHead .pmas')) pmenuCerrar(false); }, true);
+// «Detalles» abierto o cerrado se recuerda (toggle no burbujea: en captura)
+main.addEventListener('toggle', e => {
+  if (!e.target.classList || !e.target.classList.contains('pdet')) return;
+  S.detAbierto = e.target.open;
+  localStorage.setItem('detalles', e.target.open ? '1' : '0');
+}, true);
+
+/* el lateral plegable (B5, puntos 13 y 22 del review): por debajo de 1.000 px se pliega solo y se abre encima del
+   contenido; Ctrl+\ o el botón de arriba lo abren o lo cierran a cualquier ancho (en ancha, se recuerda) */
+const LAT_MQ = matchMedia('(max-width: 1000px)');
+function latEstado() {
+  const estrecha = LAT_MQ.matches;
+  const abierto = estrecha ? !!S.latAbierto : localStorage.getItem('lateral') !== '0';
+  document.body.classList.toggle('lat-off', !abierto);
+  document.body.classList.toggle('lat-sobre', estrecha && abierto);
+  $('#btnSide')?.setAttribute('aria-expanded', String(abierto));
+}
+function latAlternar() {
+  if (LAT_MQ.matches) S.latAbierto = !S.latAbierto;
+  else localStorage.setItem('lateral', document.body.classList.contains('lat-off') ? '1' : '0');
+  latEstado();
+}
+LAT_MQ.addEventListener('change', () => { S.latAbierto = false; latEstado(); });
+$('#btnSide')?.addEventListener('click', latAlternar);
+window.addEventListener('hashchange', () => { if (S.latAbierto) { S.latAbierto = false; latEstado(); } });
+document.addEventListener('mousedown', e => {
+  if (S.latAbierto && LAT_MQ.matches && !e.target.closest('.sidebar, #btnSide')) { S.latAbierto = false; latEstado(); }
+}, true);
+latEstado();
 
 /* la grabadora se cortó (o Tenca se cerró) sin que nadie la parase: lo dice la cabecera de la reunión (props, .md) */
 function interrumpidaHtml(a) {
@@ -1822,9 +1891,14 @@ document.addEventListener('keydown', e => {
   if (e.ctrlKey && e.altKey && k === 'r') { e.preventDefault(); toggleRec(); return; }  // si Windows no dejo registrar el atajo global
   if ((e.ctrlKey || e.metaKey) && k === 'p' && !e.altKey) { e.preventDefault(); if ($('#modal').classList.contains('hidden')) openPalette(); return; }  // paleta, como Notion
   if ((e.ctrlKey || e.metaKey) && k === 'k' && !e.altKey) { e.preventDefault(); const g = $('#gq'); if (g && $('#modal').classList.contains('hidden')) { g.focus(); g.select(); } return; }  // la caja de búsqueda de arriba (su kbd dice Ctrl K)
+  // Ctrl+\ pliega o abre el lateral (en un teclado español, «\» va con AltGr: Ctrl+Alt para el navegador)
+  if ((e.ctrlKey || e.metaKey) && (e.key === '\\' || e.code === 'Backslash')) { e.preventDefault(); latAlternar(); return; }
   if ((e.ctrlKey || e.metaKey) && k === 'f' && $('#tq')) { e.preventDefault(); $('#tq').focus(); $('#tq').select(); return; }
   if (e.key === 'Escape') {
-    if (cerrarSobre(false)) return;  // la confirmación de encima, sola (Ajustes sigue debajo)
+    if (cerrarSobre(false)) return;
+    if (pmenuCerrar(true)) return;  // «⋯» de la reunión
+    if (typeof spkPopCerrar === 'function' && spkPopCerrar()) return;  // el globo de un hablante (voces.js)
+    if (S.latAbierto && LAT_MQ.matches) { S.latAbierto = false; latEstado(); $('#btnSide')?.focus(); return; }  // la confirmación de encima, sola (Ajustes sigue debajo)
     if (!$('#modal').classList.contains('hidden')) return closeModal(false);
     if (!$('#jobsPanel').classList.contains('hidden')) return $('#jobsPanel').classList.add('hidden');
     if (typing) el.blur();

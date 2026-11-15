@@ -214,6 +214,137 @@ class VocesEnNavegadorTests(unittest.TestCase):
         errores, red = self.limpio(errores, [r for r in red if "/api/voces/fusionar" not in r])
         self.assertEqual((errores, red), ([], []))
 
+    def nueva(self, nombre, segundos, md=None, resumen=None):
+        """Reunión con una frase de 9 s por hablante (en el orden de `segundos`) y sus voces sin nombre."""
+        base = os.path.join(self.root, nombre)
+        with open(base + ".wav", "wb") as f:
+            f.write(wav_bytes(1.0))
+        hs = list(segundos)
+        with open(base + ".srt", "w", encoding="utf-8") as f:
+            f.write(srt_text([(k * 10 + 0.5, k * 10 + 9.5, f"Frase {k}.") for k in range(len(hs))]))
+        voices.write_sidecar(base + voices.SIDECAR_EXT, {
+            "version": 1, "tu": None, "micro": None, "creado": "2026-11-15T10:00:00",
+            "tramos": [{"inicio": k * 10, "fin": k * 10 + 10, "h": h} for k, h in enumerate(hs)],
+            "hablantes": {h: {"segundos": float(x), "persona": None} for h, x in segundos.items()}})
+        if md:
+            with open(base + ".md", "w", encoding="utf-8") as f:
+                f.write("---\n" + "".join(f"{k}: {v}\n" for k, v in md.items()) + "---\n")
+        if resumen:
+            with open(base + ".resumen.md", "w", encoding="utf-8") as f:
+                f.write(resumen)
+        return nombre + ".wav"
+
+    def test_quien_habla_embebido(self):
+        """B8 (punto 21 del review: embebido, sin abrir otra ventana): «Ponles nombre» lleva al bloque «Quién habla»
+        de la página, con todas las voces por tiempo hablado, los asistentes de la cita como sugerencia, «Recordar»
+        solo con consentimiento y «Son la misma persona» con varias a la vez. Escape
+        cierra el globo de una etiqueta."""
+        rel = self.nueva("R quien", {"h1": 8.0, "h2": 30.0, "h3": 12.0, "h4": 5.0},
+                         md={"participantes": "Ana Prueba, Luis Prueba", "participantes_origen": "outlook"})
+        ctx = self.browser.new_context(bypass_csp=True, viewport={"width": 1280, "height": 800})
+        self.addCleanup(ctx.close)
+        pg = ctx.new_page()
+        errores, red = [], []
+        pg.on("pageerror", lambda e: errores.append(f"pageerror: {e}"))
+        pg.on("response", lambda r: red.append(f"{r.status} {r.url}") if r.status >= 400 else None)
+        pg.goto(f"{self.base}/?t={self.token}", wait_until="networkidle")
+        pg.wait_for_selector("#main h1", timeout=15000)
+        pg.wait_for_function("p => S.audios && S.audios.get(p)", arg=rel, timeout=10000)
+        pg.evaluate("p => hoyAccion('voces', S.audios.get(p))", rel)  # lo que hace «Ponles nombre» en Hoy
+        pg.wait_for_selector("#qhBloque .qh-fila", timeout=15000)
+        self.assertTrue(pg.is_visible("#qhBloque"))
+        sin_dialogo = "document.querySelector('#modal').classList.contains('hidden')"
+        self.assertTrue(pg.evaluate(sin_dialogo))  # no es un diálogo
+        filas = pg.eval_on_selector_all("#qhBloque .qh-fila", "fs => fs.map(f => f.dataset.h)")
+        self.assertEqual(filas, ["h2", "h3", "h1", "h4"])  # de la que más habla a la que menos
+        self.assertEqual(pg.evaluate("document.activeElement.closest('.qh-fila')?.dataset.h"), "h2")
+        sug = pg.eval_on_selector_all("#qhBloque [data-qh-sug]", "bs => bs.map(b => b.textContent)")
+        self.assertEqual(sug, ["Ana Prueba", "Luis Prueba"])
+        # oír: la frase más larga de esa voz
+        self.assertEqual(pg.evaluate("qhMuestra('h3').t"), 20.5)
+        # «Recordar» sin consentimiento no guarda nada y enseña la casilla
+        fila = "#qhBloque .qh-fila[data-h='h2']"
+        pg.click("#qhBloque [data-qh-sug='Ana Prueba']")
+        self.assertEqual(pg.input_value(fila + " [data-qh-nombre]"), "Ana Prueba")
+        pg.check(fila + " [data-qh-rec]")
+        pg.click(fila + " [data-qh-guardar]")
+        pg.wait_for_selector("#qhBloque .qh-consent:not(.hidden)", timeout=5000)
+        hs = self.api("/api/hablantes?path=" + urllib.request.quote(rel))["hablantes"]
+        self.assertIsNone(hs["h2"]["persona"])
+        pg.uncheck(fila + " [data-qh-rec]")
+        pg.click(fila + " [data-qh-guardar]")
+        pg.wait_for_function("document.querySelector(\"#txBody .spk[data-spk='h2']\").textContent === 'Ana Prueba'",
+                             timeout=10000)
+        self.assertTrue(pg.is_visible("#qhBloque"))  # sigue abierto tras guardar
+        # «Son la misma persona»: dos voces de una vez
+        pg.check("#qhBloque .qh-fila[data-h='h1'] [data-qh-sel]")
+        self.assertTrue(pg.is_disabled("#qhBloque [data-qh-unir]"))
+        pg.check("#qhBloque .qh-fila[data-h='h4'] [data-qh-sel]")
+        pg.click("#qhBloque [data-qh-unir]")
+        pg.wait_for_function("!document.querySelector(\"#qhBloque .qh-fila[data-h='h4']\")", timeout=10000)
+        hs = self.api("/api/hablantes?path=" + urllib.request.quote(rel))["hablantes"]
+        self.assertEqual(sorted(hs), ["h1", "h2", "h3"])
+        self.assertEqual(hs["h1"]["segundos"], 20.0)  # sus tramos y los de h4
+        # Escape cierra el globo de una etiqueta
+        pg.click("#txBody .spk[data-spk='h3']")
+        pg.wait_for_selector(".spk-pop", timeout=5000)
+        pg.keyboard.press("Escape")
+        pg.wait_for_selector(".spk-pop", state="detached", timeout=3000)
+        self.assertEqual(self.limpio(errores, red), ([], []))
+
+    def test_pagina_de_la_reunion_compacta(self):
+        """B5 (puntos 13 y 22 del review): el resumen se ve sin bajar a 1500×920 y a 900×600 (antes, y = 805 y 932);
+        lo poco usado en «⋯»; «Detalles» plegado; resumen y transcripción lado a lado con ancho; el aviso dice quién
+        hizo el resumen y cuándo; el lateral se pliega solo por debajo de 1.000 px y con Ctrl+\\."""
+        resumen = ("---\nmodelo: claude-sonnet-4-5\ngenerado: 2026-11-12 16:09\n---\n\n## Resumen\nPrimera línea del "
+                   "resumen de prueba.\n\n## Decisiones\n- Una decisión\n")
+        rel = self.nueva("R b5", {"h1": 10.0, "h2": 9.0}, md={"participantes": "Ana Prueba"}, resumen=resumen)
+        for w, h in ((1500, 920), (900, 600)):
+            ctx = self.browser.new_context(bypass_csp=True, viewport={"width": w, "height": h})
+            self.addCleanup(ctx.close)
+            pg = ctx.new_page()
+            errores = []
+            pg.on("pageerror", lambda e: errores.append(f"pageerror: {e}"))
+            pg.goto(f"{self.base}/?t={self.token}", wait_until="networkidle")
+            pg.wait_for_selector("#main h1", timeout=15000)
+            pg.evaluate("p => { location.hash = '#/a/' + encodeURIComponent(p); }", rel)
+            pg.wait_for_selector("#aSum .sumview p", timeout=15000)
+            y = pg.evaluate("Math.round(document.querySelector('#aSum .sumview p').getBoundingClientRect().top)")
+            self.assertLess(y, h - 60, (w, y))
+            autor = pg.inner_text("#aSum .sum-autor")
+            self.assertIn("por Claude (claude-sonnet-4-5) el 12 nov 2026 a las 16:09", autor)
+            self.assertNotIn("no carga tu portátil", pg.inner_text("#aTabs"))
+            self.assertFalse(pg.evaluate("document.querySelector('#aHead .pdet').open"))  # «Detalles», plegado
+            self.assertFalse(pg.is_visible("#aHead [data-prop='participantes']"))
+            # lo poco usado, en «⋯»; Escape lo cierra y devuelve el foco
+            self.assertFalse(pg.is_visible("#aHead [data-act='delete']"))
+            pg.click("#aHead [data-act='mas']")
+            self.assertTrue(pg.is_visible("#aHead .pmenu [data-act='delete']"))
+            pg.keyboard.press("Escape")
+            self.assertFalse(pg.is_visible("#aHead .pmenu"))
+            self.assertEqual(pg.evaluate("document.activeElement.dataset.act"), "mas")
+            lado = pg.evaluate("""() => { const s = document.querySelector('#aSum').getBoundingClientRect(),
+                t = document.querySelector('#aTx').getBoundingClientRect();
+                return [t.width > 0 && t.left > s.right, t.height > 0]; }""")
+            lateral = pg.evaluate("getComputedStyle(document.querySelector('.sidebar')).display")
+            if w == 1500:
+                self.assertEqual(lado, [True, True])  # lado a lado
+                self.assertNotEqual(lateral, "none")
+            else:
+                self.assertEqual(lado, [False, False])  # una columna, con pestañas
+                self.assertEqual(lateral, "none")  # plegado solo por debajo de 1.000 px
+            pg.keyboard.press("Control+Backslash")
+            lateral2 = pg.evaluate("getComputedStyle(document.querySelector('.sidebar')).display")
+            self.assertEqual(lateral2 == "none", w == 1500, (w, lateral, lateral2))
+            if w == 900:  # abierto encima del contenido; Escape lo cierra
+                self.assertIn("lat-sobre", pg.evaluate("document.body.className"))
+                pg.keyboard.press("Escape")
+                self.assertEqual(pg.evaluate("getComputedStyle(document.querySelector('.sidebar')).display"), "none")
+            pg.click("#aHead .pdet summary")
+            self.assertTrue(pg.is_visible("#aHead [data-prop='participantes']"))
+            self.assertEqual(errores, [])
+            ctx.close()
+
 
 if __name__ == "__main__":
     unittest.main()
