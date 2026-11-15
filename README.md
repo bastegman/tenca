@@ -418,9 +418,11 @@ Orientativos; los vigentes, en `console.groq.com/settings/limits`.
   `%LOCALAPPDATA%\AudiosApp\voces.json`, cifrado con DPAPI, máximo 5 por persona, y se pueden olvidar una a una o todas.
   Una huella de voz es un dato biométrico: la app solo la guarda si marcas que tienes el consentimiento de esa persona.
   Los nombres que les pongas van con la transcripción, al resumen con IA y a las copias en otras carpetas. Los modelos
-  (≈47 MB) se descargan de los releases de sherpa-onnx al activar la opción, con su sha256 comprobado: segmentación
-  pyannote 3.0 (MIT) y TitaNet-S (`titanet_small`, NVIDIA NeMo; su ficha en NGC remite a la licencia del NeMo Toolkit,
-  Apache-2.0; el `.onnx` lo publica el proyecto sherpa-onnx).
+  (≈35 MB) se descargan de los releases de sherpa-onnx al activar la opción, con su sha256 comprobado: segmentación
+  pyannote 3.0 (MIT) y CAM++ de 3D-Speaker (`campplus_sv_zh_en_16k-common_advanced`, Alibaba; Apache License 2.0
+  según su ficha en ModelScope; el `.onnx` lo publica el proyecto sherpa-onnx). Hasta noviembre de 2026 las huellas
+  eran de TitaNet-S (NVIDIA NeMo): al actualizar, las guardadas dejan de usarse (no se comparan huellas de dos
+  modelos), los nombres se conservan y cada persona vuelve a tener huella con el siguiente «Recordar».
 - Las copias en otras carpetas escriben texto (nunca audio) en las carpetas que tú elijas, sin los participantes
   sugeridos que no hayas confirmado: si están sincronizadas (OneDrive, SharePoint), ese texto sale de tu PC por esa vía.
   Al borrar una reunión, sus documentos que nadie haya cambiado allí van también a la papelera.

@@ -673,6 +673,26 @@ def run(job, path, opts, write, log):
     reset(segs[-1][1] if segs else 0.0)  # retoma donde lo dejo una sesion anterior
     st["protegidas"] = len(segs)  # lo retomado no se rehace al cambiar el idioma (switch_language)
     used = [fixed_lang]  # idiomas de la reunion en esta sesion (job.idiomas_directo)
+    # desde donde vale cada idioma [(segundo de la grabacion, idioma o None)]: el repaso final en la nube manda cada
+    # tramo con el suyo (engines.CloudEngine.plan_parts; el servidor lo pasa como tramos_idioma)
+    job.idiomas_tramos = [(round(st["t0"], 2), fixed_lang)]
+
+    def marcar_idioma(antes_lang, antes_t):
+        """Tras un cambio: el idioma nuevo vale desde lo que aun no se habia transcrito (antes_t: st["t0"] antes del
+        cambio). Si se rehace desde mas atras (st["t0"] ahora, hasta ~1 min), ese trozo ya se oyo en el idioma de antes
+        y no se sabe en cual era de verdad (un cambio por error y su correccion lo rehacen dos veces): va como la mezcla
+        de los dos o, si no la hay, detectando. Lo de despues de ese punto, de un cambio anterior, ya no cuenta."""
+        t, antes_t = round(st["t0"], 2), round(antes_t, 2)
+        tr = [x for x in (getattr(job, "idiomas_tramos", None) or []) if x[0] < t]
+        if antes_t > t + 1.0:  # se rehace lo ya escrito
+            dudoso = None
+            if antes_lang and fixed_lang:  # los idiomas de los dos (una mezcla cuenta como los suyos)
+                juntos = set(engines.PAIRS.get(antes_lang, (antes_lang,)))
+                juntos |= set(engines.PAIRS.get(fixed_lang, (fixed_lang,)))
+                dudoso = next(iter(juntos)) if len(juntos) == 1 else engines.mix_code(juntos)
+            tr.append((t, dudoso))
+            t = antes_t
+        job.idiomas_tramos = tr + [(t, fixed_lang)]
     # «Lo ultimo suena a …» (B6): con un idioma fijo, en que idioma suenan los trozos; rechazos: los de esta grabacion
     propuesta = job.propuesta = directo_avisos.Propuesta(opts.get("rechazos"))
     last_size, last_growth = -1, time.time()
@@ -826,7 +846,9 @@ def run(job, path, opts, write, log):
                 reset(0.0)
                 log(f"   rehaciendo desde el principio con {job.preset}")
             if lang_changed():  # cambiado en la pagina de la reunion: vale ya, tambien para lo ultimo escrito
+                antes_lang, antes_t = fixed_lang, st["t0"]
                 switch_language()
+                marcar_idioma(antes_lang, antes_t)
             cloud = (engines.PRESETS_BY_ID.get(job.preset) or {}).get("engine") == "cloud"
             if cloud and keys and getattr(job, "translate", False) and translator is None \
                     and opts.get("summarizer") is not None:

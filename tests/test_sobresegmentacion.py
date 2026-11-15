@@ -584,6 +584,7 @@ sys.path.insert(0, {APP!r})
 import numpy as np
 import voices
 voices.load_audio_16k = lambda path, cancelled=None, en_disco=None: np.zeros(16000, np.int16)
+voices.models_ready = lambda data_dir: True  # sin bajar los modelos (main() los baja si faltan)
 def diarize(samples, data_dir, threads=2, progress=None, **kw):
     json.dump(kw, open({visto!r}, "w"))
     return {{"tramos": [], "hablantes": {{}}, "huellas": {{}}, "duracion_s": 1.0}}

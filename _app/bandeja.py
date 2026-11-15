@@ -19,6 +19,19 @@ from common import APP_NAME, log, log_exc
 TEXT_MAX = 63  # NotifyIcon.Text en .NET Framework: mas de 63 caracteres lanza ArgumentOutOfRangeException
 WM_TRAYMOUSEMESSAGE = 0x0400 + 1024  # WM_USER + 1024: el mensaje con que el icono recibe el raton (NotifyIcon.cs)
 REFRESH_S = 2.0  # cada cuanto se actualiza el texto del icono (grabando, trabajos)
+# lo que cabe en el globo (NOTIFYICONDATA de Shell_NotifyIcon: szInfoTitle[64] y szInfo[256], con el NUL final);
+# .NET lanza ArgumentException con el texto vacio, asi que nunca se le manda vacio
+GLOBO_TITULO_MAX, GLOBO_TEXTO_MAX = 63, 255
+# el icono puesto (create() con exito; close() lo quita): los avisos de la app (recording.notify) salen por su globo,
+# con el icono y el nombre de la app, y no por un PowerShell oculto, que firma «Windows PowerShell» (review del 14/11)
+_PUESTO = [None]
+
+
+def globo(titulo, texto, segundos=8):
+    """Aviso por el globo del icono, si esta puesto. True si se ha pedido; False sin icono (el aviso va por otro
+    lado). No espera al hilo de la ventana."""
+    b = _PUESTO[0]
+    return bool(b is not None and b.alive and b.balloon(titulo, texto, segundos))
 
 
 def winforms():
@@ -111,6 +124,7 @@ class Bandeja:
             self.form = form
             self.alive = True
             self.hwnd = self._native_hwnd()
+            _PUESTO[0] = self
         except Exception as e:
             log(f"   sin icono en la bandeja ({e.__class__.__name__}): cerrar la ventana la deja en segundo plano "
                 "como antes")
@@ -209,7 +223,11 @@ class Bandeja:
             self.update()
 
     def balloon(self, titulo, texto, segundos=8):
-        """El globo del icono (en Windows 11 sale como una notificacion de la app)."""
+        """El globo del icono (en Windows 11 sale como una notificacion de la app). Titulo y texto, recortados a lo
+        que cabe; sin texto, el titulo (WinForms no admite un globo sin texto)."""
+        titulo = str(titulo or "")[:GLOBO_TITULO_MAX]
+        texto = str(texto or "").strip()[:GLOBO_TEXTO_MAX] or titulo or APP_NAME
+
         def show():
             self.icon.ShowBalloonTip(int(segundos * 1000), titulo, texto, self._wf.ToolTipIcon.Info)
         return self._invoke(show)
@@ -220,6 +238,8 @@ class Bandeja:
         hace que create() ya no lo ponga."""
         self._stop.set()
         with self._lock:
+            if _PUESTO[0] is self:
+                _PUESTO[0] = None
             if not self.alive:
                 return
             self.alive = False

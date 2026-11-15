@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Quien habla: diarizacion en local (sherpa-onnx: segmentacion pyannote 3.0 + huellas TitaNet small), memoria de
-personas entre reuniones y casado con las frases del .srt.
+"""Quien habla: diarizacion en local (sherpa-onnx: segmentacion pyannote 3.0 + huellas CAM++ de 3D-Speaker, chino e
+ingles; hasta el 15/11/2026, TitaNet small), memoria de personas entre reuniones y casado con las frases del .srt.
 
   - Funcion OPCIONAL (apagada por defecto). Si esta apagada no se importa sherpa_onnx, no se descarga nada y no se
-    crea ningun sidecar. Los modelos (~47 MB) se bajan a DATA_DIR/models/voces/ al activarla.
+    crea ningun sidecar. Los modelos (~35 MB) se bajan a DATA_DIR/models/voces/ al activarla.
   - Por reunion: <audio>.hablantes.json junto al audio (tramos + hablantes h1, h2… + casado con el .srt), SIN vectores.
   - Global: DATA_DIR/voces.json cifrado con DPAPI (fuera de Windows, en claro): personas con hasta 5 huellas
     (vectores de 192) cada una. Una huella solo se guarda cuando el usuario pulsa «Recordar» con consentimiento.
@@ -24,6 +24,7 @@ import json
 import math
 import os
 import re
+import shutil
 import sys
 import tarfile
 import threading
@@ -35,7 +36,14 @@ import numpy as np
 
 from common import log, protect, read_text, unprotect, write_bytes
 
-MODEL_ID = "pyannote-seg-3.0 + nemo_en_titanet_small"
+# Modelo de huellas desde el 15/11/2026 (review del 14/11, punto 36): CAM++ zh_en de 3D-Speaker (Apache 2.0). Medido
+# con scripts/banco_voces.py + scripts/eval_voces.py: series del AMI de 2 h, reuniones montadas de 6-8 voces en español
+# (OpenSLR 71), todo tambien por Opus a 24 kbps como Teams, y reuniones de 2 h con alguien que habla 27-60 s. Contra
+# TitaNet small: DER medio 0,190 frente a 0,200 en las 12 de prueba, empate en limpio y mejor con Teams (0,198 frente a
+# 0,227 con 8 voces); quien habla poco sale en su grupo con los dos y con CAM++ cae menos de su voz en el de otro
+# (0-21 % frente a 0-32 %); la misma persona en otra reunion, con coseno >= 0,79 (TitaNet: 0,62). 830 MB de pico con
+# 2 h 13 (TitaNet: 918). Las huellas guardadas con el anterior se rehacen (Voices._migrar, rehacer_huellas).
+MODEL_ID = "pyannote-seg-3.0 + 3dspeaker_campplus_sv_zh_en_16k-common_advanced"
 DIM = 192
 UMBRAL, DUDOSO, MARGEN = 0.55, 0.40, 0.10
 MAX_HUELLAS = 5          # por persona: al anadir la sexta se descarta la mas antigua
@@ -43,6 +51,8 @@ MIN_HUELLA_S = 20.0      # voz acumulada para proponer guardar una huella
 MIN_MATCH_S = 5.0        # voz acumulada para intentar emparejar (entre 5 y 20 s: provisional)
 BREVE_S = 10.0           # clusteres con menos voz: «(breve)», no generan persona
 BLOQUE_S = 1800.0        # audio mas largo se diariza por bloques de <= 30 min enlazados por huella
+ENLACE = 0.55            # coseno para que un grupo de un bloque sea alguien de los anteriores (el de UMBRAL hasta el
+#                          15/11/2026; aparte para poder medirlo con scripts/eval_voces.py --enlace)
 HUELLA_MAX_S = 90.0      # voz que se concatena para una huella (los tramos mas largos primero)
 # Lo mas que se le pasa de una vez al modelo de huellas (TitaNet): su memoria crece con la duracion del trozo y una
 # huella mas larga es la media de las de sus ventanas, ponderada por su duracion. Medido el 09/11/2026 (sherpa-onnx
@@ -58,12 +68,21 @@ HUELLA_VENTANA_S = 30.0
 UMBRAL_GRUPOS = 0.6      # corte del clustering de sherpa-onnx (distancia coseno; mayor = menos grupos; con 0,7 ya
 #                          juntaba a dos hombres chilenos)
 # Al terminar se unen los grupos que son la misma voz (consolidate): sherpa-onnx parte a cada persona en varios.
-FUSION = 0.70            # coseno entre las huellas de dos grupos para unirlos (0,65 ya junta a dos personas)
+# Con CAM++ (15/11/2026), FUSION y FUSION_GRANDES elegidos con las series del AMI de `dev` (ES2011, y ES2011 con una
+# persona más que habla poco, 50 y 44 s; scripts/eval_voces.py sobre scripts/banco_voces.py) y comprobados con el
+# resto del banco (12 reuniones de 14 min a 2 h 30): con 0,70/0,75 (lo de TitaNet), 24 hablantes visibles para 14 en
+# dev y 79 para 64 en el resto; con 0,60/0,70, 16/14 y 74/64, el DER igual o mejor (dev 0,227 -> 0,224; resto 0,190)
+# y la misma pureza, y quien habla poco sigue en su grupo en las 6 reuniones con ella. Con TitaNet, 0,65 ya juntaba a
+# dos personas.
+FUSION = 0.60            # coseno entre las huellas de dos grupos para unirlos
 TOPE_MIN = 0.65          # con el numero de participantes como pista: nunca se une por debajo de este coseno (con
 #                          0,3 una pista demasiado baja juntaba a personas distintas; con 0,65, da igual si se queda
-#                          corta)
-FUSION_GRANDES = 0.75    # el de FUSION cuando los dos grupos tienen >= GRANDE_S: sus dos huellas son fiables (dos
-GRANDE_S = 30.0          # hombres distintos de 57 y 70 s llegaban a 0,72)
+#                          corta). Con CAM++ y FUSION 0,60 la pista ya no une nada mas (lo une todo el paso 1): en dev,
+#                          0,50-0,65 dan lo mismo, y por debajo de 0,62 (el coseno maximo medido entre dos personas
+#                          distintas con CAM++) una pista corta podria juntar a dos. Se deja en 0,65
+FUSION_GRANDES = 0.70    # el de FUSION cuando los dos grupos tienen >= GRANDE_S: sus dos huellas son fiables (con
+GRANDE_S = 30.0          # TitaNet, dos hombres distintos de 57 y 70 s llegaban a 0,72; ese caso no se ha medido con
+#                          CAM++)
 ABSORBE_MIN = 0.55       # coseno minimo para que un grupo breve pase al visible mas parecido (con 0,30, el 28 % de
 #                          la voz absorbida iba a otra persona: mejor «(breve)» que el nombre de otro)
 HOLGURA = 1              # tope de hablantes = participantes nombrados + HOLGURA (el usuario no suele apuntarse)
@@ -84,9 +103,10 @@ MODELS = (
     {"name": "segmentation.onnx", "size": 6958444, "member": "sherpa-onnx-pyannote-segmentation-3-0/model.onnx",
      "url": RELEASES + "speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
      "sha256": "24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488"},
-    {"name": "nemo_en_titanet_small.onnx", "size": 40257283,
-     "url": RELEASES + "speaker-recongition-models/nemo_en_titanet_small.onnx",
-     "sha256": "ad4a1802485d8b34c722d2a9d04249662f2ece5d28a7a039063ca22f515a789e"},
+    # sha256 del 15/11/2026, el mismo que el checksum.txt del release (y el tamaño)
+    {"name": "3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx", "size": 28281164,
+     "url": RELEASES + "speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx",
+     "sha256": "aa3cfc16963a10586a9393f5035d6d6b57e98d358b347f80c2a30bf4f00ceba2"},
 )
 
 
@@ -510,9 +530,11 @@ def mixed(huellas, umbral=DUDOSO):
 
 
 def diarize(samples16, data_dir, threads=2, progress=None, cancelled=None, shift=0.5, umbral_grupos=UMBRAL_GRUPOS,
-            consolidar=True, participantes=None):
+            consolidar=True, participantes=None, enlace=None):
     """Devuelve {"tramos": [{inicio, fin, h}], "hablantes": {h: {segundos, breve, …}}, "huellas": {h: [floats]},
-    "duracion_s"}. Audio > 30 min: por bloques, enlazando los clusteres de cada bloque por huella (coseno >= umbral)."""
+    "duracion_s"}. Audio > 30 min: por bloques, enlazando los clusteres de cada bloque por huella (coseno >= enlace;
+    None = ENLACE, leido al llamar)."""
+    enlace = ENLACE if enlace is None else float(enlace)
     progress = progress or (lambda **k: None)
     cancelled = cancelled or (lambda: False)
     so = _sherpa()
@@ -555,7 +577,7 @@ def diarize(samples16, data_dir, threads=2, progress=None, cancelled=None, shift
             if bi and vec is not None:  # bloque 2 en adelante: ¿es alguien del bloque anterior?
                 best = max(((cosine(vec, g["vec"]), g) for g in speakers if g["vec"] is not None),
                            key=lambda x: x[0], default=(0.0, None))
-                if best[0] >= UMBRAL:
+                if best[0] >= enlace:
                     target = best[1]
             if target is None:
                 target = {"vec": None, "vecs": [], "segundos": 0.0, "tramos": []}
@@ -736,6 +758,17 @@ def name_key(nombre):
     return "".join(c for c in s if not unicodedata.combining(c)).casefold()
 
 
+_CANDADOS, _CANDADOS_LOCK = {}, threading.Lock()
+
+
+def _candado(path):
+    """Un candado por fichero para todo el proceso: dos Voices() a la vez sobre el mismo voces.json (el servidor tiene
+    hilos) no escriben a la vez ni migran dos veces."""
+    key = os.path.normcase(os.path.abspath(path))
+    with _CANDADOS_LOCK:
+        return _CANDADOS.setdefault(key, threading.RLock())
+
+
 class Voices:
     """DATA_DIR/voces.json: personas con sus huellas. Cifrado con DPAPI (ambito usuario) en Windows; escritura
     atomica con copia .bak (que se elimina al olvidar o fusionar: ninguna copia con huellas sobrevive a un borrado).
@@ -744,10 +777,20 @@ class Voices:
     EMPTY = {"version": 1, "modelo": MODEL_ID, "dim": DIM, "umbral": UMBRAL, "contador": 0, "personas": []}
 
     def __init__(self, path):
-        self.path, self.lock, self.error = path, threading.RLock(), None
+        self.path, self.lock, self.error = path, _candado(path), None
         self.data = json.loads(json.dumps(self.EMPTY))
+        with self.lock:
+            self._load(path)
+
+    def _load(self, path):
         if not os.path.isfile(path):
-            return
+            # sin voces.json pero con su copia: una escritura que se corto entre las dos (antes del 15/11/2026 la copia
+            # se hacia moviendo el fichero): se recupera de la copia. No si se aparto por ilegible (entonces se empieza
+            # de cero, como siempre)
+            if not os.path.isfile(path + ".bak") or os.path.exists(path + ".ilegible"):
+                return
+            log("   voces.json no está; se recupera de voces.json.bak")
+            path = path + ".bak"
         try:
             raw = read_text(path).strip()
             text = unprotect(raw).decode("utf-8") if raw.startswith(("dpapi:", "plain:")) else raw
@@ -757,29 +800,116 @@ class Voices:
             self.data.update(saved)
         except Exception as e:  # no se pisa: se aparta y se empieza de cero
             self.error = f"{e.__class__.__name__}: {e}"
+            if path != self.path:  # la copia tampoco se lee: se deja donde esta (no pisa un .ilegible)
+                log(f"   voces.json.bak no se pudo leer ({self.error}); se empieza de cero")
+                return
             log(f"   voces.json no se pudo leer ({self.error}); se aparta como voces.json.ilegible")
             try:
-                os.replace(path, path + ".ilegible")
+                os.replace(path, self.path + ".ilegible")
             except OSError:
                 pass
+            return
+        self._migrar(saved.get("modelo"), recuperado=path != self.path)
+
+    def _migrar(self, anterior, recuperado=False):
+        """Huellas de otro modelo (hasta el 15/11/2026, TitaNet small): sus vectores no se pueden comparar con los del
+        de ahora (los dos tienen DIM valores, asi que compararlos no fallaria: daria parecidos sin sentido). Cada
+        huella lleva su "modelo" desde ese dia; las que no lo llevan o llevan otro (un voces.json de antes, o una que
+        guardo una version anterior de la app sobre uno ya migrado) pasan a «rehacer» (reunion, fecha y segundos, sin
+        el vector), para recalcularlas desde el audio de esas reuniones (rehacer_huellas). Cada persona conserva id,
+        nombre, «Soy yo» y consentimiento. Mientras, no se la reconoce por la voz: mejor que reconocer mal. La copia
+        .bak que deja save() es la de antes."""
+        n = 0
+        for p in self.data["personas"]:
+            if not isinstance(p, dict):
+                continue
+            todas = p.get("huellas") if isinstance(p.get("huellas"), list) else []
+            viejas = [h for h in todas if not isinstance(h, dict) or h.get("modelo") != MODEL_ID]
+            if not viejas:
+                continue
+            pend = p.setdefault("rehacer", [])
+            for h in viejas:
+                if isinstance(h, dict):
+                    pend.append({"reunion": h.get("reunion") or "", "fecha": h.get("fecha"),
+                                 "segundos": h.get("segundos")})
+            n += len(viejas)
+            p["huellas"] = [h for h in todas if h not in viejas]
+        cambia = n or recuperado or self.data.get("modelo") != MODEL_ID
+        if anterior and anterior != MODEL_ID:
+            self.data["modelo_anterior"] = anterior
+        self.data.update(modelo=MODEL_ID, dim=DIM)
+        if not cambia:
+            return
+        try:
+            self.save()
+        except OSError as e:  # se queda migrado en memoria; se escribe en el siguiente cambio
+            log(f"   voces.json: no se pudo escribir ({e.__class__.__name__})")
+        if n:
+            log(f"   voces.json: modelo de huellas {MODEL_ID}; {n} huellas por rehacer desde sus reuniones")
+
+    def pendientes(self):
+        """[(pid, {"reunion", "fecha", "segundos"})]: las huellas por rehacer con el modelo de ahora."""
+        with self.lock:
+            return [(p["id"], dict(x)) for p in self.data["personas"] for x in p.get("rehacer") or []]
+
+    def rehecha(self, pid, reunion, vector=None, segundos=None):
+        """La huella de `reunion` ya rehecha (vector) o que no se puede rehacer (vector None: la reunion o su audio
+        ya no estan, o era la misma reunion otra vez): sale de «rehacer». Con vector, entra con su fecha de entonces,
+        sin pedir de nuevo el consentimiento (se dio al guardarla). Devuelve cuantas huellas tiene, o None si la
+        persona ya no existe."""
+        if vector is not None:  # antes de tocar nada: una huella que no vale no quita la pendiente
+            vector = [round(float(x), 5) for x in vector]
+            if len(vector) != DIM:
+                raise ValueError(f"La huella no tiene {DIM} valores")
+        with self.lock:
+            p = self.find(pid)
+            if not p:
+                return None
+            pend = p.get("rehacer") or []
+            item = next((x for x in pend if x.get("reunion") == reunion), None)
+            if item is None:
+                return len(p.get("huellas") or [])
+            pend.remove(item)
+            if not pend:
+                p.pop("rehacer", None)
+            if vector is not None:
+                p.setdefault("huellas", []).append({"vector": vector, "fecha": item.get("fecha") or _now(),
+                                                    "reunion": reunion, "segundos": round(float(
+                                                        segundos if segundos is not None else
+                                                        item.get("segundos") or 0), 1), "modelo": MODEL_ID})
+                p["huellas"].sort(key=lambda h: h.get("fecha") or "")
+                del p["huellas"][:-MAX_HUELLAS]
+            self.save()
+            return len(p.get("huellas") or [])
 
     def save(self, backup=True):
-        """backup=False al olvidar o fusionar: el .bak (y un .ilegible apartado) guardarian huellas ya borradas."""
+        """backup=False al olvidar o fusionar: el .bak (y un .ilegible apartado) guardarian huellas ya borradas.
+        Un .tmp propio por escritura y la copia .bak copiando (no moviendo): voces.json nunca falta, ni con dos
+        escrituras a la vez (antes, dos Voices() a la vez podian dejar solo el .bak; revision 2 de motor-lote1)."""
         with self.lock:
             body = protect(json.dumps(self.data, ensure_ascii=False).encode("utf-8"))
-            tmp = self.path + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                f.write(body)
-            if backup and os.path.isfile(self.path):
-                try:
-                    os.replace(self.path, self.path + ".bak")
-                except OSError:
-                    pass
-            os.replace(tmp, self.path)
-            if not backup:
-                for suffix in (".bak", ".ilegible"):
+            tmp = f"{self.path}.{os.getpid()}.{threading.get_ident()}.tmp"
+            try:
+                with open(tmp, "w", encoding="utf-8") as f:
+                    f.write(body)
+                if backup and os.path.isfile(self.path):
                     try:
-                        os.remove(self.path + suffix)
+                        shutil.copyfile(self.path, self.path + ".bak")
+                    except OSError:
+                        pass
+                os.replace(tmp, self.path)
+            finally:  # si no se pudo poner en su sitio, no se queda una copia con huellas por ahi
+                if os.path.exists(tmp):
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass
+            if not backup:  # olvidar: ninguna copia con las huellas borradas (tampoco un .tmp de un fallo de antes)
+                import glob
+                for extra in [self.path + ".bak", self.path + ".ilegible", self.path + ".tmp"] + \
+                        glob.glob(glob.escape(self.path) + ".*.tmp"):
+                    try:
+                        os.remove(extra)
                     except OSError:
                         pass
 
@@ -796,7 +926,7 @@ class Voices:
             out.append({"id": p["id"], "nombre": p["nombre"], "creada": p.get("creada"),
                         "es_usuario": bool(p.get("es_usuario")), "consentimiento": p.get("consentimiento"),
                         "huellas": len(p.get("huellas") or []), "ultima": max(fechas) if fechas else None,
-                        "mezcla": mixed(p.get("huellas")),
+                        "mezcla": mixed(p.get("huellas")), "por_rehacer": len(p.get("rehacer") or []),
                         "reuniones": sorted({h.get("reunion") for h in p.get("huellas") or [] if h.get("reunion")})})
         return out
 
@@ -851,7 +981,7 @@ class Voices:
             if not p:
                 raise KeyError(pid)
             p.setdefault("huellas", []).append({"vector": vector, "fecha": _now(), "reunion": reunion or "",
-                                                "segundos": round(float(segundos or 0), 1)})
+                                                "segundos": round(float(segundos or 0), 1), "modelo": MODEL_ID})
             p["huellas"].sort(key=lambda h: h.get("fecha") or "")
             del p["huellas"][:-MAX_HUELLAS]
             if not p.get("consentimiento"):
@@ -911,6 +1041,8 @@ class Voices:
             both = (a.get("huellas") or []) + (b.get("huellas") or [])
             a["huellas"] = sorted(both, key=lambda h: h.get("fecha") or "")
             del a["huellas"][:-MAX_HUELLAS]
+            if a.get("rehacer") or b.get("rehacer"):  # las por rehacer de las dos (migracion de modelo)
+                a["rehacer"] = (a.get("rehacer") or []) + (b.get("rehacer") or [])
             a["es_usuario"] = bool(a.get("es_usuario") or b.get("es_usuario"))
             a["consentimiento"] = a.get("consentimiento") or b.get("consentimiento")
             self.data["personas"] = [p for p in self.data["personas"] if p["id"] != other]
@@ -929,6 +1061,112 @@ class Voices:
         with self.lock:
             self.data["personas"] = []
             self.save(backup=False)
+
+
+# las de server.AUDIO_EXT (el servidor no se importa desde aqui: este fichero corre como subproceso)
+AUDIO_EXT = (".wav", ".mp3", ".m4a", ".mp4", ".flac", ".ogg", ".aac", ".wma", ".opus", ".mkv", ".mov", ".webm", ".oga",
+             ".amr", ".3gp", ".3gpp", ".3ga", ".caf", ".qta", ".aif", ".aiff", ".waptt")
+SOLO_EN_LINEA = 0x400000 | 0x1000  # FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS | OFFLINE (OneDrive «solo en línea»)
+
+
+def buscar_por_nombre(raices, extensiones=AUDIO_EXT):
+    """buscar(nombre) para rehacer_huellas: las rutas absolutas de los audios con ese nombre de fichero bajo las raices
+    (las carpetas de reuniones), con un solo recorrido, que se hace la primera vez que se pide. Sin carpetas ocultas
+    ni la de la app (_app), y sin los ficheros de OneDrive que solo estan en linea (leerlos los descargaria). Si el
+    servidor ya tiene su lista de reuniones, mejor un buscar() sobre esa lista."""
+    indice, hecho = {}, []
+
+    def construir():
+        for raiz in raices or []:
+            for d, subs, files in os.walk(raiz):
+                subs[:] = [x for x in subs if not x.startswith(".") and x != "_app"]
+                for f in files:
+                    if not f.lower().endswith(tuple(extensiones)):
+                        continue
+                    full = os.path.join(d, f)
+                    try:
+                        if getattr(os.stat(full), "st_file_attributes", 0) & SOLO_EN_LINEA:
+                            continue
+                    except OSError:
+                        continue
+                    indice.setdefault(f, []).append(full)
+
+    def buscar(nombre):
+        if not hecho:
+            hecho.append(True)
+            construir()
+        return list(indice.get(nombre) or [])
+    return buscar
+
+
+def hablante_de(data, pid, segundos=None):
+    """El hablante del sidecar que el usuario puso a mano como esa persona (el de «Recordar»), no uno que la app solo
+    propuso (por voz, por el micro o provisional). Si hay varios, el de segundos mas cercanos a los de la huella."""
+    hablantes = (data or {}).get("hablantes") if isinstance(data, dict) else None
+    if not isinstance(hablantes, dict):
+        return None
+    cands = [(k, i) for k, i in hablantes.items() if isinstance(i, dict) and i.get("persona") == pid
+             and i.get("origen") == "manual" and not i.get("provisional")]
+    if not cands:
+        return None
+    if len(cands) == 1:
+        return cands[0][0]
+
+    def num(x):
+        try:
+            return float(x)
+        except (TypeError, ValueError):
+            return 0.0
+    return min(cands, key=lambda c: abs(num(c[1].get("segundos")) - num(segundos)))[0]
+
+
+def rehacer_huellas(v, buscar, calcular, cancelled=None):
+    """Rehace con el modelo de ahora las huellas que dejo la migracion (Voices._migrar).
+    buscar(reunion) -> rutas de audio con ese nombre (la reunion se guardaba por su nombre de fichero);
+    calcular(audio, h, sidecar) -> (vector, segundos) de ese hablante (en la app, la huella de «Recordar», en un
+    subproceso); sidecar es lo leido al elegir h: quien llama puede comprobar que su "creado" no ha cambiado (si se
+    volvio a identificar, h ya es otra voz) y devolver (None, None).
+    El hablante es el que su sidecar asigna a mano a esa persona (hablante_de). Una que no se encuentra se queda por
+    rehacer (no se pierde nada: se vuelve a buscar la proxima vez); una que falla al calcular, tambien. La misma reunion
+    dos veces da una sola huella. Devuelve {"rehechas": n, "sin_audio": n, "fallidas": n}; no lanza."""
+    cancelled = cancelled or (lambda: False)
+    out = {"rehechas": 0, "sin_audio": 0, "fallidas": 0}
+    hechas = set()
+    try:
+        for pid, item in v.pendientes():
+            if cancelled():
+                break
+            reunion = item.get("reunion") or ""
+            if (pid, reunion) in hechas:  # la misma reunion otra vez: ya tiene esa huella
+                v.rehecha(pid, reunion, None)
+                continue
+            estado = "sin_audio"
+            for audio in (buscar(reunion) if reunion else []) or []:
+                data = read_sidecar(sidecar_path(audio)) or {}
+                h = hablante_de(data, pid, item.get("segundos"))
+                if h is None:
+                    continue
+                try:
+                    vec, secs = calcular(audio, h, data)
+                    if vec is not None:
+                        vec = [float(x) for x in vec]
+                        secs = float(secs) if secs is not None else None
+                        if len(vec) != DIM:
+                            raise ValueError(f"la huella no tiene {DIM} valores")
+                except Exception as e:  # sin memoria, cancelada, sin el audio: se queda por rehacer
+                    log(f"   huella por rehacer ({reunion}, {h}): {e.__class__.__name__}")
+                    estado = "fallidas"
+                    break
+                if vec is not None and v.rehecha(pid, reunion, vec, secs) is not None:  # OSError: fuera
+                    estado = "rehechas"
+                    hechas.add((pid, reunion))
+                    break
+            out[estado] += 1
+    except OSError as e:  # no se puede escribir voces.json: se para y se sigue la proxima vez
+        log(f"   huellas por rehacer: no se pudo escribir voces.json ({e.__class__.__name__})")
+    if out["rehechas"] or out["fallidas"]:
+        log(f"   huellas rehechas con el modelo nuevo: {out}")
+    return out
 
 
 # ----------------------------------------------------------------------------- sidecar <audio>.hablantes.json
@@ -1235,6 +1473,8 @@ def main(argv=None):
     tmp = os.path.join(a.data, "tmp", f"voces-{os.getpid()}-{uuid.uuid4().hex[:8]}.pcm")
     samples = None
     try:
+        if not models_ready(a.data):  # p. ej. tras actualizar con otro modelo de huellas: «Recordar» antes que nada
+            ensure_models(a.data, progress)
         progress(stage="Leyendo audio…", frac=0.01)
         os.makedirs(os.path.dirname(tmp), exist_ok=True)
         if a.fingerprint:

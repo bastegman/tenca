@@ -10,6 +10,40 @@ nada de ningún proyecto concreto.
 empresa. Entre paréntesis va el número de cada hallazgo, el mismo que citan los commits; el informe de la auditoría no
 está en este repositorio. «Desarrollo y CI» es para quien mantiene el repositorio: no cambia nada en la app instalada.
 
+### «Quién habla» con otro modelo de huellas, medido en reuniones largas, en español y con audio de Teams (15/11/2026)
+
+Punto 36 de la revisión del 14/11/2026. Rama `motor-lote1`.
+
+- **Modelo de huellas nuevo: CAM++ de 3D-Speaker** (Apache 2.0, 28 MB; antes TitaNet small, 40 MB). Elegido entre
+  cuatro modelos que publica sherpa-onnx con un banco de 15 reuniones de audio público: series del AMI Meeting Corpus
+  de 1 h 45 a 2 h 30 con las mismas cuatro personas, reuniones montadas de 6 y 8 voces en español, las mismas pasadas
+  por Opus a 24 kbps (como Teams) y reuniones de 2 h con alguien que habla menos de un minuto. Error medio («DER») en
+  las de prueba: 0,190 frente a 0,200; con el audio de Teams, 0,198 frente a 0,227 en la de 8 voces; 74 hablantes
+  vistos para 64 personas, frente a 85. Quien habla poco sale como persona aparte con los dos, y con el nuevo se le
+  atribuye menos a otro. Algo menos de memoria (830 MB frente a 918 con 2 h).
+- **Las huellas guardadas dejan de usarse.** Las del modelo anterior no se pueden comparar con las nuevas: al
+  actualizar, cada persona conserva su nombre, «Soy yo» y su consentimiento, y vuelve a tener huella con el siguiente
+  «Recordar». Mientras, no se la reconoce por la voz: mejor que reconocer mal. Queda apuntado de qué reunión era cada
+  huella, para recalcularla desde su audio (falta que la app lo haga sola).
+- `scripts/banco_voces.py` monta ese banco y `scripts/eval_voces.py` mide con otro modelo (`--emb`).
+
+### Tres idiomas a la vez, avisos con el icono de la app y el repaso en la nube por idioma (15/11/2026)
+
+Puntos 54, 57 y 35 de la revisión del 14/11/2026. Rama `motor-lote1`.
+
+- **Español + inglés + portugués.** Nueva mezcla `es-en-pt`: en el PC se detecta el idioma de cada bloque solo entre
+  esos tres; en la nube, con una frase de ejemplo en los tres. Falta ponerla en el desplegable de idioma.
+- **Los avisos de Windows salen con el icono y el nombre de la app** cuando está el icono de la bandeja, en vez de
+  firmados por «Windows PowerShell». Sin icono, como antes. En Windows 11 ese globo no se queda en el Centro de
+  notificaciones.
+- **El repaso final en la nube ya no pasa una reunión entera a un idioma.** Whisper elige el idioma al principio de
+  cada trozo que se le manda: medido con Whisper en local, 2 min en inglés seguidos de 2 min en español en un solo
+  trozo salen enteros en inglés (0 de 16 frases en español); cortando en el cambio, 20 de 20. Con una mezcla fijada
+  (o la que deja un cambio de idioma en el directo), trozos de ~1,5 min en vez de 10: más peticiones, el mismo audio
+  por hora. Además, el directo apunta desde dónde vale cada idioma y el repaso sabe cortar ahí y mandar cada tramo con
+  el suyo (lo que el directo rehízo al cambiar, hasta ~1 min antes del clic, como la mezcla de los dos); falta
+  pasárselo desde el servidor.
+
 ### Errores que se leen y «Para revisar» que se vacía (15/11/2026)
 
 Puntos 11 y 38 del review del 14/11/2026. Rama `interfaz-lote2`.

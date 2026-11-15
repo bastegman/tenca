@@ -159,7 +159,8 @@ def main():
 
     def lang_mode(value):
         """Idioma pedido -> (idioma fijo, deteccion en cada bloque, idiomas permitidos).
-        Una mezcla ("es-en" = espanol + ingles, "es-pt", "en-pt"): se detecta en cada bloque, solo entre esos dos."""
+        Una mezcla ("es-en" = espanol + ingles, "es-pt", "en-pt", "es-en-pt"): se detecta en cada bloque, solo entre
+        esos dos (o tres)."""
         pair = engines.lang_pair(value)
         if pair:
             return None, True, pair

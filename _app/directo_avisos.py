@@ -277,7 +277,7 @@ class FinDeLlamada:
 
 def _mezcla(a, b):
     """El código de la mezcla de los idiomas a y b ("es-pt"), o None si no la hay."""
-    return next((k for k, par in engines.PAIRS.items() if set(par) == {a, b}), None)
+    return engines.mix_code((a, b)) if a != b else None
 
 
 class Propuesta:

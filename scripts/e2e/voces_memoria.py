@@ -190,7 +190,16 @@ def medir_todo(a, trabajo):
     sys.path.insert(0, os.path.join(REPO, "_app"))
     import voices
     voices.ensure_models(datos)
+    modelo_antes = voices.MODEL_ID
+    if a.antes:  # la de antes, con sus modelos (desde el 15/11/2026 el de huellas es otro: CAM++ en vez de TitaNet)
+        r = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import voices; "
+                            "voices.ensure_models(sys.argv[2]); print(voices.MODEL_ID)", os.path.abspath(a.antes),
+                            datos], capture_output=True, text=True, timeout=1800)
+        if r.returncode != 0:
+            raise SystemExit(f"no se pudieron bajar los modelos de la de antes: {r.stderr[-500:]}")
+        modelo_antes = r.stdout.strip().splitlines()[-1]
     out = {"minutos": a.minutos, "ahora": medir(os.path.join(REPO, "_app"), audio, datos, a.salida, "ahora")}
+    out["modelo_ahora"], out["modelo_antes"] = voices.MODEL_ID, modelo_antes
     if a.antes:
         out["antes"] = medir(os.path.abspath(a.antes), audio, datos, a.salida, "antes")
     m4a = a_m4a(audio, os.path.join(trabajo, "reunion.m4a"))
@@ -221,8 +230,11 @@ def medir_todo(a, trabajo):
               flush=True)
         if h1["segundos"] >= h0["segundos"]:
             mal.append("la huella de ahora no tarda menos que la de antes")
-        if out["huella_coseno"] < 0.99:
+        # la misma huella solo con el mismo modelo (con otro, el coseno no dice nada)
+        if out["modelo_ahora"] == out["modelo_antes"] and out["huella_coseno"] < 0.99:
             mal.append(f"la huella de ahora no es la de antes (coseno {out['huella_coseno']})")
+        if len(h1["vector"]) != voices.DIM:
+            mal.append(f"la huella de ahora no tiene {voices.DIM} valores")
     for m in mal:
         print("ERROR:", m, flush=True)
     return 1 if mal else 0
