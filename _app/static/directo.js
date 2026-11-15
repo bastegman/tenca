@@ -344,14 +344,28 @@ function bindDirectoSettings(d) {
     if (!b) return;
     const fila = b.closest('.dk-row'), mask = $('[data-xkey]', fila)?.dataset.mask;
     if (mask && typeof ask === 'function' && !await ask('¿Quitar esta clave?', `<p>Se deja de usar la clave <code>${esc(mask)}</code> en ${esc(APP_NAME)}. Para volver a usarla, tendrás que pegarla otra vez.</p>`, 'Quitar')) return;
+    if (!fila.isConnected) return;  // (las filas se rehicieron mientras tanto: ya no es esa)
     fila.remove();
     sync();
     rows.dispatchEvent(new Event('change', { bubbles: true }));
   });
   if (prov) prov.addEventListener('change', () => { stash(); cur = prov.value; draw(); sync(); });
-  // rehacer: las filas con lo guardado (tras guardar, las claves nuevas vuelven enmascaradas). Las filas vacías que se
-  // acaban de añadir se quedan, al final, y con el foco si lo tenían
+  // rehacer: las filas con lo guardado (tras guardar, las claves nuevas vuelven enmascaradas). Si cuadran con lo
+  // guardado (lo normal: el servidor las devuelve en el mismo orden), en su sitio, sin rehacer los nodos: un clic o el
+  // foco en ellas no se pierde (revisión 2, P1-B y P2-1). Si no, se rehacen; las vacías recién añadidas se quedan
   const rehacer = () => {
+    const g0 = S.config?.cloud || {}, guardadas = (g0.extra_keys_by || { [g0.provider || 'groq']: g0.extra_keys || [] })[cur] || [];
+    const llenas = $$('[data-xkey]', rows).filter(i => i.dataset.mask || i.value.trim());
+    if (llenas.length === guardadas.length) {
+      llenas.forEach((i, n) => {
+        i.dataset.mask = guardadas[n];
+        i.value = '';
+        i.placeholder = `Guardada: ${guardadas[n]} (escribe para cambiarla)`;
+      });
+      stash();
+      sync();
+      return;
+    }
     const foco = rows.contains(document.activeElement);
     const vacias = $$('[data-xkey]', rows).filter(i => !i.dataset.mask && !i.value.trim()).length;
     const g = S.config?.cloud || {}, by = g.extra_keys_by || { [g.provider || 'groq']: g.extra_keys || [] };

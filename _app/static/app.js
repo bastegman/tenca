@@ -2278,8 +2278,8 @@ function openSettings(opts) {
       clearTimeout(m.t);
       m.className = 'aj-ok ' + estado;
       m.setAttribute('role', estado === 'err' ? 'alert' : 'status');
-      // «Guardado como «16» ✓» si el servidor lo ha ajustado y aún no se ve (el foco sigue en la casilla, P2-5)
-      m.textContent = { ok: txt ? `Guardado como «${txt}» ✓` : 'Guardado ✓', err: `No se ha guardado: ${txt}`, guardando: 'Guardando…' }[estado] || '';
+      // ok: «Guardado ✓» o lo que diga quien guarda («Guardado como «16» ✓» si el servidor ajustó un número)
+      m.textContent = { ok: txt || 'Guardado ✓', err: `No se ha guardado: ${txt}`, guardando: 'Guardando…' }[estado] || '';
       if (estado === 'ok') m.t = setTimeout(() => { m.textContent = ''; m.className = 'aj-ok'; }, 4000);
     };
     const pend = new Set(), textos = new Map();  // textos: el temporizador de lo que se está escribiendo
@@ -2287,8 +2287,12 @@ function openSettings(opts) {
     // el config_rev de lo que enseña este Ajustes (al abrir y tras cada guardado suyo). No el de S.config: lo ponen al
     // día otras cosas con Ajustes abierto (una carpeta vinculada, una fila de Proyectos) sin repintarlo (P2-3)
     let rev = S.config.config_rev;
+    // lo escrito que no se pudo guardar: se vuelve a intentar en el siguiente guardado y al cerrar (revisión 2, P2-3)
+    const fallidos = new Set();
     const ajeno = () => !document.body.contains(d);
     const mandar = () => enVuelo || (enVuelo = (async () => {
+      fallidos.forEach(el => pend.add(el));
+      fallidos.clear();
       while (pend.size) {
         const els = [...pend];
         pend.clear();
@@ -2323,11 +2327,21 @@ function openSettings(opts) {
             el.dataset.guardado = norm != null && !pend.has(el) ? norm : v;
             const visto = norm != null && !pend.has(el) && document.activeElement !== el;
             if (visto) el.value = norm;
-            if (!pend.has(el)) marcar(el, 'ok', norm != null && norm !== v && !visto ? norm : '');
+            if (pend.has(el)) return;
+            // si el servidor lo ha ajustado y aún no se ve (el foco sigue en la casilla): el número, dicho; un texto
+            // recortado (más de 500 caracteres), «recortado» (no el texto entero, que descuadraba la sección)
+            const ajustado = norm != null && !visto && norm !== String(v).trim();
+            marcar(el, 'ok', !ajustado ? '' : el.type === 'number' ? `Guardado como «${norm}» ✓` : 'Guardado, recortado ✓');
           });
-          // la tarjeta de Procesado, con lo que se acaba de guardar (modelo, motor…): antes seguía con lo de antes (P1-1)
-          const tarjeta = $('.cfg-estado', d);
-          if (tarjeta && typeof cfgEstadoHtml === 'function') tarjeta.outerHTML = cfgEstadoHtml();
+          // la tarjeta de Procesado, con lo que se acaba de guardar (modelo, motor…): antes seguía con lo de antes (P1-1).
+          // Solo su texto: con los botones, un clic en «Cambiar…» justo entonces se perdía (revisión 2, P2-2)
+          const txt = $('.cfg-estado .cfg-txt', d);
+          if (txt && typeof cfgEstadoHtml === 'function') {
+            const tmp = document.createElement('div');
+            tmp.innerHTML = cfgEstadoHtml();
+            const nuevo = $('.cfg-txt', tmp);
+            if (nuevo) txt.replaceWith(nuevo);
+          }
           if (r.otro_cambio) refrescar = 'Ajustes se ha puesto al día con lo guardado.';
           d.ajTrasGuardar?.(cuerpo);
         } catch (err) {
@@ -2337,6 +2351,7 @@ function openSettings(opts) {
           van.forEach(([el]) => {
             if (pend.has(el) || textos.has(el)) return;
             if (!esTexto(el) && el.id !== 'dkRows') volver(el);  // (una clave escrita, tampoco se borra)
+            else if (err.status !== 409) fallidos.add(el);
             marcar(el, 'err', err.message);
             oculto = oculto || !!el.closest('[hidden]');
           });
@@ -2360,6 +2375,8 @@ function openSettings(opts) {
     const guardarYa = () => {
       textos.forEach((t, el) => { clearTimeout(t); pend.add(el); });
       textos.clear();
+      fallidos.forEach(el => pend.add(el));
+      fallidos.clear();
       return pend.size ? mandar() : enVuelo || Promise.resolve();
     };
     const pedirGuardar = (el, escribiendo = false) => {

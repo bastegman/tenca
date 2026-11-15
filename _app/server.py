@@ -2415,8 +2415,9 @@ def move_files(moves):
 
 
 SIN_AUDIO = "Sin micrófono y sin el audio del PC no se graba nada: deja al menos uno de los dos."
-AJUSTES_CAMBIADOS = ("Los ajustes han cambiado desde que abriste Ajustes (en otra ventana o al reiniciar Tenca) y esto "
-                     "no se ha guardado, para no borrar nada. Ya ves lo guardado: vuelve a hacer el cambio.")
+AJUSTES_CAMBIADOS = (f"Los ajustes han cambiado desde que abriste Ajustes (en otra ventana o al reiniciar "
+                     f"{APP_NAME}) y esto no se ha guardado, para no borrar nada. Ya ves lo guardado: vuelve a "
+                     "hacer el cambio.")
 
 
 def ajustes_previstos(st, a):
