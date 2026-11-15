@@ -58,13 +58,15 @@ class MezclaDeTresTests(unittest.TestCase):
         out = worker._OnlyLanguages(inner, engines.lang_pair("es-en-pt")).detect_language(None)
         self.assertEqual(out[0][0][0], "<|pt|>")  # el gallego no gana: solo entre es, en y pt
 
-    def test_ajustes_y_la_reunion_la_aceptan(self):
+    def test_el_patron_de_idiomas_la_acepta(self):
         for code in ("es-en-pt", "es-en", "es", "auto"):
             self.assertTrue(engines.IDIOMA_RE.match(code), code)
-            self.assertTrue(plan.IDIOMA_RE.match(code), code)
         for code in ("es-en-pt-fr", "es-", "español", "xx-yy-zz", "es-fr-it"):
             self.assertFalse(engines.IDIOMA_RE.match(code), code)
-            self.assertFalse(plan.IDIOMA_RE.match(code), code)
+        # plan (la tarjeta de grabar) sigue como server.IDIOMA_RE hasta que el servidor la admita (revisión 1, P2-5)
+        for code in ("es-en", "es", "auto"):
+            self.assertTrue(plan.IDIOMA_RE.match(code), code)
+        self.assertFalse(plan.IDIOMA_RE.match("es-en-pt"))
         self.assertEqual(plan.idioma_txt("es-en-pt"), "Español + inglés + portugués")
         self.assertFalse(plan.idioma_fijo("es-en-pt"))
 
@@ -147,6 +149,8 @@ class TramosDeIdiomaTests(unittest.TestCase):
     def test_sin_cambios_un_tramo(self):
         self.assertEqual(engines.tramos_idioma(None, 600.0, language="es"), [(0.0, 600.0, "es")])
         self.assertEqual(engines.tramos_idioma([(0.0, None)], 600.0), [(0.0, 600.0, None)])
+        # el directo no cambió: manda el idioma del repaso (el servidor pudo cambiarlo con el repaso en cola)
+        self.assertEqual(engines.tramos_idioma([(0.0, "en")], 600.0, language="pt"), [(0.0, 600.0, "pt")])
 
     def test_cambios_del_directo(self):
         tr = engines.tramos_idioma([(0.0, "en"), (1800.0, "pt"), (3000.0, "en")], 3600.0)
@@ -262,16 +266,29 @@ class DirectoApuntaLosTramosTests(unittest.TestCase):
         r = self.session(tid.SPANS, 34.0)
         self.assertEqual(r.job.idiomas_tramos, [(0.0, None)])
 
-    def test_cada_cambio_desde_donde_se_rehace(self):
-        r = self.session(tid.SPANS, 34.0, events=[(10.0, "en"), (26.0, "pt")])
+    LARGO = [(t, t + 3.2) for t in range(0, 170, 4)]
+
+    def test_cada_cambio_y_lo_rehecho_como_mezcla(self):
+        r = self.session(self.LARGO, 175.0, events=[(100.0, "en"), (150.0, "pt")])
         tr = r.job.idiomas_tramos
-        self.assertEqual(tr[-1][1], "pt")
         ts = [t for t, _ in tr]
-        self.assertEqual(ts, sorted(set(ts)))
-        self.assertLessEqual(tr[-1][0], 26.0)  # desde lo que se rehizo en portugués, no desde el clic
-        # el repaso de esa reunión: lo de antes del último cambio, con lo de antes; lo de después, en portugués
-        parts = engines.CloudEngine.plan_parts(34.0, [], 600, "pt", tramos=tr)
-        self.assertEqual(parts[-1][2], "pt")
+        self.assertEqual(ts, sorted(set(ts)), tr)
+        self.assertEqual(tr[0], (0.0, None))
+        self.assertEqual(tr[-1][1], "pt")
+        self.assertGreater(tr[-1][0], 100.0)  # lo de antes del cambio a portugués no se pierde
+        # lo que se rehizo (hasta ~1 min antes de cada clic) va como la mezcla de los dos idiomas
+        self.assertIn("en-pt", [x for _, x in tr], tr)
+        self.assertIn("en", [x for _, x in tr], tr)
+
+    def test_un_cambio_por_error_y_su_correccion_no_fijan_el_equivocado(self):
+        # revisión 1, P2-1: a portugués a los 150 s y corregido a inglés a los 160 s. Lo rehecho en portugués no queda
+        # con portugués fijo (Whisper traduciría al portugués un minuto dicho en inglés)
+        r = self.session(self.LARGO, 175.0, events=[(150.0, "pt"), (160.0, "en")])
+        tr = r.job.idiomas_tramos
+        self.assertEqual(tr[-1][1], "en")
+        parts = engines.CloudEngine.plan_parts(175.0, [], 600, None, tramos=tr)
+        fijo_pt = [(a, b) for a, b, x in parts if x == "pt"]
+        self.assertEqual(fijo_pt, [], (tr, parts))
 
 
 if __name__ == "__main__":

@@ -1594,8 +1594,11 @@ def tramos_idioma(tramos, duration, start=0.0, language=None):
     de idioma que conocia el directo [(desde_s, idioma o None)] (live: job.idiomas_tramos). Sin cambios: un solo
     tramo con `language`. Los tramos de menos de TRAMO_MIN_S se unen al anterior; dos seguidos con el mismo idioma,
     uno."""
+    tramos = list(tramos or ())
+    if len(tramos) <= 1:  # el directo no cambio de idioma: manda el de la reunion (el servidor pudo cambiarlo luego)
+        return [(0.0, duration, language or None)]
     puntos = []
-    for t, lang in sorted(((float(t), lang or None) for t, lang in (tramos or ())), key=lambda x: x[0]):
+    for t, lang in sorted(((float(t), lang or None) for t, lang in tramos), key=lambda x: x[0]):
         t = max(0.0, t - start)
         if t >= duration:
             continue

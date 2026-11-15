@@ -31,8 +31,9 @@ MESES = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "
 DIAS = ("lun", "mar", "mié", "jue", "vie", "sáb", "dom")
 CLAVES_CAMBIOS = ("carpeta", "idioma", "contexto", "mic", "sys", "live", "preset")
 ALCANCES = ("reunion", "proyecto", "workstream", "ajustes")
-# el mismo que engines.IDIOMA_RE (y server.IDIOMA_RE): un idioma, una mezcla de dos o la de tres («es-en-pt»)
-IDIOMA_RE = re.compile(r"^(auto|[a-z]{2}(-[a-z]{2})?|es-en-pt)$")
+# el mismo que server.IDIOMA_RE. Con la mezcla de tres en el servidor (engines.IDIOMA_RE, que tambien la admite), los
+# dos pasan a ser ese: si solo cambia este, la tarjeta de grabar ensenaria «es-en-pt» mientras se graba detectando
+IDIOMA_RE = re.compile(r"^(auto|[a-z]{2}(-[a-z]{2})?)$")
 # con un idioma fijo Whisper pasa a ese idioma lo que se diga en otro (msg 1150: una reunion que paso del ingles al
 # portugues siguio saliendo en ingles): se dice en la tarjeta de grabar, con lo que hacer
 NOTA_IDIOMA_FIJO = ("Con un idioma fijo, lo que se diga en otro se traduce a este: si la reunión puede cambiar de "
