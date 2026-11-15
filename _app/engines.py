@@ -474,6 +474,19 @@ def decode_16k(path, start=0.0, cancelled=lambda: False, destino=None, canal=Non
                 parts.append(a)
             escritas += len(a)
 
+    # en estereo (dos pistas) se junta ~1 s de fotogramas antes de pasarlos a lo pedido: numpy por cada fotograma, con
+    # la suma y su limitador, hacia leer 1 h un 45-90 % mas lento que la mezcla de swresample (revision 1, P2-3)
+    pend, pend_n = [], 0
+
+    def soltar():
+        nonlocal pend_n, leidos
+        if pend:
+            a = post(np.concatenate(pend, axis=1))
+            pend.clear()
+            pend_n = 0
+            leidos += len(a)
+            anadir(a)
+
     try:
         with av.open(path) as c:
             s = next((s for s in c.streams if s.type == "audio"), None)
@@ -486,18 +499,33 @@ def decode_16k(path, start=0.0, cancelled=lambda: False, destino=None, canal=Non
                     raise Cancelled()
                 if isinstance(fr, float):  # un paquete que no se pudo leer: su silencio (con tope total)
                     n = int(round(fr * 16000))
-                    if n > trama and relleno + n > libre and relleno + n > leidos:
+                    if n > trama and relleno + n > libre and relleno + n > leidos + pend_n:
                         continue
+                    soltar()
                     relleno += n
                     anadir(np.zeros((n, 2) if ancho == 2 else n, np.int16))
                     continue
                 for o in rs.resample(fr):
+                    if layout == "stereo":
+                        nd = o.to_ndarray()
+                        pend.append(nd.copy())
+                        pend_n += nd.shape[-1] // 2
+                        if pend_n >= 16000:
+                            soltar()
+                        continue
                     a = post(o.to_ndarray())
                     leidos += len(a)
                     anadir(a.copy())
+            soltar()
     except (EngineError, Cancelled):
         raise
     except Exception as e:
+        try:
+            soltar()  # lo que ya se habia leido
+        except (EngineError, Cancelled):
+            raise
+        except Exception:
+            pass
         if not leidos:
             raise EngineError(f"No se pudo leer el audio ({e.__class__.__name__}: {e})")
         # WAV cortado (p. ej. grabacion interrumpida): se usa lo que se pudo leer

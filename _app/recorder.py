@@ -140,7 +140,7 @@ class MicLeveler(Leveler):
         self.eco, self.eco_visto, self.sonando_s = None, False, 0.0
         self.refs = deque()     # (t, dB de la salida) de los ultimos REF_COLA_S
         self.recent = deque()   # (t, duracion, dB) de los bloques de su voz de los ultimos MIC_INICIO[0] s
-        self.mine = False
+        self.mine, self.db = False, None
 
     def _mine(self, db, ref_db):
         """¿De este bloque se aprende?"""
@@ -170,7 +170,7 @@ class MicLeveler(Leveler):
             return x
         self.dur = dur = len(x) / SR
         self.t += dur
-        db = block_db(x)
+        self.db = db = block_db(x)  # en crudo (lo usa tambien SueloMic, para la linea de «Tú»)
         if db is None:  # un bloque roto (NaN): se aplica la ganancia de antes y no se aprende nada
             update = False
         if update and self._mine(db, block_db(ref)):
@@ -241,6 +241,28 @@ def mezclar_pistas(parts, levelers, mic_muted=False, eco=None):
     soft_limit(out)
     np.clip(out, -1.0, 1.0, out=out)
     return out, mine
+
+
+class SueloMic:
+    """El ruido de fondo del micro (dB de cada bloque, en crudo): baja al momento con un bloque mas flojo y sube
+    despacio (SUBE_S), asi que entre dos palabras vuelve a el. Un bloque cuenta para la linea de «Tú» solo si pasa de
+    ese suelo SOBRE_DB: con un micro con ruido por encima de -50 dBFS (un ventilador) y cascos, el nivelador lo toma por
+    su voz (como antes del 14/11) y la linea salia toda «1»; despues «Tú» no salia (revision 1 de dos-pistas, P1-2:
+    ruido a -46/-43/-40 dBFS, con 67-98 % de pasos «1» sin su voz)."""
+
+    SUBE_S, SOBRE_DB = 20.0, 6.0
+
+    def __init__(self):
+        self.suelo = None
+
+    def __call__(self, db, dur):
+        if db is None:
+            return False
+        if self.suelo is None or db < self.suelo:
+            self.suelo = db
+        else:
+            self.suelo += (db - self.suelo) * (1 - math.exp(-dur / self.SUBE_S))
+        return db > self.suelo + self.SOBRE_DB
 
 
 class PasosTu:
@@ -710,6 +732,7 @@ def main():
             raise
     data_off = len(pistas.cabecera(SR) if a.pistas else wav_header())  # donde empieza el audio en el archivo
     tu = PasosTu() if "mic" in sources else None
+    suelo = SueloMic()
     t0, written, last = time.perf_counter(), 0, 0.0
     dicho = [False]  # ya se mando una linea «fatal» con el motivo
     base = int(round((t0 - EPOCH) * SR))  # posicion de la muestra 0 del fichero: lo capturado en t0
@@ -738,6 +761,9 @@ def main():
                     mix = mezclar(parts, levelers, muted["mic"], echo if gates[0] else None)
                     mine = bool(getattr(levelers.get("mic"), "mine", False)) and not muted["mic"]
                 if tu is not None:
+                    lev = levelers["mic"]
+                    if not muted["mic"]:  # el ruido de fondo, con todos los bloques (tambien los del eco)
+                        mine = suelo(getattr(lev, "db", None), n / SR) and mine
                     tu.add(n, mine)
                 if w:
                     w.write((mix * 32767).astype("<i2").tobytes())
@@ -815,6 +841,9 @@ def main():
                 f.write(struct.pack("<I", size - 8))
                 f.seek(data_off - 4)
                 f.write(struct.pack("<I", size - data_off))
+                if a.pistas:  # si vio el eco de los altavoces (el reproductor solo lo quita por defecto entonces)
+                    f.seek(pistas.eco_off(SR))
+                    f.write(b"1" if getattr(levelers.get("mic"), "eco_visto", False) else b"0")
             except OSError as e:
                 elog(f"✖ no se pudo cerrar la cabecera del WAV: {e.__class__.__name__}: {e}")
             finally:

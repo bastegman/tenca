@@ -40,8 +40,8 @@ class PistasProcessor extends AudioWorkletProcessor {
       if (d.estado) {  // para los tests y el diagnóstico: niveles (RMS) de lo último que ha pasado
         const n = Math.max(1, this.medN), r = v => Math.sqrt(v / n);
         this.port.postMessage({ modo: this.modo, g: this.g, bajado: this.bajado, ventanas: this.ventanas,
-          rms: { izq: r(this.medL), der: r(this.medR), sale: r(this.medO) } });
-        this.medL = this.medR = this.medO = this.medN = 0;
+          rms: { izq: r(this.medL), der: r(this.medR), sale: r(this.medO), sale_der: r(this.medO1) } });
+        this.medL = this.medR = this.medO = this.medO1 = this.medN = 0;
       }
     };
   }
@@ -51,7 +51,7 @@ class PistasProcessor extends AudioWorkletProcessor {
     this.inL = new Float32Array(w); this.inR = new Float32Array(w); this.i = 0; this.sl = 0; this.sr = 0;
     this.outL = new Float32Array(w); this.outR = new Float32Array(w);
     this.g = 1; this.gPrev = 1; this.gWin = 1; this.bajado = 0; this.ventanas = 0;
-    this.medL = 0; this.medR = 0; this.medO = 0; this.medN = 0;
+    this.medL = 0; this.medR = 0; this.medO = 0; this.medO1 = 0; this.medN = 0;
     this.dr = new Float64Array(this.k).fill(-120); this.j = 0;  // lo que sonó en las últimas k ventanas
   }
   decidir() {
@@ -73,7 +73,10 @@ class PistasProcessor extends AudioWorkletProcessor {
       if (this.modo !== 'doble' || inp.length < 2) {
         for (let c = 0; c < out.length; c++) out[c].set(inp[Math.min(c, inp.length - 1)]);
         const a = inp[0], b = inp[Math.min(1, inp.length - 1)];
-        for (let k = 0; k < a.length; k++) { this.medL += a[k] * a[k]; this.medR += b[k] * b[k]; this.medO += a[k] * a[k]; }
+        const s0 = out[0], s1 = out[1] || out[0];
+        for (let k = 0; k < a.length; k++) {
+          this.medL += a[k] * a[k]; this.medR += b[k] * b[k]; this.medO += s0[k] * s0[k]; this.medO1 += s1[k] * s1[k];
+        }
         this.medN += a.length;
         return true;
       }
@@ -85,7 +88,7 @@ class PistasProcessor extends AudioWorkletProcessor {
         const y = limit(unlimit(this.outL[this.i]) * this.tu * gl + unlimit(this.outR[this.i]) * this.demas);
         o0[k] = y; o1[k] = y;
         const l = L[k], r = R[k];
-        this.medL += l * l; this.medR += r * r; this.medO += y * y;
+        this.medL += l * l; this.medR += r * r; this.medO += y * y; this.medO1 += y * y;
         this.inL[this.i] = l; this.inR[this.i] = r;
         this.sl += l * l; this.sr += r * r;
         if (++this.i === w) {  // ventana completa: se decide su ganancia y pasa a ser la que sale

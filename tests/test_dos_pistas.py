@@ -343,19 +343,28 @@ class GrabadoraRealTests(unittest.TestCase):
         sel[len(x) - 48000:] = False
         return float(np.sqrt(np.mean(x[sel[:len(x)]] ** 2)))
 
+    def pasos(self):
+        """Energía por paso de 0,25 s de cada canal, desde los 6 s (la puerta de eco ya convencida) y la línea."""
+        x = self.canales()
+        n = 12000
+        k = len(x) // n
+        e = np.sqrt(np.mean(x[:k * n].reshape(k, n, 2) ** 2, axis=1))
+        bits = np.array([c == "1" for c in self.tl["activo"][:k]])
+        tarde = np.arange(k) >= 24
+        return e[:, 0], e[:, 1], bits[:k], tarde[:len(bits)]
+
     def test_cada_uno_en_su_canal(self):
         x = self.canales()
-        dur = len(x) / 48000
-        # el tiempo del archivo va 1 s (LAT) por detras del reloj de la tarjeta falsa, mas lo que tarda en arrancar:
-        # se mide por niveles, no por instantes exactos
         izq, der = x[:, 0], x[:, 1]
         self.assertGreater(float(np.abs(izq).max()), 0.05)
         self.assertGreater(float(np.abs(der).max()), 0.05)
         self.assertFalse(np.allclose(izq, der))  # ya no es la misma mezcla en los dos
-        # la reunion suena por la derecha; por la izquierda solo su eco, muy por debajo
-        r_meet = np.sqrt(np.mean(der[int(6 * 48000):] ** 2))
-        self.assertGreater(r_meet, 0.01)
-        self.assertGreater(dur, 12)
+        self.assertGreater(len(x) / 48000, 12)
+        # la reunión suena por la derecha; por la izquierda, cuando él calla, solo su eco, muy por debajo
+        el, er, bits, tarde = self.pasos()
+        solo_ellos = tarde & (er > 0.02) & ~bits
+        self.assertGreaterEqual(solo_ellos.sum(), 4)
+        self.assertLess(np.median(el[solo_ellos] / er[solo_ellos]), 0.35)
 
     def test_la_linea_de_tu(self):
         self.assertEqual(self.rc, 0, self.log)
@@ -369,24 +378,85 @@ class GrabadoraRealTests(unittest.TestCase):
             self.assertEqual(s["tu_i"], pos)
             pos += len(s["tu"])
         info = live.wav_info(self.wav)
-        self.assertAlmostEqual(len(bits) * 0.25, info["data_size"] / info["byte_rate"], delta=0.3)
-        # su voz en la izquierda coincide con los «1»: energia de la izquierda en los pasos 1 frente a los 0
-        x = self.canales()[:, 0]
-        n = 12000
-        e = np.array([np.sqrt(np.mean(x[i * n:(i + 1) * n] ** 2)) for i in range(min(len(bits), len(x) // n))])
-        b = np.array([c == "1" for c in bits[:len(e)]])
-        # desde los 6 s, con la puerta de eco ya convencida; en la CI (Ubuntu y Windows) caben ~15 s en 16 de reloj, con
-        # dos de sus frases de 1,6 s (6 pasos cada una): se pedían más de 8 «1» y salieron 8 (run 43761731619)
-        tarde = np.arange(len(e)) >= 24
-        self.assertGreaterEqual(b[tarde].sum(), 6, bits)
-        self.assertGreaterEqual((~b[tarde]).sum(), 10, bits)
-        self.assertGreater(np.median(e[tarde & b]), 3 * np.median(e[tarde & ~b]), (bits, e.round(3).tolist()))
-        # con la reunion sonando y él callado (solo eco en el micro), casi nunca «1»
-        x_r = self.canales()[:, 1]
-        er = np.array([np.sqrt(np.mean(x_r[i * n:(i + 1) * n] ** 2)) for i in range(len(e))])
-        eco = tarde & (er > 0.02) & (e < er / 4)
+        # el último paso, aunque quede a medias (PasosTu.cerrar al parar)
+        self.assertEqual(len(bits), int(np.ceil(info["data_size"] / info["byte_rate"] / 0.25 - 1e-9)))
+        # sin depender del reloj: los pasos con su voz (la izquierda fuerte y por encima de la derecha) son «1» y los
+        # de solo eco (la derecha fuerte, la izquierda muy por debajo) no (en la CI caben ~15 s en 16 de reloj)
+        el, er, b, tarde = self.pasos()
+        suya = tarde & (el > 0.05) & (el > er)
+        eco = tarde & (er > 0.02) & (el < er / 4)
+        self.assertGreaterEqual(suya.sum(), 4, bits)
+        self.assertGreaterEqual(b[suya].mean(), 0.7, bits)
         if eco.sum() >= 4:
-            self.assertLessEqual(b[eco].mean(), 0.25, bits)
+            self.assertLessEqual(b[eco].mean(), 0.15, bits)
+
+    def test_vio_el_eco(self):
+        # la tarjeta falsa lleva el eco de la reunión en el micro: la cabecera lo dice al cerrar (eco=1)
+        with open(self.wav, "rb") as f:
+            self.assertIs(pistas.eco_de(f.read(4096)), True)
+
+
+class SueloMicTests(unittest.TestCase):
+    def test_ruido_estacionario_no_es_su_voz(self):
+        s = recorder.SueloMic()
+        rng = np.random.default_rng(2)
+        dbs = list(-46 + rng.normal(0, 0.4, 400))  # 20 s de ventilador a -46 dBFS en bloques de 50 ms
+        self.assertEqual(sum(s(d, 0.05) for d in dbs), 0)
+        # su voz (-32 dBFS) a ratos, con pausas entre palabras: pasa del suelo
+        voz = [s(-32.0 if i % 4 else -46.0, 0.05) for i in range(200)]
+        self.assertGreater(sum(voz), 140)
+        self.assertLess(s.suelo, -40)  # entre palabras vuelve al ruido
+        self.assertFalse(s(None, 0.05))
+
+    def test_la_grabadora_lo_usa(self):
+        with open(recorder.__file__, encoding="utf-8") as f:
+            src = f.read()
+        self.assertIn("mine = suelo(getattr(lev, \"db\", None), n / SR) and mine", src)
+
+
+class GrabadoraConRuidoTests(unittest.TestCase):
+    """Con ruido en el micro (FAKESC_RUIDO_MIC, -40 dBFS de ruido blanco), la línea de «Tú» no se llena de «1»
+    (revisión 1, P1-2: con cascos y ruido, el 98 % de los pasos salían «1» y «Tú» dejaba de salir)."""
+
+    def test_el_ruido_no_es_tu(self):
+        tmp = tempfile.mkdtemp(prefix="tenca-pistas-ruido-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        wav = os.path.join(tmp, "r.wav")
+        env = dict(os.environ, PYTHONPATH=FAKE, PYTHONIOENCODING="utf-8", FAKESC_RUIDO_MIC="-40", FAKESC_SIN_ECO="1")
+        p = subprocess.Popen([sys.executable, "-u", os.path.join(APP, "recorder.py"), wav, "--mic", "default",
+                              "--sys", "all", "--pistas"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, env=env, cwd=APP)
+        out = []
+        th = threading.Thread(target=lambda: out.extend(p.stdout), daemon=True)
+        th.start()
+        threading.Thread(target=lambda: p.stderr.read(), daemon=True).start()
+        time.sleep(13)
+        p.stdin.write(b"stop\n")
+        p.stdin.flush()
+        p.wait(timeout=60)
+        th.join(timeout=10)
+        r = recording.RecorderProcess.__new__(recording.RecorderProcess)
+        r.path, r.levels = wav, []
+        for line in b"".join(out).decode("utf-8", "replace").splitlines():
+            if line.strip():
+                r.note_levels(json.loads(line))
+        bits = r.timeline()["activo"]
+        info = live.wav_info(wav)
+        with open(wav, "rb") as f:
+            f.seek(info["data_off"])
+            x = np.frombuffer(f.read(info["data_size"]), "<i2").reshape(-1, 2).astype(np.float32) / 32768
+        n = 12000
+        k = min(len(bits), len(x) // n)
+        e = np.sqrt(np.mean(x[:k * n].reshape(k, n, 2) ** 2, axis=1))
+        b = np.array([c == "1" for c in bits[:k]])
+        tarde = np.arange(k) >= 24
+        # los pasos más flojos de la izquierda (el ruido, sin su voz) casi nunca «1»; los suyos, sí
+        flojos = tarde & (e[:, 0] <= np.percentile(e[tarde, 0], 40))
+        fuertes = tarde & (e[:, 0] >= np.percentile(e[tarde, 0], 90))
+        self.assertLessEqual(b[flojos].mean(), 0.1, bits)
+        self.assertGreaterEqual(b[fuertes].mean(), 0.6, bits)
+        with open(wav, "rb") as f:
+            self.assertIs(pistas.eco_de(f.read(4096)), False)  # sin eco: el reproductor no lo quita
 
 
 # ----------------------------------------------------------------------------- un directo de verdad (reloj falso)
@@ -523,6 +593,19 @@ class LecturaTests(Tmp):
             [tramo] = engines.decode_rangos_16k(d, [(1.0, 2.0)], dur, canal=canal)
             self.assertLessEqual(int(np.abs(tramo[100:-100].astype(int) - entera[16100:31900].astype(int)).max()), 2)
 
+    @unittest.skipUnless(HAY_AV, "sin PyAV")
+    def test_huella_de_su_canal(self):
+        d, _ = self.wavs()
+        dur = round(len(engines.decode_16k(d)) / 16000, 1)
+        tramos = [(0.5, 1.5), (2.0, 2.8)]
+        for canal in (0, 1, None):
+            voz, por_tramos = voices.audio_huella(d, tramos, dur, canal=canal)
+            self.assertTrue(por_tramos)
+            entera = engines.decode_16k(d, canal=canal)
+            ref = np.concatenate([entera[int(a * 16000):int(b * 16000)] for a, b in voices.tramos_huella(tramos)])
+            self.assertEqual(len(voz), len(ref))
+            self.assertLessEqual(int(np.abs(voz[200:-200].astype(int) - ref[200:-200].astype(int)).max()), 2)
+
     def test_voices_sin_pyav(self):
         d, antes = self.wavs()
         with mock.patch.dict(sys.modules, {"engines": None}):
@@ -530,8 +613,11 @@ class LecturaTests(Tmp):
             viejo = voices.load_audio_16k(antes)
             ambos = voices.load_audio_16k(d, canal="ambos")
             izq = voices.load_audio_16k(d, canal=0)
+            der = voices.load_audio_16k(d, canal=1)
         self.assertEqual(ambos.shape, (len(suma), 2))
         np.testing.assert_array_equal(ambos[:, 0], izq)
+        np.testing.assert_array_equal(ambos[:, 1], der)
+        self.assertGreater(np.std(der), 3 * np.std(izq))  # el tono (0,2) a la derecha, el ruido (0,05) a la izquierda
         self.assertLessEqual(int(np.abs(suma.astype(int) - viejo.astype(int)).max()), 2)
 
     @unittest.skipUnless(HAY_AV, "sin PyAV")
@@ -572,14 +658,16 @@ class DiarizarPistasTests(unittest.TestCase):
         x[:, 0] = 3
         return x
 
-    def correr(self, x, mic, salidas):
+    def correr(self, x, mic, salidas, participantes=None):
         llamadas = []
+        self.kw = []
 
         def falso(samples16, *a, **k):
             llamadas.append(len(samples16))
+            self.kw.append(k)
             return salidas[len(llamadas) - 1](samples16)
         with mock.patch.object(voices, "diarize", falso):
-            res = voices.diarize_pistas(x, mic, "datos")
+            res = voices.diarize_pistas(x, mic, "datos", participantes=participantes)
         return res, llamadas
 
     def test_los_demas_aparte_y_tu_del_micro(self):
@@ -596,8 +684,10 @@ class DiarizarPistasTests(unittest.TestCase):
             return {"tramos": [{"inicio": 0.0, "fin": len(s) / voices.SR, "h": "h1"}], "hablantes": {},
                     "huellas": {"h1": [0.0, 0.0, 1.0] + [0.0] * 189}}
         mic = micro(bits_de(mios, self.TOTAL))
-        res, llamadas = self.correr(x, mic, [der, izq])
+        res, llamadas = self.correr(x, mic, [der, izq], participantes=4)
         self.assertEqual(llamadas[0], int(100.25 * voices.SR))  # de la derecha, solo lo que suena (y su margen)
+        self.assertEqual(self.kw[0].get("participantes"), 4)  # la pista de los invitados, a los demás
+        self.assertIsNone(self.kw[1].get("participantes"))
         self.assertTrue(res["pistas"])
         por = {h: i for h, i in res["hablantes"].items()}
         self.assertEqual(sorted(i["pista"] for i in por.values()), ["micro", "sistema", "sistema"])
@@ -721,6 +811,44 @@ class DiarizarPistasTests(unittest.TestCase):
         res, llamadas = self.correr(self.estereo(), micro(bits_de([(120.0, 121.0)], self.TOTAL)), [der])
         self.assertEqual(len(llamadas), 1)  # 1,2 s de micro: no se diariza
         self.assertEqual([i["pista"] for i in res["hablantes"].values()], ["sistema"])
+
+    def test_quien_esta_lejos_en_la_sala_tambien_se_escucha(self):
+        # el micro: tú a -22 dB de 10 a 40 s (con su línea) y alguien de la sala a -40 dB de 50 a 80 s (sin «1»); el
+        # eco de los demás a -38 dB mientras ellos suenan (de 100 a 160 s, a -22 dB) no se escucha
+        k = int(200 / 0.25)
+        dl, dr = np.full(k, -70.0), np.full(k, -120.0)
+        t = np.arange(k) * 0.25
+        dl[(t >= 10) & (t < 40)] = -22
+        dl[(t >= 50) & (t < 80)] = -40
+        dr[(t >= 100) & (t < 160)] = -22
+        dl[(t >= 100) & (t < 160)] = -38
+        bits = (t >= 10) & (t < 40)
+        m = voices.pasos_micro(dl, dr, bits)
+        self.assertTrue(m[(t >= 10) & (t < 40)].all())
+        self.assertTrue(m[(t >= 50) & (t < 80)].all())   # el de la sala, aunque la línea no lo marque
+        self.assertFalse(m[(t >= 100) & (t < 160.75)].any())  # el eco (y su cola), no
+        self.assertFalse(m[t < 10].any())
+        # con ruido de fondo alto en el micro (-35 dB), solo lo que pasa de él
+        dl2 = np.full(k, -35.0)
+        dl2[(t >= 10) & (t < 40)] = -22
+        m2 = voices.pasos_micro(dl2, np.full(k, -120.0))
+        self.assertTrue(m2[(t >= 10) & (t < 40)].all())
+        self.assertFalse(m2[(t >= 45)].any())
+
+    def test_tu_solo_entre_los_del_micro(self):
+        # un grupo de los demás que coincide con falsos «1» de la línea (42 %) ya no le quita «Tú» a quien es
+        data = {"pistas": True,
+                "tramos": [{"inicio": 0.0, "fin": 20.0, "h": "h1"}, {"inicio": 20.0, "fin": 40.0, "h": "h2"}],
+                "hablantes": {"h1": {"pista": "micro", "segundos": 20.0}, "h2": {"pista": "sistema", "segundos": 20.0}}}
+        bits = "1" * 80 + "1" * 34 + "0" * 46
+        mic = micro(bits)
+        self.assertEqual(voices.fuera_de_tu(data), {"h2"})
+        self.assertEqual(voices.mark_user(data["tramos"], mic, skip=voices.fuera_de_tu(data)), "h1")
+        self.assertIsNone(voices.mark_user(data["tramos"], mic, skip=set()))  # antes, nadie
+        voices.identify(data, {}, None, mic)
+        self.assertEqual(data["tu"], "h1")
+        sin = dict(data, pistas=False)
+        self.assertEqual(voices.fuera_de_tu(sin), set())  # una grabación de antes, como siempre
 
     def test_compactar(self):
         x = np.arange(100 * voices.SR, dtype=np.int64).astype(np.int16)
@@ -893,6 +1021,42 @@ class ExportarTests(Tmp):
         with self.assertRaisesRegex(ValueError, "No encuentro la carpeta"):
             pistas.exportar_peticion(path, os.path.join(self.tmp, "no"), {})
 
+    def test_nombres_y_carreras(self):
+        x = eco_prueba()
+        path = dual_wav(self.p("r.wav"), x[:, 0], x[:, 1])
+        esc = self.p("Escritorio")
+        os.makedirs(esc)
+        viejo = os.path.join(esc, "r (mezclado).wav.part")  # una exportación que no acabó (hace 2 h)
+        open(viejo, "wb").close()
+        os.utime(viejo, (time.time() - 7200, time.time() - 7200))
+        reciente = os.path.join(esc, "r (mezclado 2).wav.part")  # otra en curso ahora mismo
+        open(reciente, "wb").close()
+        self.assertEqual(pistas.nombre_mezcla(path, esc), viejo[:-5])
+        self.assertFalse(os.path.exists(viejo))
+        self.assertEqual(pistas.nombre_mezcla(path, esc, 2), os.path.join(esc, "r (mezclado 3).wav"))
+        # dos a la vez: la segunda encuentra el .part de la primera y elige otro nombre
+        with self.assertRaises(FileExistsError):
+            pistas.exportar_mezcla(path, reciente[:-5])
+        self.assertTrue(os.path.exists(reciente))  # el de la otra no se toca
+        real = pistas.exportar_mezcla
+        llamadas = []
+
+        def primera_choca(src, dst, *a, **k):
+            llamadas.append(os.path.basename(dst))
+            if len(llamadas) == 1:
+                raise FileExistsError(dst)
+            return real(src, dst, *a, **k)
+        with mock.patch.object(pistas, "exportar_mezcla", primera_choca):
+            r = pistas.exportar_peticion(path, esc, {"eco": "false"})
+        self.assertEqual(llamadas, ["r (mezclado).wav", "r (mezclado 3).wav"])
+        self.assertEqual(r["nombre"], "r (mezclado 3).wav")
+        with wave.open(r["destino"], "rb") as w:
+            y = np.frombuffer(w.readframes(w.getnframes()), "<i2").astype(np.float32) / 32768
+        q = (np.clip(x, -1, 1) * 32767).astype("<i2").astype(np.float32) / 32768
+        np.testing.assert_allclose(y, pistas.mezclar_bloque(q, eco=False), atol=1e-4)  # «false» es no
+        self.assertEqual([pistas.si(v) for v in (None, True, False, "false", "0", "no", "true", "1", 0, 1)],
+                         [True, True, False, False, False, False, True, True, False, True])
+
     def test_grabando_y_cancelar(self):
         x = eco_prueba()
         path = dual_wav(self.p("r.wav"), x[:, 0], x[:, 1], open_header=True)
@@ -932,8 +1096,11 @@ class RutaExportarTests(Tmp):
             app.rec = types.SimpleNamespace(path=wav, alive=lambda: True)
             with self.assertRaisesRegex(server.ApiError, "se está grabando"):
                 app.audio_mezclado({"path": "Alfa/r.wav"})
+            fuera = dual_wav(self.p("fuera.wav"), x[:, 0], x[:, 1])  # de dos pistas de verdad, fuera de la raíz
             with self.assertRaises(server.ApiError):
                 app.audio_mezclado({"path": "../fuera.wav"})
+            self.assertTrue(os.path.isfile(fuera))
+            self.assertEqual(sorted(os.listdir(esc)), ["r (mezclado).wav"])  # no se ha exportado
         with open(os.path.join(APP, "api.py"), encoding="utf-8") as f:
             self.assertIn('"/api/audio/mezclado": a.audio_mezclado', f.read())
 

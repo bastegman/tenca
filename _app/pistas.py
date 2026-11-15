@@ -19,14 +19,19 @@ el eco del micro quitado al reproducir; «Exportar audio mezclado» hace lo mism
 numpy puro y sin dependencias de la app: lo importan la grabadora (proceso aparte), el directo y el motor.
 """
 import os
+import re
 import struct
 
 SR = 48000
 OPEN = 0xFFFFFFFF
 MARCA = b"tenca:pistas=micro,sistema"
 # lo que se ve en las propiedades del archivo en Windows («Comentarios»): ASCII, por si lo lee otro programa
+# eco=?: la grabadora lo cambia al cerrar por 1 si vio el eco de los altavoces en el micro y por 0 si no (cascos); el
+# reproductor solo quita el eco por defecto si lo hubo (revision 1, P2-5: con cascos no hay eco y quitarlo se comia
+# tu voz al hablar a la vez). «?»: no se sabe (sigue grabando, o se corto sin cerrar).
+ECO = b" eco="
 COMENTARIO = (b"Tenca, dos pistas: izquierda = tu micro, derecha = el audio del PC (los demas). Para oirlo mezclado, "
-              b"Exportar audio mezclado en Tenca. " + MARCA)
+              b"Exportar audio mezclado en Tenca. " + MARCA + ECO + b"?")
 CABECERA_MAX = 4096  # la cabecera entera cabe aqui (live.wav_info lee lo mismo)
 
 
@@ -40,6 +45,18 @@ def cabecera(sr=SR):
             + b"fmt " + struct.pack("<IHHIIHH", 16, 1, 2, sr, sr * 4, 4, 16)
             + b"LIST" + struct.pack("<I", len(info)) + info
             + b"data" + struct.pack("<I", OPEN))
+
+
+def eco_off(sr=SR):
+    """Posicion en el archivo del byte de eco=? (lo escribe la grabadora al cerrar)."""
+    return cabecera(sr).index(MARCA + ECO) + len(MARCA + ECO)
+
+
+def eco_de(head):
+    """¿Vio la grabadora el eco de los altavoces? True, False o None (no se sabe, o no es de dos pistas)."""
+    i = head.find(MARCA + ECO) if marca_en(head) else -1
+    c = head[i + len(MARCA + ECO):i + len(MARCA + ECO) + 1] if i >= 0 else b""
+    return True if c == b"1" else False if c == b"0" else None
 
 
 def marca_en(head):
@@ -98,6 +115,10 @@ def soft_unlimit(y, knee=0.8):
     return y
 
 
+KNEE = 0.8
+KNEE_I16 = int(KNEE * 32767)
+
+
 def a_mono(x):
     """(n, 2) float de un WAV de dos pistas → (n,) float: la suma, que es la mezcla de antes (micro + lo que suena),
     con el mismo limitador. La media de los dos canales (lo de cualquier otro estéreo) la dejaría 6 dB más baja. Cada
@@ -105,7 +126,13 @@ def a_mono(x):
     como antes, y no el limitador dos veces (medido el 15/11/2026: hasta 0,048 de diferencia en los picos
     de una sala)."""
     import numpy as np
-    y = soft_unlimit(x[:, 0]) + soft_unlimit(x[:, 1])
+    x = np.asarray(x, np.float32)
+    if max(float(x.max(initial=0.0)), -float(x.min(initial=0.0))) <= KNEE:  # lo normal: ningun canal se limito
+        y = x[:, 0] + x[:, 1]
+        if max(float(y.max(initial=0.0)), -float(y.min(initial=0.0))) <= KNEE:
+            return y
+    else:
+        y = soft_unlimit(x[:, 0]) + soft_unlimit(x[:, 1])
     soft_limit(y)
     np.clip(y, -1.0, 1.0, out=y)
     return y
@@ -114,7 +141,12 @@ def a_mono(x):
 def a_mono_i16(x):
     """Lo mismo con int16 (n, 2) → int16 (n,) (la lectura a 16 kHz de engines.decode_16k)."""
     import numpy as np
-    y = a_mono(np.asarray(x, np.float32) / 32768.0)
+    x = np.asarray(x)
+    if max(int(x.max(initial=0)), -int(x.min(initial=0))) <= KNEE_I16:  # lo normal: sumar en enteros
+        y = x[:, 0].astype(np.int32) + x[:, 1]
+        if max(int(y.max(initial=0)), -int(y.min(initial=0))) <= KNEE_I16:
+            return y.astype(np.int16)
+    y = a_mono(x.astype(np.float32) / 32768.0)
     return np.round(y * 32767).astype(np.int16)
 
 
@@ -249,8 +281,9 @@ def exportar_mezcla(src, dst, tu=1.0, demas=1.0, eco=True, cancelled=None, bloqu
     total -= total % 4
     tmp = dst + ".part"
     estado, escritas = {}, 0
+    out = open(tmp, "xb")  # nuevo: dos exportaciones a la vez no escriben en el mismo (FileExistsError: otro nombre)
     try:
-        with open(src, "rb") as f, open(tmp, "wb") as out:
+        with open(src, "rb") as f, out:
             out.write(_cabecera_mono(0))
             f.seek(off)
             quedan, paso = total, int(bloque_s * SR) * 4
@@ -268,6 +301,8 @@ def exportar_mezcla(src, dst, tu=1.0, demas=1.0, eco=True, cancelled=None, bloqu
                 escritas += len(y)
             out.seek(0)
             out.write(_cabecera_mono(escritas))
+        if os.path.exists(dst):  # alguien lo ha creado mientras: no se pisa
+            raise FileExistsError(dst)
         os.replace(tmp, dst)
     except BaseException:
         try:
@@ -296,14 +331,36 @@ def _cabecera_mono(muestras, sr=SR):
             + b"data" + struct.pack("<I", n))
 
 
-def nombre_mezcla(src, carpeta):
-    """Ruta libre en `carpeta` para la mezcla de src: «<nombre> (mezclado).wav», «… (mezclado 2).wav»…"""
-    base = os.path.splitext(os.path.basename(src))[0] + " (mezclado)"
-    cand, k = os.path.join(carpeta, base + ".wav"), 2
-    while os.path.exists(cand) or os.path.exists(cand + ".part"):
-        cand = os.path.join(carpeta, f"{os.path.splitext(os.path.basename(src))[0]} (mezclado {k}).wav")
+PART_VIEJO_S = 3600.0  # un «.part» de mas de 1 h es de una exportacion que no acabo (la app se cerro): se borra
+
+
+def nombre_mezcla(src, carpeta, k0=1):
+    """Ruta libre en `carpeta` para la mezcla de src: «<nombre> (mezclado).wav», «… (mezclado 2).wav»… Un «.part»
+    reciente es otra exportacion en curso (ese nombre no); uno viejo, de una que no acabo: se borra y el nombre vale."""
+    import time
+    stem = os.path.splitext(os.path.basename(src))[0]
+    k = max(1, int(k0))
+    while True:
+        cand = os.path.join(carpeta, f"{stem} (mezclado).wav" if k == 1 else f"{stem} (mezclado {k}).wav")
+        part = cand + ".part"
+        if os.path.exists(part):
+            try:
+                if time.time() - os.path.getmtime(part) > PART_VIEJO_S:
+                    os.remove(part)
+            except OSError:
+                pass
+        if not os.path.exists(cand) and not os.path.exists(part):
+            return cand
         k += 1
-    return cand
+
+
+def si(v, defecto=True):
+    """Un sí/no de una peticion: el booleano, un numero, o un texto («false», «0», «no», «off» son no)."""
+    if v is None:
+        return defecto
+    if isinstance(v, str):
+        return v.strip().lower() not in ("false", "0", "no", "off", "")
+    return bool(v)
 
 
 def exportar_peticion(abs_path, carpeta, body, grabando=None):
@@ -323,9 +380,15 @@ def exportar_peticion(abs_path, carpeta, body, grabando=None):
         return min(2.0, max(0.0, v)) if v == v else 1.0
     if not os.path.isdir(carpeta):
         raise ValueError(f"No encuentro la carpeta donde guardarlo ({carpeta}).")
-    dst = nombre_mezcla(abs_path, carpeta)
-    try:
-        segundos = exportar_mezcla(abs_path, dst, num("tu"), num("demas"), bool((body or {}).get("eco", True)))
-    except OSError as e:
-        raise ValueError(f"No se pudo guardar el audio mezclado ({e.strerror or e}).")
-    return {"destino": dst, "nombre": os.path.basename(dst), "segundos": round(segundos, 1)}
+    k = 1
+    for _ in range(50):  # otra exportacion a la vez coge el mismo nombre: se prueba el siguiente
+        dst = nombre_mezcla(abs_path, carpeta, k)
+        try:
+            segundos = exportar_mezcla(abs_path, dst, num("tu"), num("demas"), si((body or {}).get("eco")))
+        except FileExistsError:
+            k = int(re.search(r"\(mezclado(?: (\d+))?\)\.wav$", dst).group(1) or 1) + 1
+            continue
+        except OSError as e:
+            raise ValueError(f"No se pudo guardar el audio mezclado ({e.strerror or e}).")
+        return {"destino": dst, "nombre": os.path.basename(dst), "segundos": round(segundos, 1)}
+    raise ValueError("No se pudo elegir un nombre para el audio mezclado: demasiados con el mismo.")
