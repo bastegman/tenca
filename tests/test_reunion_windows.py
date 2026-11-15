@@ -95,6 +95,8 @@ class FakeHandler(BaseHTTPRequestHandler):
             self.server.posts.append({"path": self.path, "host": self.headers.get("Host"),
                                       "x_audios": self.headers.get("X-Audios"), "body": body})
         if self.path == "/api/rec/siguiente":  # «Ya ha empezado «X»» (hoy): graba esa si sigue siendo la propuesta
+            if body.get("descartar"):  # «Ahora no» (la ✕ del aviso)
+                return self._json({"ok": True})
             if body.get("grabar") != "Revisión de presupuesto":
                 return self._json({"error": "Esa reunión ya no está en curso: graba desde «Grabar» si sigues en ella."},
                                   400)
@@ -338,6 +340,21 @@ class AvisoTests(unittest.TestCase):
             self.skipTest("el clic sintético no llegó a la ventana en este escritorio")
         self.assertEqual(res["resultado"], "cerrar", res)
         self.assertEqual(self.srv.posts, [])
+
+    def test_clic_real_en_cerrar_la_siguiente_es_ahora_no(self):
+        """La ✕ de «Ya ha empezado «X»» (punto 38 del review): «Ahora no», como en la app, y no solo cerrar."""
+        p, est = self.abrir("siguiente-cerrar", "--siguiente", "Revisión de presupuesto")
+        e = self.estado(est)
+        time.sleep(0.5)
+        clic(*e["botones"]["cerrar"])
+        try:
+            res = self.resultado(p, secs=8)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            self.skipTest("el clic sintético no llegó a la ventana en este escritorio")
+        self.assertEqual((res["resultado"], res.get("descartada")), ("cerrar", True), res)
+        self.assertEqual([(x["path"], x["body"]) for x in self.srv.posts],
+                         [("/api/rec/siguiente", {"descartar": True})])
 
     def test_se_cierra_si_ya_se_graba(self):
         self.srv.recording = True

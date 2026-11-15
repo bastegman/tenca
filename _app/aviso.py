@@ -2,7 +2,8 @@
 """Aviso flotante «● Grabar / ✕» que la app abre, en un proceso aparte (como el selector de carpetas), al detectar
 una llamada. Ventana sin borde, siempre visible, abajo en el centro del monitor principal (respetando la barra de
 tareas), que NO roba el foco (WS_EX_NOACTIVATE: puedes seguir escribiendo en la llamada). Se cierra sola a los
-20 s, al pulsar ✕, al empezar a grabar (también con Ctrl+Alt+R) o si la app se cierra.
+20 s, al pulsar ✕, al empezar a grabar (también con Ctrl+Alt+R) o si la app se cierra. En «Ya ha empezado «X»» la ✕
+es «Ahora no» (como en la app): no se vuelve a proponer esa reunión hasta la próxima grabación.
 
     python aviso.py --puerto 8765 [--titulo "Reunión semanal"] [--nombre "Reunión semanal"] [--vocab ID]
                     [--tema "Alfa · General"] [--segundos 20] [--ocultar-captura]
@@ -202,7 +203,7 @@ class Aviso:
             w.bind("<Button-1>", lambda e: self.grabar())
             w.bind("<Enter>", lambda e: self._hover(True))
             w.bind("<Leave>", lambda e: self._hover(False))
-        self.cerrar_btn.bind("<Button-1>", lambda e: self.cerrar("cerrar"))
+        self.cerrar_btn.bind("<Button-1>", lambda e: self.cerrar_x())
         self.cerrar_btn.bind("<Enter>", lambda e: self.cerrar_btn.configure(fg=C["texto"]))
         self.cerrar_btn.bind("<Leave>", lambda e: self.cerrar_btn.configure(fg=C["suave"]))
         self.w, self.h = int(ANCHO * s), int(ALTO * s)
@@ -266,6 +267,28 @@ class Aviso:
             msg = f"No se pudo hablar con la app ({e.__class__.__name__})"
             self.root.after(0, lambda m=msg: self._error(m))
 
+    def cerrar_x(self):
+        """✕. En «Ya ha empezado «X»» es «Ahora no», como en la app: POST /api/rec/siguiente {descartar: true}, y la
+        franja de la app tampoco la vuelve a proponer hasta la próxima grabación (review del 14/11/2026, punto 38).
+        Antes solo cerraba esta ventana. La ventana se va al momento; la petición, en segundo plano (el servidor, al
+        recibirla, cierra también este proceso: el descarte ya está hecho)."""
+        if self.resultado or self.enviando or not getattr(self.args, "siguiente", ""):
+            return self.cerrar("cerrar")
+        self.enviando = self.descartando = True
+        try:
+            self.root.withdraw()
+        except Exception:
+            pass
+        threading.Thread(target=self._descartar, daemon=True).start()
+
+    def _descartar(self):
+        try:
+            self._pedir("/api/rec/siguiente", {"descartar": True}, timeout=5)
+            self.datos = {"descartada": True}
+        except Exception as e:
+            self.datos = {"descartada": False, "error": f"No se pudo hablar con la app ({e.__class__.__name__})"}
+        self.root.after(0, lambda: self.cerrar("cerrar"))
+
     def _ok(self, r):
         self.resultado = "grabar"
         self.datos = {"path": r.get("path"), "workstream": r.get("workstream")}
@@ -296,6 +319,8 @@ class Aviso:
         self.root.after(2000, self.sondear)
 
     def cerrar(self, resultado):
+        if getattr(self, "descartando", False) and resultado != "cerrar":
+            return  # el «Ahora no» de la ✕ en camino: ni los 20 s ni el sondeo lo cortan a medias
         if self.resultado is None or resultado == self.resultado:
             self.resultado = resultado
         try:

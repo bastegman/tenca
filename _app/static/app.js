@@ -163,7 +163,11 @@ function hlTerms(text, terms) {
 
 /* timeout (ms): tope de la petición entera (los sondeos: 5 s). Sin respuesta (el servidor caído, colgado o sin
    red) el error dice «Tenca no responde», con noResponde = true, y no el «Failed to fetch» del navegador (review del
-   14/11/2026, punto 1). */
+   14/11/2026, punto 1).
+   Un fallo inesperado del servidor (500: una excepción de Python o de Windows, que llegaba tal cual al aviso) dice
+   «Algo ha fallado dentro de Tenca», con interno = true y el texto técnico en detalle, que el aviso pliega en
+   «Detalle» (punto 11). Si el servidor ya manda la frase y el detalle por separado ({error, detalle}), se respetan. */
+let falloInternoUltimo = null;  // {frase, detalle, t}: el último 500, para el aviso que lo cuente (detalleInternoHtml)
 async function api(path, body, timeout) {
   const opt = body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Audios': '1' }, body: JSON.stringify(body) };
   const ctl = timeout ? new AbortController() : null;
@@ -176,6 +180,12 @@ async function api(path, body, timeout) {
   } catch {
     throw Object.assign(new Error(`${APP_NAME} no responde`), { noResponde: true });
   } finally { if (tm) clearTimeout(tm); }
+  if (r.status >= 500) {
+    const detalle = String((j.detalle ? j.detalle : j.error) || r.statusText || `HTTP ${r.status}`);
+    const frase = j.detalle && j.error ? String(j.error) : `Algo ha fallado dentro de ${APP_NAME}`;
+    falloInternoUltimo = { frase, detalle, t: Date.now() };
+    throw Object.assign(new Error(frase), { status: r.status, interno: true, detalle });
+  }
   if (!r.ok || j.error) throw Object.assign(new Error(j.error || r.statusText), { status: r.status });  // 409: Ajustes
   return j;
 }
@@ -484,7 +494,7 @@ function avisarCortes(cortes) {
   for (const c of vivos) {
     const html = corteTexto(c);
     if (S.cortesAvisados.has(c.id)) {  // ya está a la vista: si el corte ha cambiado (sigue / no sigue), se rehace
-      $$('.toast[data-corte]').forEach(t => { if (t.dataset.corte === c.id && t.dataset.html !== html) { t.dataset.html = html; t.innerHTML = html + '<span class="toast-x" aria-hidden="true">✕</span>'; } });
+      $$('.toast[data-corte]').forEach(t => { if (t.dataset.corte === c.id && t.dataset.html !== html) { t.dataset.html = html; t.innerHTML = html + TOAST_X; } });
       continue;
     }
     S.cortesAvisados.add(c.id);
@@ -1759,7 +1769,7 @@ main.addEventListener('click', async e => {
     return;
   }
   const g = t.closest('[data-go]');
-  if (g) {
+  if (g && !t.closest('[data-cfg-accion]')) {  // el botón de explicar.py en una fila de Hoy hace lo suyo (configurar.js)
     const params = {};
     if (g.dataset.t) params.t = g.dataset.t;
     if (g.dataset.q) params.q = g.dataset.q;
@@ -1903,17 +1913,19 @@ function applyProgress() {
   });
   renderLiveChip();
 }
+/* el botón de explicar.py de un trabajo con error (configurar.js), en su aviso como en la Cola (punto 11) */
+const jobAccionHtml = j => (typeof cfgAccionHtml === 'function' ? cfgAccionHtml(j) : '');
 function notifyJob(j) {
   if (j.kind === 'voces') {
     const a = S.audios.get(j.path), title = a ? fullTitle(a) : j.name;
     if (j.status === 'done') toast(`🗣 ${esc(j.stage)}: ${esc(title)}`, 'ok', () => go('a', j.path));
-    else toast(`No se pudieron identificar las voces de ${esc(title)}: ${esc(j.aviso?.frase || j.error)}`, 'err', () => go('a', j.path));
+    else toast(`No se pudieron identificar las voces de ${esc(title)}: ${esc(j.aviso?.frase || j.error)}${jobAccionHtml(j)}`, 'err', () => go('a', j.path));
     return;
   }
-  if (j.kind === 'summary') { if (j.status === 'error') toast(`No se pudo resumir: ${esc(j.aviso?.frase || j.error)}`, 'err'); return; }  // el aviso de listo lo da notas.js
+  if (j.kind === 'summary') { if (j.status === 'error') toast(`No se pudo resumir: ${esc(j.aviso?.frase || j.error)}${jobAccionHtml(j)}`, 'err'); return; }  // el aviso de listo lo da notas.js
   const a = S.audios.get(j.path), title = a ? fullTitle(a) : j.name;
   if (j.status === 'done') toast(`<b>✓</b> ${j.live ? 'Grabación transcrita' : 'Transcrito'}: ${esc(title)}`, 'ok', () => go('a', j.path));
-  else toast(`No se pudo transcribir ${esc(title)}: ${esc(j.aviso?.frase || j.error)}`, 'err', () => go('a', j.path));
+  else toast(`No se pudo transcribir ${esc(title)}: ${esc(j.aviso?.frase || j.error)}${jobAccionHtml(j)}`, 'err', () => go('a', j.path));
   if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
     const n = new Notification(j.status === 'done' ? 'Transcripción lista' : 'Error al transcribir', { body: title });
     n.onclick = () => { window.focus(); go('a', j.path); };
@@ -1931,14 +1943,30 @@ function renderJobsPanel() {
       const btn = isActive(j) ? `<button class="btn ghost sm danger" data-jact="cancel" data-id="${j.id}">${j.live ? 'Detener' : 'Cancelar'}</button>`
         : `<span class="pill ${j.status === 'done' ? 'ok' : j.status === 'error' ? 'err' : ''}">${{ done: 'Hecho', error: 'Error', cancelled: 'Cancelado' }[j.status]}</span>`;
       return `<div class="jitem"><span class="n" data-jgo="${esc(j.path)}">${esc(title)}</span>${btn}${bar}${sub}</div>`;
-    }).join('') : '<div class="empty">No hay transcripciones en marcha.<br>Elige un audio y pulsa <b>Transcribir</b>.</div>');
+    }).join('') : '<div class="empty">No hay transcripciones en marcha.<br>Elige un audio y pulsa <b>Transcribir</b>.</div>')
+    + avisosHtml();
+}
+/* «Avisos»: los últimos avisos de error de esta ventana (toast), del más reciente al más antiguo, para releerlos después
+   de cerrarlos, con su botón y su «Detalle» */
+function avisosHtml() {
+  const l = avisosLista();
+  if (!l.length) return '';
+  const hora = t => { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  return `<div class="ph ph-avisos"><b>Avisos</b><button class="btn ghost sm" type="button" data-jact="avisos-borrar">Borrar avisos</button></div>`
+    + [...l].reverse().map(a => `<div class="aviso-item"><span class="t">${hora(a.t)}${a.n > 1 ? ` · ${a.n} veces` : ''}</span><div class="s">${a.html}</div></div>`).join('');
 }
 $('#btnJobs').onclick = e => { e.stopPropagation(); const p = $('#jobsPanel'); p.classList.toggle('hidden'); if (!p.classList.contains('hidden')) renderJobsPanel(); };
 $('#jobsPanel').addEventListener('click', async e => {
-  e.stopPropagation();
+  // el botón de explicar.py de un error (cfgAccionHtml) lo atiende document (configurar.js): sin parar el clic aquí
+  if (!e.target.closest('[data-cfg-accion]')) e.stopPropagation();
   const b = e.target.closest('[data-jact]'), g = e.target.closest('[data-jgo]');
   if (b && b.dataset.jact === 'cancel') { await api('/api/cancel', { id: b.dataset.id }); pollJobs(true); }
   else if (b && b.dataset.jact === 'clear') { await api('/api/jobs/clear', {}); pollJobs(true); }
+  else if (b && b.dataset.jact === 'avisos-borrar') {
+    S.avisos = [];
+    try { sessionStorage.removeItem(AVISOS_CLAVE); } catch { /* sin almacenamiento */ }
+    renderJobsPanel();
+  }
   else if (g) { go('a', g.dataset.jgo); $('#jobsPanel').classList.add('hidden'); }
 });
 document.addEventListener('click', e => { if (!e.target.closest('#jobsPanel, #btnJobs')) $('#jobsPanel').classList.add('hidden'); });
@@ -2761,14 +2789,54 @@ function shutdownScreen() {
     <h2 style="margin:16px 0 8px">${esc(APP_NAME)} se ha apagado</h2><p class="muted">Cierra esta ventana. Para volver a usar ${esc(APP_NAME)}, ábrela con el acceso directo del escritorio.</p></div>`;
 }
 
-/* keep: no caduca (se cierra con un clic): la grabación cortada, que no puede irse sola a los 9 s */
+/* Avisos (review del 14/11/2026, punto 11). Los de error no caducan: se cierran con ✕ (a los 9 s no daba tiempo a leer
+   una frase de explicar.py) y quedan en «Avisos», en la Cola, para releerlos. Un clic en el texto hace lo suyo (abrir
+   la reunión, si lo tiene) y lo cierra; en un botón de dentro (el de explicar.py) o en «Detalle», solo lo de ese botón.
+   El mismo aviso otra vez no se apila (queda el último) y a la vista hay como mucho AVISOS_A_LA_VISTA.
+   keep === true: tampoco caduca, y cualquier clic, ✕ incluida, hace lo suyo y lo cierra (la grabación cortada: su clic
+   es «visto»). keep === false: un error que sí se va solo, a los 9 s. Los demás avisos, a los 4 s. */
+const TOAST_X = '<button type="button" class="toast-x" aria-label="Cerrar este aviso" title="Cerrar">✕</button>';
+const AVISOS_A_LA_VISTA = 3, AVISOS_MAX = 20, AVISOS_CLAVE = 'tenca.avisos';
+function avisosLista() {
+  if (!S.avisos) { try { S.avisos = JSON.parse(sessionStorage.getItem(AVISOS_CLAVE) || '[]'); } catch { S.avisos = []; } }
+  return S.avisos;
+}
+function apuntarAviso(html) {
+  const l = avisosLista(), u = l[l.length - 1], t = Date.now();
+  if (u && u.html === html) { u.t = t; u.n = (u.n || 1) + 1; } else l.push({ html, t });
+  S.avisos = l.slice(-AVISOS_MAX);
+  try { sessionStorage.setItem(AVISOS_CLAVE, JSON.stringify(S.avisos)); } catch { /* sin almacenamiento */ }
+  if (!$('#jobsPanel').classList.contains('hidden')) renderJobsPanel();
+}
+/* El texto técnico del último 500 (api), plegado en «Detalle», para el aviso que dice su frase justo después (el catch
+   de esa petición). Pasados 5 s, o ya contado, no se pega a otro aviso. */
+function detalleInternoHtml(html) {
+  const f = falloInternoUltimo;
+  if (!f || Date.now() - f.t > 5000 || !html.includes(esc(f.frase))) return '';
+  falloInternoUltimo = null;
+  return `<details class="toast-det"><summary>Detalle</summary><div class="toast-tec">${esc(f.detalle)}</div></details>`;
+}
 function toast(html, kind = '', onclick, keep) {
+  const err = kind === 'err', fijo = keep === true || (err && keep !== false), box = $('#toasts');
+  if (err) { html += detalleInternoHtml(html); apuntarAviso(html); }
+  if (fijo) {
+    $$('.toast.fijo', box).forEach(t => { if (t.dataset.k === html) t.remove(); });
+    const vistos = $$('.toast.fijo:not([data-corte])', box);
+    vistos.slice(0, Math.max(0, vistos.length - AVISOS_A_LA_VISTA + 1)).forEach(t => t.remove());
+  }
   const el = document.createElement('div');
-  el.className = 'toast ' + kind + (keep ? ' keep' : '');
-  el.innerHTML = html + (keep ? '<span class="toast-x" aria-hidden="true">✕</span>' : '');
-  el.onclick = () => { onclick && onclick(); el.remove(); };
-  $('#toasts').append(el);
-  if (!keep) setTimeout(() => el.remove(), kind === 'err' ? 9000 : 4000);
+  el.className = 'toast ' + kind + (fijo ? ' fijo' : '') + (keep === true ? ' keep' : '');
+  el.dataset.k = html;
+  el.innerHTML = html + (fijo ? TOAST_X : '');
+  el.onclick = e => {
+    const x = e.target.closest('.toast-x');
+    if (keep !== true && x) return el.remove();
+    if (keep !== true && e.target.closest('button, a, summary, details, input, select, textarea')) return;
+    onclick && onclick();
+    el.remove();
+  };
+  box.append(el);
+  if (!fijo) setTimeout(() => el.remove(), err ? 9000 : 4000);
   return el;
 }
 
