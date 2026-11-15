@@ -21,6 +21,7 @@ from unittest import mock
 
 from support import APP, server
 import bandeja  # noqa: E402
+import inicio_windows  # noqa: E402
 import window  # noqa: E402
 
 
@@ -476,7 +477,9 @@ class ArrancarConWindowsTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.appdata, True)
         self.progs = os.path.join(self.appdata, "Microsoft", "Windows", "Start Menu", "Programs")
         for p in (mock.patch.object(server, "WINDOWS", True), mock.patch.dict(os.environ, {"APPDATA": self.appdata}),
-                  mock.patch.object(server, "log"), mock.patch.object(server, "shell_folder", return_value=None)):
+                  mock.patch.object(server, "log"), mock.patch.object(inicio_windows, "WINDOWS", True),
+                  mock.patch.object(inicio_windows, "log"),
+                  mock.patch.object(inicio_windows, "shell_folder", return_value=None)):
             p.start()
             self.addCleanup(p.stop)
         self.origen = os.path.join(self.progs, f"{server.APP_NAME}.lnk")
@@ -521,7 +524,7 @@ class ArrancarConWindowsTests(unittest.TestCase):
         otra = tempfile.mkdtemp(prefix="chuleta-redirigida-")
         self.addCleanup(shutil.rmtree, otra, True)
         carpetas = {0x02: os.path.join(otra, "Programas"), 0x07: os.path.join(otra, "Inicio")}
-        with mock.patch.object(server, "shell_folder", side_effect=carpetas.get):
+        with mock.patch.object(inicio_windows, "shell_folder", side_effect=carpetas.get):
             origen, destino = server._startup_lnks()
         self.assertEqual(origen, os.path.join(otra, "Programas", f"{server.APP_NAME}.lnk"))
         self.assertEqual(destino, os.path.join(otra, "Inicio", f"{server.APP_NAME}.lnk"))
@@ -562,7 +565,7 @@ class ArrancarConWindowsTests(unittest.TestCase):
         self.assertTrue(re.search(r'GetFolderPath\("Startup"\)', bloque), bloque[:600])
 
     def test_fuera_de_windows_nada(self):
-        with mock.patch.object(server, "WINDOWS", False):
+        with mock.patch.object(server, "WINDOWS", False), mock.patch.object(inicio_windows, "WINDOWS", False):
             self.assertIsNone(server.inicio_windows_leer())
 
 

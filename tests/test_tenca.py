@@ -20,6 +20,7 @@ from unittest import mock
 
 from support import APP, REPO, patched_paths, server
 import common
+import inicio_windows
 from test_desinstalar import function_body, powershell, ps_text, run_ps_functions
 
 WINDOWS = sys.platform == "win32"
@@ -380,7 +381,9 @@ class ArranqueConNombreAnteriorTests(unittest.TestCase):
         self.startup = os.path.join(self.progs, "Startup")
         os.makedirs(self.startup)
         for p in (mock.patch.object(server, "WINDOWS", True), mock.patch.dict(os.environ, {"APPDATA": self.appdata}),
-                  mock.patch.object(server, "log"), mock.patch.object(server, "shell_folder", return_value=None)):
+                  mock.patch.object(server, "log"), mock.patch.object(inicio_windows, "WINDOWS", True),
+                  mock.patch.object(inicio_windows, "log"),
+                  mock.patch.object(inicio_windows, "shell_folder", return_value=None)):
             p.start()
             self.addCleanup(p.stop)
         self.origen = os.path.join(self.progs, "Tenca.lnk")
@@ -411,11 +414,11 @@ class ArranqueConNombreAnteriorTests(unittest.TestCase):
         inicio (StartupApproved, por nombre de fichero) pasa también a Tenca.lnk; con Tenca.lnk ya puesto, nada."""
         self.write(self.origen, b"lnk-tenca")
         self.write(self.viejo, self.nuestro)
-        with mock.patch.object(server, "_startup_aprobado_copiar") as cp:
+        with mock.patch.object(inicio_windows, "_startup_aprobado_copiar") as cp:
             server.inicio_windows_al_dia()
         cp.assert_called_once_with("Chuleta.lnk", "Tenca.lnk")
         self.write(self.viejo, self.nuestro)  # las dos: la de ahora ya tiene lo suyo
-        with mock.patch.object(server, "_startup_aprobado_copiar") as cp:
+        with mock.patch.object(inicio_windows, "_startup_aprobado_copiar") as cp:
             server.inicio_windows_al_dia()
         cp.assert_not_called()
         with mock.patch.dict(sys.modules, {"winreg": None}):  # sin registro (o fuera de Windows): nada, sin error
