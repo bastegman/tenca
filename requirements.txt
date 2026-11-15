@@ -1,6 +1,6 @@
 # Lo mismo que instala _app/instalar.ps1 (mantener las dos listas iguales; tests/test_package.py lo comprueba)
 faster-whisper==1.2.1
-soundcard>=0.4.3
+soundcard>=0.4.6
 requests
 truststore
 # ventana propia de la app (WebView2); sin ella la interfaz se abre en Edge (modo app). Arrastra pythonnet y clr-loader
