@@ -30,6 +30,30 @@ Punto 20 de la revisión del 14/11/2026. Rama `dos-pistas`. Sin cambiar el direc
   Escritorio un WAV normal con lo que oyes, para abrirlo con otro programa (abierto fuera de Tenca, el de dos pistas
   suena con tu voz en un oído y los demás en el otro).
 
+### Ajustes a prueba de valores raros, el PC despierto, informe técnico por reunión y «Buscar versión nueva» (15/11/2026)
+
+Puntos 5, 30, 32, 33 y 60 de la revisión del 14/11/2026. Rama `motor-lote2a`.
+
+- **Un valor raro en `settings.json` ya no deja la app sin arrancar** ni «cargando». Al arrancar, cada ajuste se
+  compara con su tipo y con lo que vale (lista cerrada o rango); si no cuadra, vuelve al valor por defecto y queda
+  una línea en el registro, con la clave y sin el valor. De una lista o un mapa solo se quita lo que no vale. Medido
+  con un fuzz de 583 casos (cada ajuste con un tipo equivocado): antes, 21 sin arrancar y 58 con algo roto; ahora, 0.
+  «Copiar diagnóstico» dice qué ajustes se corrigieron.
+- **El PC no se suspende solo mientras graba o transcribe.** Mientras hay una grabación o trabajos en cola o en
+  marcha, la app pide a Windows que no se suspenda por inactividad, y lo suelta al acabar. No enciende la pantalla
+  ni impide suspenderlo a mano (tapa o botón). El diagnóstico dice si está pedido y por qué.
+- **Informe técnico de cada reunión, solo números.** Junto al audio, `<reunión>.informe.json` (va con ella al moverla o
+  borrarla): grabación (segundos, audio perdido, eco), directo (motor y modelo de cada tramo, trozos fallidos y
+  segundos perdidos, latencia p50/p95, espera por cupo, caídas a este PC, cupo y memoria pico) y transcripción o
+  repaso (motor, modelo, tiempos). Sin texto de la reunión, ni su nombre, ni rutas, ni nombres de dispositivos.
+  «Copiar diagnóstico» lleva los de las 3 últimas.
+- **Los errores de los hilos quedan en el registro.** Lo que se escape de un hilo o del programa va a `server.log`
+  (con el acceso directo no había dónde verlo), un fallo grave de Python deja su volcado en `fallos-graves.log` y, si
+  se para una parte que vigila (las colas de trabajos, el directo automático, el aviso de llamada…), la interfaz lo
+  avisa con un aviso que se queda.
+- **Ajustes › Ayuda › Acerca de › «Buscar versión nueva».** Una consulta a GitHub al pulsarlo, nunca sola: dice si hay
+  una versión publicada más nueva que la tuya, con el enlace a su página.
+
 ### Las huellas de voz se rehacen solas al actualizar, y lo que faltaba enganchar al servidor (15/11/2026)
 
 Rama `enganches`: lo que las ramas anteriores de esta revisión dejaron preparado y esperaba al servidor ya partido.

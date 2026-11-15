@@ -263,6 +263,7 @@ class Handler(BaseHTTPRequestHandler):
                   "/api/acerca/abrir": a.acerca_abrir, "/api/calendario/activar": a.calendario_activar,
                   "/api/movil/abrir": a.movil_abrir, "/api/movil/datos": a.movil_datos,
                   "/api/movil/cerrar": a.movil_cerrar,
+                  "/api/version/buscar": a.version_buscar,  # Acerca de: una consulta a GitHub, solo al pulsar
                   "/api/inicio-windows": lambda b: {"activado": inicio_windows_poner(b.get("activado") is True)},
                   "/api/ocultar-captura": a.ocultar_captura}
         try:

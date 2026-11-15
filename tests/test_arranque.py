@@ -353,6 +353,9 @@ class OtraVersionTests(unittest.TestCase):
         with mock.patch.object(server.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, tl, "")):
             self.assertFalse(server._is_python_process(1234))
 
+    # ni los ganchos ni faulthandler (fallos.py) en el proceso de los tests; como decorador: en el `with` serian 21
+    # bloques anidados y Python 3.10-3.11 no pasa de 20 («too many statically nested blocks»)
+    @mock.patch.object(server, "fallos", mock.MagicMock())
     def run_main(self, estados, retirar):
         argv = ["server.py", "--port", "8799", "--data", self.data]
         srv = mock.MagicMock()
