@@ -168,6 +168,13 @@ function hlTerms(text, terms) {
    «Algo ha fallado dentro de Tenca», con interno = true y el texto técnico en detalle, que el aviso pliega en
    «Detalle» (punto 11). Si el servidor ya manda la frase y el detalle por separado ({error, detalle}), se respetan. */
 let falloInternoUltimo = null;  // {frase, detalle, t}: el último 500, para el aviso que lo cuente (detalleInternoHtml)
+/* El error de una respuesta con status >= 500, para api() y para lo que pide sin ella (subir por XHR, /api/import) */
+function errorInterno(status, j, statusText) {
+  const detalle = String((j && j.detalle ? j.detalle : j && j.error) || statusText || `HTTP ${status}`);
+  const frase = j && j.detalle && j.error ? String(j.error) : `Algo ha fallado dentro de ${APP_NAME}`;
+  falloInternoUltimo = { frase, detalle, t: Date.now() };
+  return Object.assign(new Error(frase), { status, interno: true, detalle });
+}
 async function api(path, body, timeout) {
   const opt = body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Audios': '1' }, body: JSON.stringify(body) };
   const ctl = timeout ? new AbortController() : null;
@@ -180,12 +187,7 @@ async function api(path, body, timeout) {
   } catch {
     throw Object.assign(new Error(`${APP_NAME} no responde`), { noResponde: true });
   } finally { if (tm) clearTimeout(tm); }
-  if (r.status >= 500) {
-    const detalle = String((j.detalle ? j.detalle : j.error) || r.statusText || `HTTP ${r.status}`);
-    const frase = j.detalle && j.error ? String(j.error) : `Algo ha fallado dentro de ${APP_NAME}`;
-    falloInternoUltimo = { frase, detalle, t: Date.now() };
-    throw Object.assign(new Error(frase), { status: r.status, interno: true, detalle });
-  }
+  if (r.status >= 500) throw errorInterno(r.status, j, r.statusText);
   if (!r.ok || j.error) throw Object.assign(new Error(j.error || r.statusText), { status: r.status });  // 409: Ajustes
   return j;
 }
@@ -2406,11 +2408,13 @@ function openSettings(opts) {
       else el.after(s);
       return (el._ajMarca = s);
     };
-    const marcar = (el, estado, txt = '') => {
+    // detalle: el texto técnico de un 500 que vio api(), al pasar por encima de «No se ha guardado: Algo ha fallado…» (punto 11)
+    const marcar = (el, estado, txt = '', detalle = '') => {
       if (!document.body.contains(el)) return;
       const m = marcaDe(el);
       clearTimeout(m.t);
       m.className = 'aj-ok ' + estado;
+      m.title = estado === 'err' && detalle ? detalle : '';
       m.setAttribute('role', estado === 'err' ? 'alert' : 'status');
       // ok: «Guardado ✓» o lo que diga quien guarda («Guardado como «16» ✓» si el servidor ajustó un número)
       m.textContent = { ok: txt || 'Guardado ✓', err: `No se ha guardado: ${txt}`, guardando: 'Guardando…' }[estado] || '';
@@ -2486,7 +2490,7 @@ function openSettings(opts) {
             if (pend.has(el) || textos.has(el)) return;
             if (!esTexto(el) && el.id !== 'dkRows') volver(el);  // (una clave escrita, tampoco se borra)
             else if (err.status !== 409) fallidos.add(el);
-            marcar(el, 'err', err.message);
+            marcar(el, 'err', err.message, err.detalle);
             oculto = oculto || !!el.closest('[hidden]');
           });
           d.ajPlanPedir?.();  // el plan de Al grabar, con lo que se ve otra vez
@@ -2608,7 +2612,7 @@ function openSettings(opts) {
       } catch (err) { res.innerHTML = `<span style="color:var(--err)">✖ ${esc(err.message)}</span> <span class="muted">(tras ${seg()} s)</span>`; }
       finally { clearInterval(timer); btn.disabled = false; }
     };
-    $('#aDatos', d).onclick = () => api('/api/acerca/abrir', { que: 'datos' }).catch(e => toast(e.message, 'err'));
+    $('#aDatos', d).onclick = () => api('/api/acerca/abrir', { que: 'datos' }).catch(e => toast(esc(e.message), 'err'));
     $('#aRepo', d).onclick = e => { e.preventDefault(); api('/api/acerca/abrir', { que: 'repo' }).catch(() => window.open(ac.repo, '_blank')); };
     $('#aDonar', d).onclick = e => { e.preventDefault(); if (ac.donar) api('/api/acerca/abrir', { que: 'donar' }).catch(() => window.open(ac.donar, '_blank')); };
     const cafe = $('#ajCafe', d);
@@ -2616,7 +2620,7 @@ function openSettings(opts) {
     const tenca = $('#aTenca', d);
     if (tenca) tenca.onclick = e => { e.preventDefault(); api('/api/acerca/abrir', { que: 'tenca' }).catch(() => window.open(ac.tenca, '_blank')); };
     $('#aDiag', d).onclick = async () => {
-      try { const r = await api('/api/diagnostico'); await copy(r.texto, 'Diagnóstico copiado: revísalo antes de pegarlo donde pidas ayuda'); } catch (e) { toast(e.message, 'err'); }
+      try { const r = await api('/api/diagnostico'); await copy(r.texto, 'Diagnóstico copiado: revísalo antes de pegarlo donde pidas ayuda'); } catch (e) { toast(esc(e.message), 'err'); }
     };
     const autoLocal = $('#sAutoLocal', d);
     if (autoLocal) autoLocal.addEventListener('change', () => { $('#sAutoLocalAviso', d).hidden = !autoLocal.checked; if (autoLocal.checked) localStorage.setItem('sumOk', '1'); });
@@ -2791,54 +2795,83 @@ function shutdownScreen() {
 
 /* Avisos (review del 14/11/2026, punto 11). Los de error no caducan: se cierran con ✕ (a los 9 s no daba tiempo a leer
    una frase de explicar.py) y quedan en «Avisos», en la Cola, para releerlos. Un clic en el texto hace lo suyo (abrir
-   la reunión, si lo tiene) y lo cierra; en un botón de dentro (el de explicar.py) o en «Detalle», solo lo de ese botón.
-   El mismo aviso otra vez no se apila (queda el último) y a la vista hay como mucho AVISOS_A_LA_VISTA (uno menos en
-   una ventana baja). Con la Cola abierta quedan por debajo de ella (app.css).
-   keep === true: tampoco caduca, y cualquier clic, ✕ incluida, hace lo suyo y lo cierra (la grabación cortada: su clic
-   es «visto»). keep === false: un error que sí se va solo, a los 9 s. Los demás avisos, a los 4 s. */
+   la reunión, si lo tiene) y lo cierra; en un botón de dentro (el de explicar.py) o en «Detalle», solo lo de ese botón;
+   con un diálogo abierto, no abre nada detrás de él.
+   Van en pila: a la vista solo el último, y los de antes detrás de «N avisos más · Ver en la Cola»; al cerrar el de la
+   vista sale el anterior. Así no tapan la página (revisión 1, P1-3: tres a la vez tapaban botones de Hoy y de
+   Ajustes). El mismo aviso otra vez no se apila: queda el último.
+   keep === true: tampoco caduca, siempre a la vista y fuera de la pila, y cualquier clic, ✕ incluida, hace lo suyo y
+   lo cierra (la grabación cortada: su clic es «visto»; «quedan N min de disco»…). keep === false: un error que sí se
+   va solo, a los 9 s. Los demás avisos, a los 4 s. */
 const TOAST_X = '<button type="button" class="toast-x" aria-label="Cerrar este aviso" title="Cerrar">✕</button>';
-const AVISOS_A_LA_VISTA = 3, AVISOS_MAX = 20, AVISOS_CLAVE = 'tenca.avisos';
+const PILA_MAX = 10, AVISOS_MAX = 20, AVISOS_CLAVE = 'tenca.avisos';
+const CARGA = Date.now();  // esta carga de la página: lo que se vuelve a anunciar al recargar no cuenta como otra vez
 function avisosLista() {
   if (!S.avisos) { try { S.avisos = JSON.parse(sessionStorage.getItem(AVISOS_CLAVE) || '[]'); } catch { S.avisos = []; } }
   return S.avisos;
 }
 function apuntarAviso(html) {
   const l = avisosLista(), u = l[l.length - 1], t = Date.now();
-  if (u && u.html === html) { u.t = t; u.n = (u.n || 1) + 1; } else l.push({ html, t });
+  if (u && u.html === html) {
+    if (u.c !== CARGA) return;  // (la grabación cortada se anuncia en cada carga: no es «2 veces», revisión 1, P2-6)
+    u.t = t; u.n = (u.n || 1) + 1;
+  } else l.push({ html, t, c: CARGA });
   S.avisos = l.slice(-AVISOS_MAX);
   try { sessionStorage.setItem(AVISOS_CLAVE, JSON.stringify(S.avisos)); } catch { /* sin almacenamiento */ }
   if (!$('#jobsPanel').classList.contains('hidden')) renderJobsPanel();
 }
-/* El texto técnico del último 500 que vio api(), plegado en «Detalle», para el aviso que dice su frase justo después (el catch
-   de esa petición). Pasados 5 s, o ya contado, no se pega a otro aviso. */
+/* El texto técnico del último 500 que vio api(), plegado en «Detalle», para el aviso que dice su frase justo después (el
+   catch de esa petición). Pasados 5 s, o ya contado, no se pega a otro aviso. */
 function detalleInternoHtml(html) {
   const f = falloInternoUltimo;
   if (!f || Date.now() - f.t > 5000 || !html.includes(esc(f.frase))) return '';
   falloInternoUltimo = null;
   return `<details class="toast-det"><summary>Detalle</summary><div class="toast-tec">${esc(f.detalle)}</div></details>`;
 }
+function abrirCola() {
+  const p = $('#jobsPanel');
+  p.classList.remove('hidden');
+  renderJobsPanel();
+  $('.ph-avisos', p)?.scrollIntoView({ block: 'nearest' });
+}
+/* la pila de avisos de error: el último a la vista; los de antes, detrás de «N avisos más · Ver en la Cola» */
+function pilaOrden() {
+  const box = $('#toasts');
+  let pila = $$('.toast.pila', box);
+  pila.slice(0, Math.max(0, pila.length - PILA_MAX)).forEach(t => t.remove());  // (siguen en «Avisos»)
+  pila = $$('.toast.pila', box);
+  pila.forEach((t, i) => t.classList.toggle('detras', i < pila.length - 1));
+  let mas = $('#toastMas');
+  const n = pila.length - 1;
+  if (n < 1) return mas?.remove();
+  if (!mas) {
+    mas = Object.assign(document.createElement('button'), { id: 'toastMas', type: 'button', className: 'toast-mas' });
+    mas.onclick = e => { e.stopPropagation(); abrirCola(); };
+  }
+  mas.textContent = `${n} ${n === 1 ? 'aviso más' : 'avisos más'} · Ver en la Cola`;
+  pila[pila.length - 1].before(mas);
+}
 function toast(html, kind = '', onclick, keep) {
   const err = kind === 'err', fijo = keep === true || (err && keep !== false), box = $('#toasts');
   if (err) { html += detalleInternoHtml(html); apuntarAviso(html); }
-  if (fijo) {
-    $$('.toast.fijo', box).forEach(t => { if (t.dataset.k === html) t.remove(); });
-    const vistos = $$('.toast.fijo:not([data-corte])', box);
-    const max = innerHeight < 700 ? AVISOS_A_LA_VISTA - 1 : AVISOS_A_LA_VISTA;  // ventana baja: que no tapen la página
-    vistos.slice(0, Math.max(0, vistos.length - max + 1)).forEach(t => t.remove());
-  }
+  if (fijo) $$('.toast.fijo', box).forEach(t => { if (t.dataset.k === html) t.remove(); });
   const el = document.createElement('div');
-  el.className = 'toast ' + kind + (fijo ? ' fijo' : '') + (keep === true ? ' keep' : '');
+  el.className = 'toast ' + kind + (fijo ? ' fijo' : '') + (keep === true ? ' keep' : fijo ? ' pila' : '');
   el.dataset.k = html;
   el.innerHTML = html + (fijo ? TOAST_X : '');
+  const quitar = () => { el.remove(); if (fijo) pilaOrden(); };
   el.onclick = e => {
     const x = e.target.closest('.toast-x');
-    if (keep !== true && x) return el.remove();
+    if (keep !== true && x) return quitar();
     if (keep !== true && e.target.closest('button, a, summary, details, input, select, textarea')) return;
-    onclick && onclick();
-    el.remove();
+    const dialogo = keep !== true && !$('#modal').classList.contains('hidden');
+    if (dialogo && fijo) return;  // con un diálogo encima no se abre nada detrás (el clic iba a lo tapado)
+    if (!dialogo) onclick && onclick();
+    quitar();
   };
   box.append(el);
-  if (!fijo) setTimeout(() => el.remove(), err ? 9000 : 4000);
+  if (fijo) pilaOrden();
+  else setTimeout(() => el.remove(), err ? 9000 : 4000);
   return el;
 }
 

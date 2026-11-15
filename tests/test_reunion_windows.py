@@ -354,7 +354,7 @@ class AvisoTests(unittest.TestCase):
             self.skipTest("el clic sintético no llegó a la ventana en este escritorio")
         self.assertEqual((res["resultado"], res.get("descartada")), ("cerrar", True), res)
         self.assertEqual([(x["path"], x["body"]) for x in self.srv.posts],
-                         [("/api/rec/siguiente", {"descartar": True})])
+                         [("/api/rec/siguiente", {"descartar": True, "origen": "aviso"})])
 
     def test_se_cierra_si_ya_se_graba(self):
         self.srv.recording = True

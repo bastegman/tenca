@@ -360,7 +360,7 @@ function hoyRevisarHtml(lista, now) {
   const filas = lista.slice(0, HOY_REVISAR_MAX).map(r => {
     const a = r.a, proy = hoyProyTxt(a);
     return `<div class="hr-fila" data-go="a" data-path="${esc(a.path)}"><span class="hr-dia">${esc(hoyDiaTxt(hoyFechaDe(a), now))}</span>
-      <div class="hr-t"><div class="hr-n">${iconOf(a) ? iconOf(a) + ' ' : ''}${esc(hoyTitulo(a))}${proy ? `<span class="hr-proy">${esc(proy)}</span>` : (S.vocab || []).length ? '<span class="hr-proy sin">Sin proyecto</span>' : ''}</div>
+      <div class="hr-t"><div class="hr-n">${iconOf(a) ? iconOf(a) + ' ' : ''}${esc(hoyTitulo(a))}${proy ? `<span class="hr-proy">${esc(proy)}</span>` : !(S.vocab || []).length ? '' : hoySinProyecto(a) ? '<span class="hr-proy">Ningún proyecto</span>' : '<span class="hr-proy sin">Sin proyecto</span>'}</div>
       <div class="hr-sub">${r.motivos.map(m => m.aviso ? `<b class="aviso">${esc(m.texto)}</b>` : esc(m.texto)).join(' · ')}</div>${hoyFalloHtml(r.fallo)}</div>
       <div class="hr-acts">${r.fallo && typeof cfgAccionHtml === 'function' ? cfgAccionHtml(r.fallo) : ''}<button class="btn sm" data-act="hoy-accion" data-k="${r.accion.k}" data-path="${esc(a.path)}">${esc(r.accion.label)}</button></div></div>`;
   }).join('');

@@ -447,6 +447,9 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px;
 .toast-x:hover { opacity: 1; background: rgba(127, 127, 127, .22); }
 .toast-x:focus-visible { outline: 2px solid currentColor; outline-offset: 1px; }
 .toast .cfg-accion { margin: 8px 0 0; }
+.toast.detras { display: none; }  /* la pila: a la vista solo el último (app.js, pilaOrden) */
+.toast-mas { align-self: flex-end; border: 1px solid var(--line-2); background: var(--panel); color: var(--ink-2); font: 600 12.5px var(--font); padding: 6px 12px; border-radius: 16px; box-shadow: var(--shadow); cursor: pointer; }
+.toast-mas:hover { color: var(--ink); background: var(--hover); }
 .toast-det { margin-top: 6px; font-size: 12px; cursor: default; }
 .toast-det summary { cursor: pointer; opacity: .9; width: max-content; }
 .toast-tec { margin-top: 4px; font: 11.5px/1.45 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 140px; overflow-y: auto; user-select: text; }

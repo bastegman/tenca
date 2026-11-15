@@ -493,7 +493,7 @@ class AvisoCerrarTests(unittest.TestCase):
         fin = time.time() + 10
         while a.resultado is None and time.time() < fin:
             time.sleep(0.05)
-        self.assertEqual(self.srv.posts, [("/api/rec/siguiente", {"descartar": True})])
+        self.assertEqual(self.srv.posts, [("/api/rec/siguiente", {"descartar": True, "origen": "aviso"})])
         self.assertEqual((a.resultado, a.datos, a.root.destruida), ("cerrar", {"descartada": True}, True))
 
     def test_con_el_descarte_en_camino_ni_los_20_s_lo_cortan(self):

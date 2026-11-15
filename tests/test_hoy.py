@@ -985,6 +985,18 @@ class HoyJsTests(unittest.TestCase):
         ])  # c (en la cola), g (nada que hacer), h (hace más de 30 días), j (en directo) y k y l («No es de ningún
         # proyecto», por la cabecera o apuntado aquí) no salen; e y f dicen por qué fallaron (punto 38)
 
+    def test_fila_de_ningun_proyecto_sin_aviso(self):
+        """Una reunión que «No es de ningún proyecto» y sigue en «Para revisar» por otra cosa: «Ningún proyecto», sin el
+        color de aviso de «Sin proyecto» (revisión 1 de interfaz-lote2, P2-7)."""
+        out = self.node("""const now = new Date(2026, 10, 9, 10, 30);
+          const A = [{path: 'n', date: '2026-11-09T09:00:00', st: 'pending', props: {sin_proyecto: 'sí'}, dur: 60},
+            {path: 's', date: '2026-11-09T08:00:00', st: 'pending', props: {}, dur: 60}];
+          const html = hoyRevisarHtml(hoyRevisar(A, now), now);
+          const fila = p => html.split('data-path="' + p + '"')[1].split('hr-sub')[0];
+          console.log(JSON.stringify([fila('n'), fila('s')]));""")
+        self.assertIn('<span class="hr-proy">Ningún proyecto</span>', out[0])
+        self.assertIn('<span class="hr-proy sin">Sin proyecto</span>', out[1])
+
     def test_esta_semana_y_agenda(self):
         out = self.node("""const now = new Date(2026, 10, 11, 10, 30);  // miércoles
           const A = [{path: 'lun', date: '2026-11-09T09:00:00'}, {path: 'mie', date: '2026-11-11T09:00:00'},

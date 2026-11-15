@@ -283,7 +283,9 @@ class Aviso:
 
     def _descartar(self):
         try:
-            self._pedir("/api/rec/siguiente", {"descartar": True}, timeout=5)
+            # origen: quien descarta es este mismo aviso; al descartar, el servidor cierra el aviso de esa propuesta, y
+            # así puede saber que no hace falta cerrar al que le está preguntando
+            self._pedir("/api/rec/siguiente", {"descartar": True, "origen": "aviso"}, timeout=5)
             self.datos = {"descartada": True}
         except Exception as e:
             self.datos = {"descartada": False, "error": f"No se pudo hablar con la app ({e.__class__.__name__})"}
