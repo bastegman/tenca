@@ -20,6 +20,7 @@ from common import APP_NAME, ApiError, TOKEN_HEADER, log, log_exc
 from inicio_windows import inicio_windows_leer, inicio_windows_poner
 from rutas import AUDIO_EXT, MIME, STATIC_DIR, VERSION, alias_of, safe
 
+SERVER = None  # el servidor HTTP; lo pone main()
 WINDOW = None  # la ventana propia (None si se abre en Edge); la pone main()
 
 
