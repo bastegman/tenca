@@ -440,10 +440,17 @@ function hoyPendCargar(forzar) {
   if (PEND.cargando || (!forzar && PEND.hechas.size)) return PEND.cargando;
   PEND.at = Date.now();
   PEND.cargando = api('/api/pendientes').then(d => {
-    (d.tareas || []).forEach(t => { t._k = hoyPendClave(t); t._id = ++PEND.seq; });
-    // las recién marcadas siguen en su sitio hasta que venza su «Deshacer»
-    const quedan = (PEND.datos?.tareas || []).filter(t => PEND.hechas.has(t._k) && !(d.tareas || []).some(x => x._k === t._k));
-    d.tareas = (d.tareas || []).concat(quedan);
+    const nuevas = d.tareas || [], viejas = PEND.datos?.tareas || [];
+    nuevas.forEach(t => { t._k = hoyPendClave(t); t._id = ++PEND.seq; });
+    // las recién marcadas siguen en su sitio hasta que venza su «Deshacer»: tras la que iba delante (al final, una
+    // segunda marcada se salía de las 12 primeras y perdía su «Deshacer»; revisión 1)
+    viejas.forEach((t, n) => {
+      if (!PEND.hechas.has(t._k) || nuevas.some(x => x._k === t._k)) return;
+      let pos = -1;
+      for (let m = n - 1; m >= 0 && pos < 0; m--) pos = nuevas.findIndex(x => x._k === viejas[m]._k);
+      nuevas.splice(pos + 1, 0, t);
+    });
+    d.tareas = nuevas;
     PEND.datos = d; PEND.error = null;
   }).catch(err => { PEND.error = err.message; }).finally(() => { PEND.cargando = null; hoyPendPintar(); });
   return PEND.cargando;
@@ -471,7 +478,7 @@ function hoyPendHtml() {
   const d = PEND.datos;
   if (!d) return PEND.error ? `<div class="mp-nada">Mis pendientes: ${esc(PEND.error)}</div>` : '';
   const todas = d.tareas || [], abiertas = todas.filter(t => !PEND.hechas.has(t._k));
-  if (!todas.length) return `<div class="mp-nada">${I.check}<span>Mis pendientes: no queda ninguna tarea abierta en los resúmenes de tus reuniones</span></div>`;
+  if (!todas.length) return `<div class="mp-nada">${I.check}<span>Mis pendientes: ninguna tarea abierta en los resúmenes de tus reuniones</span></div>`;
   // «Tuyas» si hay alguna (también recién marcada, con su «Deshacer»); si no, todas y sin los dos botones
   const tuyas = abiertas.filter(t => t.tuya).length, hayTuyas = todas.some(t => t.tuya);
   const filtro = hayTuyas ? (PEND.filtro || 'tuyas') : 'todas';
@@ -504,6 +511,7 @@ async function hoyPendMarcar(t, hecha) {
       }, HOY_PEND_DESHACER_MS));
     }
     if (S.sum && S.sum.path === t.path) S.sum = null;  // la vista del resumen lo vuelve a leer
+    if (HOY.datos?.ultima?.path === t.path) hoyCargar(false, true);  // «La última vez: N tareas abiertas», al momento
     hoyPendPintar();
   } catch (err) {
     toast(esc(err.message), 'err');

@@ -13,11 +13,13 @@ clic durante una regeneración no se pierde.
 
 Funciones puras (sin disco) salvo Cache, que relee un resumen solo si cambia su fecha o su tamaño y no abre los que
 OneDrive tiene «solo en línea» (leerlos los descargaría y, sin conexión, puede bloquear)."""
+import codecs
 import os
 import re
 import threading
+from collections import Counter
 
-from common import fold, read_text
+from common import fold, read_text, write_bytes
 from rutas import CLOUD_ONLY
 
 # un leer-cambiar-escribir del .resumen.md a la vez: «marcar» (Hoy y la vista del resumen) y el resumen regenerado
@@ -32,10 +34,11 @@ _PRIMER_MINUTO = re.compile(r"\[\s*(?:(\d+):)?(\d{1,3}):(\d{2})")
 _CABECERA = re.compile(r"^[ \t]*#{1,6}[ \t]+(.*?)[ \t#]*$")
 CABECERAS_PASOS = ("proximos pasos", "next steps")  # normalizadas (engines.SUMMARY_HEADINGS["next"])
 NINGUNO = ("ninguno", "ninguna", "none", "nada", "ninguno claro", "ninguna clara", "none clear")
-CABECERA_NUEVA = "## Próximos pasos"
-# quién eres tú en un responsable: «Yo» (como etiqueta el resumen al usuario), «Tú»/«Tu» y, en un resumen en inglés,
-# «Me» o «I» (normalizados)
-YO = ("yo", "tu", "me", "i")
+CABECERA_NUEVA = {"es": "## Próximos pasos", "en": "## Next steps"}
+CABECERAS_EN = ("summary", "key points", "decisions", "next steps", "participants")  # engines.SUMMARY_HEADINGS["en"]
+# quién eres tú en un responsable: «Yo» (como etiqueta el resumen al usuario) y «Tú»/«Tu» (normalizados). Ni «Me» ni
+# «I»: «I+D» sería tuya (revisión 1)
+YO = ("yo", "tu")
 _PARTES_RESPONSABLE = re.compile(r"\s*(?:,|/|&|\+|;|\by\b|\be\b|\band\b)\s*")
 
 
@@ -43,11 +46,21 @@ class NoEsta(ValueError):
     """La tarea que se quiere marcar ya no está en el resumen (se regeneró o se editó)."""
 
 
+class NoUtf8(ValueError):
+    """El .resumen.md no está en UTF-8 (se guardó a mano en otra codificación): no se toca."""
+
+
 def normalizar(s):
     """La clave para comparar tareas: sin los minutos [mm:ss], sin mayúsculas ni tildes, sin puntuación y con los
     espacios normalizados. «Ana: enviar el **acta** [12:34]» y «ana enviar el acta» son la misma tarea."""
     s = fold(_MINUTOS.sub(" ", s or ""))
     return " ".join(re.sub(r"[\W_]+", " ", s).split())
+
+
+def clave_de(texto):
+    """La clave de una tarea: normalizar y, si no queda nada (una tarea que es solo «✅» o solo un minuto), el texto tal
+    cual con los espacios normalizados (marcado aparte: no choca con una clave normalizada)."""
+    return normalizar(texto) or "=" + " ".join((texto or "").split())
 
 
 def primer_segundo(s):
@@ -93,7 +106,7 @@ def extraer(texto):
         if not m:
             continue
         resp, tarea = partir(m.group(3))
-        out.append({"i": i, "hecha": m.group(2) != " ", "texto": m.group(3), "clave": normalizar(m.group(3)),
+        out.append({"i": i, "hecha": m.group(2) != " ", "texto": m.group(3), "clave": clave_de(m.group(3)),
                     "responsable": resp, "tarea": tarea, "segundo": primer_segundo(m.group(3)), "pos": m.end(1)})
     return out
 
@@ -110,8 +123,8 @@ def marcar(texto, i, tarea, hecha):
     """(texto nuevo, línea, cambiado): la tarea `tarea` (su texto, como lo dio extraer) hecha o sin hacer. Se busca en
     la línea `i`; si ya no está ahí (el resumen se editó), la misma tarea en otra línea (la más cercana que aún no esté
     así). Si no está en ninguna, NoEsta: nunca se marca otra por parecido."""
-    clave = normalizar(tarea)
-    tareas = [t for t in extraer(texto) if clave and t["clave"] == clave]
+    clave = clave_de(tarea)
+    tareas = [t for t in extraer(texto) if t["clave"] == clave]
     if not tareas:
         raise NoEsta("Esa tarea ya no está en el resumen: puede que se haya regenerado o editado. Vuelve a abrirlo.")
     t = next((t for t in tareas if t["i"] == i), None)
@@ -125,6 +138,25 @@ def marcar(texto, i, tarea, hecha):
     return "\n".join(lineas), t["i"], True
 
 
+def marcar_fichero(path, i, tarea, hecha):
+    """(línea, cambiado): marcar en el fichero, cambiando solo el carácter de la casilla. Se lee en UTF-8 estricto y se
+    conservan el BOM y los saltos de línea (\\r\\n): read_text los normaliza y, con errors="replace", reescribir con lo
+    leído estropeaba todas las tildes de un fichero guardado a mano en otra codificación (revisión 1, P1). Así, un
+    fichero que no es UTF-8 no se toca (NoUtf8). Se llama con LOCK."""
+    with open(path, "rb") as f:
+        datos = f.read()
+    bom = datos.startswith(codecs.BOM_UTF8)
+    try:
+        texto = datos[len(codecs.BOM_UTF8) if bom else 0:].decode("utf-8")
+    except UnicodeDecodeError:
+        raise NoUtf8("Ese resumen no está guardado en UTF-8 (se editó fuera de la app): márcalo a mano en el "
+                     "fichero o regenéralo.")
+    nuevo, linea, cambiado = marcar(texto, i, tarea, hecha)
+    if cambiado:
+        write_bytes(path, (codecs.BOM_UTF8 if bom else b"") + nuevo.encode("utf-8"))
+    return linea, cambiado
+
+
 def _seccion_pasos(lineas):
     """Índice de la cabecera «Próximos pasos» / «Next steps», o None."""
     for k, linea in enumerate(lineas):
@@ -134,19 +166,34 @@ def _seccion_pasos(lineas):
     return None
 
 
+def _tras(lineas, t):
+    """La línea tras la tarea t y lo que lleve sangrado debajo (es suyo)."""
+    k = t["i"] + 1
+    while k < len(lineas) and lineas[k][:1] in (" ", "\t") and lineas[k].strip() and not _TAREA.match(lineas[k]):
+        k += 1
+    return k
+
+
 def conservar_hechas(viejo, nuevo):
-    """El resumen `nuevo` sin perder lo que estaba hecho en `viejo`: (a) sus tareas con el mismo texto normalizado que
-    una hecha del viejo salen ya hechas; (b) las hechas del viejo que no están en el nuevo (ni hechas ni sin hacer) se
-    añaden hechas tras la última tarea del nuevo, o tras su cabecera de próximos pasos (sin el «Ninguno» que hubiera),
-    o al final con su cabecera. Nunca se marca hecha una tarea nueva por parecido: solo por igualdad normalizada."""
-    hechas = [t for t in extraer(viejo) if t["hecha"] and t["clave"]]
+    """El resumen `nuevo` sin perder lo que estaba hecho en `viejo`:
+    (a) sus tareas con el mismo texto normalizado que una hecha del viejo salen ya hechas, tantas como había hechas
+        con ese texto (dos «Yo: llamar a Ana» en distintos minutos, una hecha y otra no, siguen una y una);
+    (b) las hechas del viejo cuyo texto no está en el nuevo (ni hecho ni sin hacer) se añaden hechas al final de sus
+        próximos pasos: tras la última tarea de esa sección o, sin tareas, tras su cabecera (sin el «Ninguno» que
+        hubiera); sin esa cabecera, tras la última tarea, o al final con la cabecera en el idioma del resumen.
+    Nunca se marca hecha una tarea nueva por parecido: solo por igualdad normalizada."""
+    hechas = [t for t in extraer(viejo) if t["hecha"]]
     if not hechas:
         return nuevo
-    claves = {t["clave"] for t in hechas}
     lineas = nuevo.split("\n")
     tareas = extraer(nuevo)
+    quedan = Counter(t["clave"] for t in hechas)
+    for t in tareas:  # las que el nuevo ya trae hechas cuentan primero
+        if t["hecha"] and quedan[t["clave"]] > 0:
+            quedan[t["clave"]] -= 1
     for t in tareas:
-        if not t["hecha"] and t["clave"] in claves:
+        if not t["hecha"] and quedan[t["clave"]] > 0:
+            quedan[t["clave"]] -= 1
             lineas[t["i"]] = _poner(lineas[t["i"]], t, True)
     en_el_nuevo, sobran = {t["clave"] for t in tareas}, []
     for t in hechas:
@@ -155,21 +202,24 @@ def conservar_hechas(viejo, nuevo):
             sobran.append("- [x] " + t["texto"])
     if not sobran:
         return "\n".join(lineas)
-    if tareas:
-        k = tareas[-1]["i"] + 1
-        while k < len(lineas) and lineas[k][:1] in (" ", "\t") and lineas[k].strip() and not _TAREA.match(lineas[k]):
-            k += 1  # lo que sigue sangrado es de esa tarea
-        lineas[k:k] = sobran
-        return "\n".join(lineas)
     h = _seccion_pasos(lineas)
     if h is not None:
         fin = next((k for k in range(h + 1, len(lineas)) if _CABECERA.match(lineas[k])), len(lineas))
-        llenas = [k for k in range(h + 1, fin) if lineas[k].strip()]
-        if len(llenas) == 1 and normalizar(re.sub(r"^\s*(?:[-*+•]|\d+[.)])\s*", "", lineas[llenas[0]])) in NINGUNO:
-            del lineas[llenas[0]]
-        lineas[h + 1:h + 1] = sobran
-        return "\n".join(lineas)
-    return "\n".join(lineas).rstrip("\n") + "\n\n" + CABECERA_NUEVA + "\n" + "\n".join(sobran)
+        suyas = [t for t in tareas if h < t["i"] < fin]
+        if suyas:
+            k = _tras(lineas, suyas[-1])
+        else:
+            llenas = [k for k in range(h + 1, fin) if lineas[k].strip()]
+            if len(llenas) == 1 and normalizar(re.sub(r"^\s*(?:[-*+•]|\d+[.)])\s*", "", lineas[llenas[0]])) in NINGUNO:
+                del lineas[llenas[0]]
+            k = h + 1
+    elif tareas:
+        k = _tras(lineas, tareas[-1])
+    else:
+        en = any(m and normalizar(m.group(1)) in CABECERAS_EN for m in map(_CABECERA.match, lineas))
+        return "\n".join(lineas).rstrip("\n") + "\n\n" + CABECERA_NUEVA["en" if en else "es"] + "\n" + "\n".join(sobran)
+    lineas[k:k] = sobran
+    return "\n".join(lineas)
 
 
 def separar_cabecera(texto):

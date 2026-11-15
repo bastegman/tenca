@@ -16,10 +16,10 @@ import plan as grabar_plan
 from api import PORT
 from app_grabar import teams_estado
 from biblioteca import IDIOMA_RE
-from common import APP_NAME, ApiError, log, log_exc, read_text, save_text
+from common import APP_NAME, ApiError, log, log_exc, read_text
 from listas import find_vocab, list_vocab, read_vocab
 from recording import cue, mic_meeting_app, notify
-from rutas import APP_DIR, alias_of, rel_of, safe
+from rutas import APP_DIR, AUDIO_EXT, alias_of, rel_of, safe
 
 
 class Hoy:
@@ -409,28 +409,41 @@ class Hoy:
         out.sort(key=lambda x: x["fecha"], reverse=True)  # estable: cada reunión, en el orden de su resumen
         return {"tareas": out, "total": len(out), "tuyas": sum(1 for x in out if x["tuya"])}
 
+    def _resumen_de(self, rel):
+        """(ruta interna, .resumen.md) de la reunión `rel`, con su ruta nueva si se movió en esta sesión. El de la
+        biblioteca si la reunión está en ella (también la que ya no tiene audio, con otra ruta); si no, el que va junto
+        a su audio, y solo para una ruta de audio (no «.», una carpeta ni otro fichero: revisión 1)."""
+        abs_path = safe(alias_of(rel))
+        rel = rel_of(abs_path)
+        a = next((x for x in list(getattr(getattr(self, "library", None), "flat", None) or [])
+                  if x.get("path") == rel and x.get("_sum")), None)
+        if a:
+            return rel, a["_sum"]
+        if not rel or os.path.splitext(abs_path)[1].lower() not in AUDIO_EXT:
+            raise ApiError("Solo se marcan las tareas del resumen de una reunión.")
+        return rel, os.path.splitext(abs_path)[0] + ".resumen.md"
+
     def pendiente_hecha(self, b):
         """POST /api/pendientes/hecha {path, i, texto, hecha}: la tarea hecha (o sin hacer) en el .resumen.md de esa
-        reunión, que es lo que manda (pendientes.marcar: en la línea i si su texto sigue siendo ese, o donde esté
-        ahora; si ya no está, un error que lo dice). El resumen se busca junto a la ruta de la reunión aunque su audio
-        ya no esté. Los destinos de salida, que llevan el resumen, se reescriben."""
+        reunión, que es lo que manda (pendientes.marcar_fichero: en la línea i si su texto sigue siendo ese, o donde
+        esté ahora; si ya no está, un error que lo dice; solo cambia el carácter de la casilla). Los destinos de salida,
+        que llevan el resumen, se reescriben.
+        Candados: primero el de los resúmenes (pendientes.LOCK: mientras se escribe uno regenerado, el clic espera sin
+        coger el de mover, que frenaría mover, borrar o el directo) y, dentro, el de mover (no escribir en la ruta
+        vieja de una reunión que se está moviendo). Nadie coge los dos al revés: _run_summary solo coge el primero."""
         rel, i, texto, hecha = b.get("path"), b.get("i"), b.get("texto"), b.get("hecha")
         if (not isinstance(rel, str) or not rel or type(i) is not int or not isinstance(texto, str)
                 or not texto.strip() or not isinstance(hecha, bool)):
             raise ApiError("Petición no válida: faltan path, i, texto o hecha.")
-        with self._move_lock():  # no a la vez que se mueve la reunión (escribiría el resumen en la ruta vieja)
-            rel = rel_of(safe(alias_of(rel)))  # con su ruta nueva si se movió mientras se esperaba
-            p = os.path.splitext(safe(rel))[0] + ".resumen.md"
+        with pendientes.LOCK, self._move_lock():
+            rel, p = self._resumen_de(rel)
             if not os.path.isfile(p):
                 raise ApiError("Esa reunión ya no tiene resumen.", 404)
-            with pendientes.LOCK:
-                try:
-                    nuevo, linea, cambiado = pendientes.marcar(read_text(p), i, texto, hecha)
-                except pendientes.NoEsta as e:
-                    raise ApiError(str(e), 409)
-                if cambiado:
-                    save_text(p, nuevo, "utf-8")
-            pendientes.CACHE.olvidar(p)
+            try:
+                linea, cambiado = pendientes.marcar_fichero(p, i, texto, hecha)
+            except (pendientes.NoEsta, pendientes.NoUtf8) as e:
+                raise ApiError(str(e), 409)
+        pendientes.CACHE.olvidar(p)
         if cambiado:
             log(f"   pendientes: tarea {'hecha' if hecha else 'sin hacer'} en {os.path.basename(rel)}")
             lib = getattr(self, "library", None)

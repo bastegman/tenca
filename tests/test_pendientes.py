@@ -104,9 +104,10 @@ class ExtraerTests(unittest.TestCase):
 
     def test_es_tuya(self):
         t = pendientes.es_tuya
-        for r in ("Yo", "yo", "Tú", "Tu", "Me", "Yo y Luis", "Luis, Yo", "¿Yo?"):
+        for r in ("Yo", "yo", "Tú", "Tu", "Yo y Luis", "Luis, Yo", "¿Yo?"):
             self.assertTrue(t(r), r)
-        for r in ("Luis", "Yolanda", "Todos", "", None, "Ana García"):
+        # ni «Me» ni «I»: «I+D» o «Dirección e I+D» no son tuyas (revisión 1)
+        for r in ("Luis", "Yolanda", "Todos", "", None, "Ana García", "I+D", "Dirección e I+D", "Me", "I"):
             self.assertFalse(t(r), r)
         self.assertTrue(t("Ana García", "ana  garcía"))  # la persona «Soy yo» de las voces
         self.assertTrue(t("¿Ana García?", "Ana García"))  # la provisional
@@ -136,6 +137,17 @@ class MarcarTests(unittest.TestCase):
         self.assertEqual(i, 4)
         nuevo, i, _ = pendientes.marcar(nuevo, 2, "Ana: enviar", True)
         self.assertEqual(i, 2)
+
+    def test_una_tarea_sin_letras_tambien_se_marca(self):
+        """«- [ ] ✅» o una tarea que es solo un minuto: su clave es el texto tal cual (revisión 1: daba siempre 409)."""
+        t = "- [ ] ✅\n- [ ] [12:34]\n- [ ] 🎯\n"
+        nuevo, i, cambiado = pendientes.marcar(t, 0, "✅", True)
+        self.assertEqual((nuevo.split("\n")[0], i, cambiado), ("- [x] ✅", 0, True))
+        nuevo, i, _ = pendientes.marcar(nuevo, 1, "[12:34]", True)
+        self.assertEqual(nuevo.split("\n")[1:3], ["- [x] [12:34]", "- [ ] 🎯"])
+        self.assertEqual(pendientes.marcar(t, 2, "✅", True)[1], 0)  # la de la línea 0, no la 🎯 de la 2
+        with self.assertRaises(pendientes.NoEsta):
+            pendientes.marcar(t, 2, "⭐", True)
 
     def test_el_texto_ha_cambiado(self):
         with self.assertRaises(pendientes.NoEsta):
@@ -184,6 +196,28 @@ class ConservarHechasTests(unittest.TestCase):
         out = pendientes.conservar_hechas(self.VIEJO, nuevo).split("\n")
         self.assertEqual(out[1:5], ["- [ ] Yo: demo", "  con el equipo de pruebas",
                                     "- [x] Ana: enviar el presupuesto [12:34]", "- [x] Carmen: cerrar el acta"])
+
+    def test_repetidas_tantas_como_habia_hechas(self):
+        """Dos tareas iguales salvo el minuto, una hecha y otra no: siguen una y una (revisión 1: salían las dos
+        hechas y la abierta desaparecía de «Mis pendientes»)."""
+        viejo = "## Próximos pasos\n- [x] Yo: llamar a Ana [10:00]\n- [ ] Yo: llamar a Ana [50:00]\n"
+        nuevo = "## Próximos pasos\n- [ ] Yo: llamar a Ana [10:05]\n- [ ] Yo: llamar a Ana [50:10]\n"
+        out = pendientes.conservar_hechas(viejo, nuevo)
+        self.assertEqual(out.split("\n")[1:3], ["- [x] Yo: llamar a Ana [10:05]", "- [ ] Yo: llamar a Ana [50:10]"])
+        # si el nuevo ya la trae hecha, cuenta: no se marca otra
+        nuevo = "## Próximos pasos\n- [ ] Yo: llamar a Ana [10:05]\n- [x] Yo: llamar a Ana [50:10]\n"
+        self.assertEqual(pendientes.abiertas(pendientes.conservar_hechas(viejo, nuevo)), 1)
+
+    def test_en_su_seccion_aunque_haya_tareas_en_otra(self):
+        """Las hechas que se arrastran van a los próximos pasos, no tras una tarea de «Riesgos» (revisión 1)."""
+        nuevo = ("## Próximos pasos\n- [ ] Yo: demo\n\n## Riesgos\n- [ ] Vigilar el plazo\n\n## Participantes\n- Ana\n")
+        out = pendientes.conservar_hechas(self.VIEJO, nuevo).split("\n")
+        self.assertEqual(out[:5], ["## Próximos pasos", "- [ ] Yo: demo", "- [x] Ana: enviar el presupuesto [12:34]",
+                                   "- [x] Carmen: cerrar el acta", ""])
+        self.assertEqual(out[5:7], ["## Riesgos", "- [ ] Vigilar el plazo"])
+        # sin cabecera de próximos pasos y en inglés: «## Next steps»
+        out = pendientes.conservar_hechas(self.VIEJO, "## Summary\nOk.\n\n## Participants\n- Ana")
+        self.assertIn("\n\n## Next steps\n- [x] Ana: enviar el presupuesto [12:34]", out)
 
     def test_sin_nada_hecho_no_cambia(self):
         nuevo = "## Próximos pasos\n- [ ] Yo: demo\n"
@@ -404,6 +438,82 @@ class ServidorTests(TempTree):
         self.assertEqual(r["i"], k + s["desde"])
         self.assertIn("* [x] Yo: preparar la demo [1:02:10]", a.summary_get({"path": "r.wav"})["text"])
 
+    def bytes_de(self, p):
+        with open(p, "rb") as f:
+            return f.read()
+
+    def test_post_conserva_bom_y_saltos_y_no_toca_otra_codificacion(self):
+        """Marcar cambia solo el carácter de la casilla: el BOM y los \\r\\n se quedan; un resumen guardado a mano en
+        otra codificación no se reescribe (revisión 1, P1: todas sus tildes acababan en U+FFFD)."""
+        flat = self.flat()
+        a = self.app(flat)
+        p = flat[1]["_sum"]
+        crlf = "## Próximos pasos\r\n- [ ] Ana: presupuesto [12:34]\r\n- [ ] Yo: acta — revisión\r\n".encode("utf-8")
+        with open(p, "wb") as f:
+            f.write(b"\xef\xbb\xbf" + crlf)
+        r = a.pendiente_hecha({"path": "Alfa/nueva.wav", "i": 2, "texto": "Yo: acta — revisión", "hecha": True})
+        self.assertTrue(r["cambiado"])
+        self.assertEqual(self.bytes_de(p), b"\xef\xbb\xbf" + crlf.replace(b"- [ ] Yo", b"- [x] Yo"))
+        ansi = "## Próximos pasos\r\n- [ ] José: revisión del año\r\n- [ ] Yo: acta\r\n".encode("cp1252")
+        with open(p, "wb") as f:
+            f.write(ansi)
+        with self.assertRaises(server.ApiError) as e:
+            a.pendiente_hecha({"path": "Alfa/nueva.wav", "i": 2, "texto": "Yo: acta", "hecha": True})
+        self.assertEqual(e.exception.code, 409)
+        self.assertIn("UTF-8", e.exception.msg)
+        self.assertEqual(self.bytes_de(p), ansi)
+
+    def test_post_solo_en_el_resumen_de_una_reunion(self):
+        """«.», una carpeta o la raíz de una vinculada no son una reunión: antes «.» marcaba <padre>/Tenca.resumen.md,
+        fuera de la carpeta de la app (revisión 1)."""
+        fuera = os.path.join(self.tmp, os.path.basename(self.root) + ".resumen.md")
+        with open(fuera, "w", encoding="utf-8") as f:
+            f.write("- [ ] Yo: fuera\n")
+        self.write("Alfa.resumen.md", "- [ ] Yo: carpeta\n")
+        a = self.app(self.flat())
+        for path, texto in ((".", "Yo: fuera"), ("Alfa", "Yo: carpeta"), ("Alfa/..", "Yo: fuera"),
+                            ("Alfa/nueva.md", "Yo: acta")):
+            with self.assertRaises(server.ApiError, msg=path):
+                a.pendiente_hecha({"path": path, "i": 0, "texto": texto, "hecha": True})
+        self.assertEqual(server.read_text(fuera), "- [ ] Yo: fuera\n")
+        self.assertEqual(server.read_text(os.path.join(self.root, "Alfa.resumen.md")), "- [ ] Yo: carpeta\n")
+
+    def test_post_con_el_resumen_que_da_la_biblioteca(self):
+        """Una reunión de la biblioteca cuyo resumen no va junto a su ruta (la que ya no tiene audio, punto 17, si su
+        ruta fuera la del propio resumen): el de la biblioteca (revisión 1: daba 404)."""
+        p = self.write("Alfa/solo-texto.resumen.md", "- [ ] Yo: acta\n")
+        a = self.app([{"path": "Alfa/solo-texto.resumen.md", "date": "2026-11-10T10:00:00", "props": {}, "_sum": p,
+                       "sin_audio": True}])
+        self.assertEqual(a.pendientes_lista({})["tareas"][0]["sin_audio"], True)
+        r = a.pendiente_hecha({"path": "Alfa/solo-texto.resumen.md", "i": 0, "texto": "Yo: acta", "hecha": True})
+        self.assertEqual((r["path"], r["cambiado"]), ("Alfa/solo-texto.resumen.md", True))
+        self.assertEqual(server.read_text(p), "- [x] Yo: acta\n")
+
+    def test_un_clic_que_espera_no_tiene_cogido_el_candado_de_mover(self):
+        """Mientras se escribe un resumen regenerado (pendientes.LOCK cogido), el clic espera ese candado sin coger
+        antes el de mover: mover, borrar o el directo no se frenan (revisión 1)."""
+        flat = self.flat()
+        a = self.app(flat)
+        res = {}
+        hilo = threading.Thread(target=lambda: res.update(r=a.pendiente_hecha(
+            {"path": "Alfa/nueva.wav", "i": 3, "texto": "Yo: acta", "hecha": True})))
+        libre = {}
+        with pendientes.LOCK:
+            hilo.start()
+            time.sleep(0.3)
+
+            def probar():
+                lock = a._move_lock()
+                libre["ok"] = lock.acquire(blocking=False)
+                if libre["ok"]:
+                    lock.release()
+            otro = threading.Thread(target=probar)
+            otro.start()
+            otro.join(5)
+        hilo.join(10)
+        self.assertTrue(libre["ok"])
+        self.assertTrue(res["r"]["cambiado"])
+
     def test_por_http(self):
         flat = self.flat()
         s = ServidorDePrueba(self.app(flat))
@@ -541,6 +651,15 @@ class SumHtmlTests(unittest.TestCase):
         self.assertTrue(out["minuto"])  # los minutos siguen siendo enlaces
         self.assertTrue(out["mas"])
 
+    def test_sangrada_con_espacio_duro_sin_casilla(self):
+        """El servidor solo cuenta la sangría con espacios o tabuladores: una tarea sangrada con un espacio duro no
+        lleva casilla que pulsar (daba siempre 409; revisión 1)."""
+        out = self.node(r"""const h = sumHtml('\u00a0- [ ] Yo: x\n\t- [ ] Yo: y\n\u3000* [x] Yo: z');
+          console.log(JSON.stringify([...h.matchAll(/data-l="(\d+)"/g)].map(m => +m[1])));""")
+        self.assertEqual(out, [1])
+        self.assertEqual([t["i"] for t in pendientes.extraer("\u00a0- [ ] Yo: x\n\t- [ ] Yo: y\n\u3000* [x] Yo: z")],
+                         [1])
+
 
 @unittest.skipUnless(shutil.which("node"), "node no instalado")
 class PendientesHoyJsTests(unittest.TestCase):
@@ -555,6 +674,42 @@ class PendientesHoyJsTests(unittest.TestCase):
         r = subprocess.run(["node", js], capture_output=True, text=True, encoding="utf-8", timeout=30)
         self.assertEqual(r.returncode, 0, r.stderr)
         return json.loads(r.stdout)
+
+    def test_la_segunda_marcada_sigue_en_su_sitio_con_deshacer(self):
+        """Con 14 tuyas, se marcan la 1 y la 4; al releer (sin ellas), la 4 sigue tras la 3 y dentro de las 12
+        primeras, con su «Deshacer» (revisión 1: iba al final y lo perdía). Y «La última vez» se pide al momento."""
+        out = self.node("""
+          const t = n => ({path: 'p', i: n, texto: 'x' + n, responsable: 'Yo', tarea: 'tarea ' + n, segundo: null,
+            tuya: true, titulo: 'R', fecha_txt: 'lun 9 nov'});
+          let respuesta = {tareas: Array.from({length: 14}, (_, n) => t(n))};
+          const llamadas = [];
+          globalThis.api = (url, body) => {
+            llamadas.push([url, body]);
+            const r = url === '/api/pendientes' ? JSON.parse(JSON.stringify(respuesta)) : {ok: true, i: body.i};
+            return Promise.resolve(r);
+          };
+          globalThis.toast = () => {};
+          const cargas = [];
+          hoyCargar = (...a) => { cargas.push(a); };
+          HOY.datos = {ultima: {path: 'p'}};
+          (async () => {
+            await hoyPendCargar(true);
+            const de = n => PEND.datos.tareas.find(x => x.texto === 'x' + n);
+            await hoyPendMarcar(de(1), true);
+            await hoyPendMarcar(de(4), true);
+            respuesta = {tareas: Array.from({length: 14}, (_, n) => t(n)).filter(x => x.i !== 1 && x.i !== 4)};
+            clearTimeout(PEND.hechas.get(de(1)._k)); PEND.hechas.delete(de(1)._k);  // vence el «Deshacer» de la 1
+            PEND.datos.tareas = PEND.datos.tareas.filter(x => x.texto !== 'x1');
+            await hoyPendCargar(true);
+            const orden = PEND.datos.tareas.map(x => x.texto);
+            const h = hoyPendHtml();
+            PEND.hechas.forEach(clearTimeout);
+            console.log(JSON.stringify({orden, deshacer: (h.match(/hoy-pend-deshacer/g) || []).length,
+              cargas: cargas.length}));
+          })();""")
+        self.assertEqual(out["orden"][:5], ["x0", "x2", "x3", "x4", "x5"])
+        self.assertEqual(out["deshacer"], 1)
+        self.assertEqual(out["cargas"], 2)  # una por cada marcada: «La última vez» de esa reunión
 
     def test_tuyas_todas_y_ver_todas(self):
         out = self.node("""
@@ -579,7 +734,7 @@ class PendientesHoyJsTests(unittest.TestCase):
             todas1: h1.includes('Todas (15)'), min: h1.includes('[12:34]'), f2: filas(h2),
             mas2: h2.includes('Ver todas (15)'), f3: filas(h3), mas3: h3.includes('Ver todas'),
             deshacer: h4.includes('Deshacer'), tuyas4: h4.includes('Tuyas (2)'), todas4: h4.includes('Todas (14)'),
-            sinfiltro: !h5.includes('Tuyas'), nada: h6.includes('no queda ninguna tarea abierta'),
+            sinfiltro: !h5.includes('Tuyas'), nada: h6.includes('ninguna tarea abierta'),
             nadaCard: h6.includes('<section')}));""")
         self.assertEqual((out["f1"], out["tuyas1"], out["todas1"], out["min"]), (3, True, True, True))
         self.assertEqual((out["f2"], out["mas2"]), (12, True))

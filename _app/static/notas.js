@@ -381,8 +381,9 @@ const stampSecs = t => t.split(':').reduce((acc, x) => acc * 60 + +x, 0);
    la casilla manda la línea del .resumen.md (la del cuerpo + S.sum.desde) y su texto a POST /api/pendientes/hecha, como
    «Mis pendientes» en Hoy. Cada línea de tarea lleva una marca (\uE000n\uE001, n = su línea en el cuerpo) que md()
    deja pasar tal cual: así la casilla es la de esa línea y no la n-ésima de la lista (una tarea que md() no pinta como
-   lista no descuadra las demás). Solo «-», «*» y «1.»: las que md() pinta como lista y el servidor cuenta como tarea. */
-const SUM_TAREA = /^(\s*(?:[-*]|\d+[.)])[ \t]+)\[([ xX])\][ \t]*(\S.*?)[ \t]*$/;
+   lista no descuadra las demás). Solo «-», «*» y «1.», sangradas con espacios o tabuladores: las que md() pinta como
+   lista y el servidor (pendientes._TAREA) cuenta como tarea. */
+const SUM_TAREA = /^([ \t]*(?:[-*]|\d+[.)])[ \t]+)\[([ xX])\][ \t]*(\S.*?)[ \t]*$/;
 function sumHtml(text) {
   const src = String(text || '').split('\n').map((l, k) => {
     const m = l.match(SUM_TAREA);
