@@ -86,25 +86,32 @@ class CompartidasTests(unittest.TestCase):
         guarda = next(n for n in arbol.body if isinstance(n, ast.If) and cambios[0] in n.body)
         self.assertEqual(ast.unparse(guarda.test), "__name__ != '__main__'")
 
-    def test_main_comparte_cada_asignacion(self):
-        """Cada asignacion de main() a una de COMPARTIDAS va seguida, en su bloque, de un _compartir con ese nombre."""
+    def test_cada_asignacion_global_se_comparte(self):
+        """En server.py, cada asignacion a una de COMPARTIDAS dentro de una funcion (main(), App.__init__) va seguida,
+        en su bloque, de un _compartir con ese nombre."""
         with open(os.path.join(APP, "server.py"), encoding="utf-8") as f:
             arbol = ast.parse(f.read())
-        main = next(n for n in arbol.body if isinstance(n, ast.FunctionDef) and n.name == "main")
-        vistas = 0
-        for bloque in [n for n in ast.walk(main) if hasattr(n, "body") and isinstance(n.body, list)]:
-            for cuerpo in (bloque.body, getattr(bloque, "orelse", []) or []):
-                for i, st in enumerate(cuerpo):
-                    nombres = {t.id for t in getattr(st, "targets", []) if isinstance(t, ast.Name)}
-                    nombres &= set(server.COMPARTIDAS)
-                    if not nombres:
-                        continue
-                    vistas += 1
-                    despues = [a.value for c in cuerpo[i + 1:] for a in ast.walk(c) if isinstance(a, ast.Constant)
-                               and isinstance(c, ast.Expr) and isinstance(c.value, ast.Call)
-                               and getattr(c.value.func, "id", "") == "_compartir"]
-                    self.assertTrue(nombres <= set(despues), f"main(), línea {st.lineno}: falta _compartir{nombres}")
-        self.assertGreaterEqual(vistas, 6)  # PORT, URL, DATA_DIR, SERVER y las tres de WINDOW
+        vistas = []
+        for fn in [n for n in ast.walk(arbol) if isinstance(n, ast.FunctionDef)]:
+            globales = {x for n in ast.walk(fn) if isinstance(n, ast.Global) for x in n.names}
+            if not globales & set(server.COMPARTIDAS):
+                continue
+            for bloque in [n for n in ast.walk(fn) if isinstance(getattr(n, "body", None), list)]:
+                for cuerpo in (bloque.body, getattr(bloque, "orelse", []) or []):
+                    for i, st in enumerate(cuerpo):
+                        nombres = {t.id for t in getattr(st, "targets", []) if isinstance(t, ast.Name)}
+                        nombres &= set(server.COMPARTIDAS) & globales
+                        if not nombres:
+                            continue
+                        vistas.append((fn.name, st.lineno))
+                        despues = [a.value for c in cuerpo[i + 1:] if isinstance(c, ast.Expr)
+                                   and isinstance(c.value, ast.Call) and getattr(c.value.func, "id", "") == "_compartir"
+                                   for a in c.value.args if isinstance(a, ast.Constant)]
+                        self.assertTrue(nombres <= set(despues), f"{fn.name}(), línea {st.lineno}: falta "
+                                        f"_compartir{tuple(nombres)}")
+        # main(): PORT, URL, DATA_DIR, SERVER y las tres de WINDOW; App.__init__: COMPLETE
+        self.assertGreaterEqual(len([v for v in vistas if v[0] == "main"]), 7)
+        self.assertIn("__init__", [v[0] for v in vistas])
 
 
 class ArranqueComoLaAppTests(unittest.TestCase):
