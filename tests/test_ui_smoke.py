@@ -1783,21 +1783,22 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         self.assertEqual(err, [], (err, red))
         self.assertEqual(red, [], red)
 
-
     def test_reuniones_por_proyecto(self):
         """Reuniones › Tabla (punto 43 del review): columna y filtro «Proyecto» en vez de «Carpeta»; fuera las columnas
         sin datos (aquí ninguna reunión lleva etiquetas ni estado) y cada desplegable con su nombre accesible."""
         pg, errores, red = self.pagina()
         pg.goto(f"{self.base}/?t={self.token}", wait_until="networkidle")
         pg.wait_for_selector("#main h1:has-text('Hoy')", timeout=15000)
-        pg.evaluate("localStorage.setItem('tbl', JSON.stringify({folder: 'Proyecto', group: 'folder', estado: 'Revisada'}))")
+        guardado = "{folder: 'Proyecto', group: 'folder', estado: 'Revisada'}"  # lo de antes, en este navegador
+        pg.evaluate(f"localStorage.setItem('tbl', JSON.stringify({guardado}))")
         pg.reload(wait_until="networkidle")
         pg.wait_for_selector("#main h1:has-text('Hoy')", timeout=15000)
         pg.click("[data-nav='r']")
         pg.wait_for_selector("#main .db-table tbody tr[data-path]", timeout=10000)
         cab = pg.eval_on_selector_all("#main .db-table thead th", "ths => ths.map(t => t.textContent)")
         self.assertEqual(cab, ["Nombre", "Fecha", "Duración", "Proyecto", "Transcripción"])
-        self.assertEqual(pg.text_content("#main .db-table tbody tr[data-path] td:nth-child(4)").strip(), "Proyecto › General")
+        celda = pg.text_content("#main .db-table tbody tr[data-path] td:nth-child(4)")
+        self.assertEqual(celda.strip(), "Proyecto › General")
         nombres = pg.eval_on_selector_all("#main .db-tools select, #main .db-tools input",
                                           "els => els.map(e => [e.dataset.tbl, e.getAttribute('aria-label') || ''])")
         self.assertEqual(nombres, [["q", "Filtrar reuniones"], ["proy", "Proyecto"], ["tx", "Transcripción"],
