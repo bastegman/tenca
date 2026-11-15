@@ -780,6 +780,10 @@ def strip_private(node):
             "docs": node["docs"]}
 
 
+# guardar una transcripcion: uno a la vez (App._tx_save_lock y aprendido.aplicar_aprendido; estaba en App)
+TX_SAVE_LOCK = threading.Lock()
+
+
 class Transcripts:
     """Lee .srt / .txt con cache por fecha de modificacion (para la busqueda global)."""
 
