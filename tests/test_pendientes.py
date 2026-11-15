@@ -208,6 +208,17 @@ class ConservarHechasTests(unittest.TestCase):
         nuevo = "## Próximos pasos\n- [ ] Yo: llamar a Ana [10:05]\n- [x] Yo: llamar a Ana [50:10]\n"
         self.assertEqual(pendientes.abiertas(pendientes.conservar_hechas(viejo, nuevo)), 1)
 
+    def test_repetidas_por_el_minuto_mas_cercano(self):
+        """Si el nuevo trae las repetidas en otro orden, la hecha sigue siendo la de su minuto (revisión 2)."""
+        viejo = "## Próximos pasos\n- [x] Yo: llamar a Ana [10:00]\n- [ ] Yo: llamar a Ana [50:00]\n"
+        nuevo = "## Próximos pasos\n- [ ] Yo: llamar a Ana [50:10]\n- [ ] Yo: llamar a Ana [10:05]\n"
+        self.assertEqual(pendientes.conservar_hechas(viejo, nuevo).split("\n")[1:3],
+                         ["- [ ] Yo: llamar a Ana [50:10]", "- [x] Yo: llamar a Ana [10:05]"])
+        # sin minutos, por orden
+        viejo = "- [x] Yo: llamar\n- [ ] Yo: llamar\n"
+        self.assertEqual(pendientes.conservar_hechas(viejo, "- [ ] Yo: llamar\n- [ ] Yo: llamar"),
+                         "- [x] Yo: llamar\n- [ ] Yo: llamar")
+
     def test_en_su_seccion_aunque_haya_tareas_en_otra(self):
         """Las hechas que se arrastran van a los próximos pasos, no tras una tarea de «Riesgos» (revisión 1)."""
         nuevo = ("## Próximos pasos\n- [ ] Yo: demo\n\n## Riesgos\n- [ ] Vigilar el plazo\n\n## Participantes\n- Ana\n")
@@ -462,6 +473,51 @@ class ServidorTests(TempTree):
         self.assertEqual(e.exception.code, 409)
         self.assertIn("UTF-8", e.exception.msg)
         self.assertEqual(self.bytes_de(p), ansi)
+
+    def test_post_con_un_retorno_de_carro_suelto_no_se_toca(self):
+        """Un «\\r» suelto es un salto de línea para Hoy y la vista del resumen (read_text) y no para marcar: la línea
+        sería otra. No se toca (revisión 2: marcaba la de debajo)."""
+        flat = self.flat()
+        a = self.app(flat)
+        p = flat[1]["_sum"]
+        raro = "## Próximos pasos\r- [ ] Yo: llamar a Ana [10:00]\n- [ ] Yo: llamar a Ana [50:00]\n".encode("utf-8")
+        with open(p, "wb") as f:
+            f.write(raro)
+        t = next(x for x in a.pendientes_lista({})["tareas"] if x["path"] == "Alfa/nueva.wav")
+        self.assertEqual((t["i"], t["texto"]), (1, "Yo: llamar a Ana [10:00]"))
+        with self.assertRaises(server.ApiError) as e:
+            a.pendiente_hecha({"path": "Alfa/nueva.wav", "i": t["i"], "texto": t["texto"], "hecha": True})
+        self.assertEqual(e.exception.code, 409)
+        self.assertEqual(self.bytes_de(p), raro)
+
+    def test_post_con_reuniones_moviendose_no_espera_para_siempre(self):
+        """Con un movimiento largo en marcha, «marcar» espera un tope y dice que se vuelva a intentar, sin dejar cogido
+        el candado de los resúmenes (revisión 2: la cola de resúmenes se paraba mientras durara la copia)."""
+        flat = self.flat()
+        a = self.app(flat)
+        cogido, soltar = threading.Event(), threading.Event()
+
+        def mover():
+            with a._move_lock():
+                cogido.set()
+                soltar.wait(10)
+        hilo = threading.Thread(target=mover)
+        hilo.start()
+        self.addCleanup(hilo.join, 10)
+        self.addCleanup(soltar.set)
+        cogido.wait(5)
+        t0 = time.monotonic()
+        with mock.patch.object(type(a), "PENDIENTE_MOVER_S", 0.2), self.assertRaises(server.ApiError) as e:
+            a.pendiente_hecha({"path": "Alfa/nueva.wav", "i": 3, "texto": "Yo: acta", "hecha": True})
+        self.assertLess(time.monotonic() - t0, 2)
+        self.assertEqual(e.exception.code, 409)
+        self.assertIn("moviendo", e.exception.msg)
+        self.assertTrue(pendientes.LOCK.acquire(blocking=False))
+        pendientes.LOCK.release()
+        soltar.set()
+        hilo.join(10)
+        self.assertTrue(a.pendiente_hecha({"path": "Alfa/nueva.wav", "i": 3, "texto": "Yo: acta", "hecha": True})[
+            "cambiado"])
 
     def test_post_solo_en_el_resumen_de_una_reunion(self):
         """«.», una carpeta o la raíz de una vinculada no son una reunión: antes «.» marcaba <padre>/Tenca.resumen.md,

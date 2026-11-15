@@ -409,6 +409,8 @@ class Hoy:
         out.sort(key=lambda x: x["fecha"], reverse=True)  # estable: cada reunión, en el orden de su resumen
         return {"tareas": out, "total": len(out), "tuyas": sum(1 for x in out if x["tuya"])}
 
+    PENDIENTE_MOVER_S = 5  # segundos que «marcar» espera a que acabe de moverse una reunión
+
     def _resumen_de(self, rel):
         """(ruta interna, .resumen.md) de la reunión `rel`, con su ruta nueva si se movió en esta sesión. El de la
         biblioteca si la reunión está en ella (también la que ya no tiene audio, con otra ruta); si no, el que va junto
@@ -435,14 +437,22 @@ class Hoy:
         if (not isinstance(rel, str) or not rel or type(i) is not int or not isinstance(texto, str)
                 or not texto.strip() or not isinstance(hecha, bool)):
             raise ApiError("Petición no válida: faltan path, i, texto o hecha.")
-        with pendientes.LOCK, self._move_lock():
-            rel, p = self._resumen_de(rel)
-            if not os.path.isfile(p):
-                raise ApiError("Esa reunión ya no tiene resumen.", 404)
+        with pendientes.LOCK:
+            # el de mover, con tope: un movimiento largo (una copia a otra unidad) no deja parada aquí, con LOCK cogido,
+            # la escritura de los resúmenes de las demás reuniones (revisión 2)
+            mover = self._move_lock()
+            if not mover.acquire(timeout=self.PENDIENTE_MOVER_S):
+                raise ApiError("Se están moviendo reuniones: vuelve a marcarla en un momento.", 409)
             try:
-                linea, cambiado = pendientes.marcar_fichero(p, i, texto, hecha)
-            except (pendientes.NoEsta, pendientes.NoUtf8) as e:
-                raise ApiError(str(e), 409)
+                rel, p = self._resumen_de(rel)
+                if not os.path.isfile(p):
+                    raise ApiError("Esa reunión ya no tiene resumen.", 404)
+                try:
+                    linea, cambiado = pendientes.marcar_fichero(p, i, texto, hecha)
+                except (pendientes.NoEsta, pendientes.NoSeToca) as e:
+                    raise ApiError(str(e), 409)
+            finally:
+                mover.release()
         pendientes.CACHE.olvidar(p)
         if cambiado:
             log(f"   pendientes: tarea {'hecha' if hecha else 'sin hacer'} en {os.path.basename(rel)}")

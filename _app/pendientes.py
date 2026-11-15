@@ -17,7 +17,6 @@ import codecs
 import os
 import re
 import threading
-from collections import Counter
 
 from common import fold, read_text, write_bytes
 from rutas import CLOUD_ONLY
@@ -46,8 +45,9 @@ class NoEsta(ValueError):
     """La tarea que se quiere marcar ya no está en el resumen (se regeneró o se editó)."""
 
 
-class NoUtf8(ValueError):
-    """El .resumen.md no está en UTF-8 (se guardó a mano en otra codificación): no se toca."""
+class NoSeToca(ValueError):
+    """El .resumen.md no se puede marcar sin riesgo (no está en UTF-8, o lleva saltos de línea «\\r» sueltos): no se
+    toca."""
 
 
 def normalizar(s):
@@ -142,15 +142,20 @@ def marcar_fichero(path, i, tarea, hecha):
     """(línea, cambiado): marcar en el fichero, cambiando solo el carácter de la casilla. Se lee en UTF-8 estricto y se
     conservan el BOM y los saltos de línea (\\r\\n): read_text los normaliza y, con errors="replace", reescribir con lo
     leído estropeaba todas las tildes de un fichero guardado a mano en otra codificación (revisión 1, P1). Así, un
-    fichero que no es UTF-8 no se toca (NoUtf8). Se llama con LOCK."""
+    fichero que no es UTF-8 no se toca (NoSeToca); tampoco uno con un «\\r» suelto, que read_text (y con él Hoy y la
+    vista del resumen) cuenta como salto de línea y aquí no: la línea `i` sería otra (revisión 2). Se llama con
+    LOCK."""
     with open(path, "rb") as f:
         datos = f.read()
     bom = datos.startswith(codecs.BOM_UTF8)
     try:
         texto = datos[len(codecs.BOM_UTF8) if bom else 0:].decode("utf-8")
     except UnicodeDecodeError:
-        raise NoUtf8("Ese resumen no está guardado en UTF-8 (se editó fuera de la app): márcalo a mano en el "
-                     "fichero o regenéralo.")
+        raise NoSeToca("Ese resumen no está guardado en UTF-8 (se editó fuera de la app): márcalo a mano en el "
+                       "fichero.")
+    if re.search(r"\r(?!\n)", texto):
+        raise NoSeToca("Ese resumen tiene saltos de línea raros (se editó fuera de la app): márcalo a mano en el "
+                       "fichero.")
     nuevo, linea, cambiado = marcar(texto, i, tarea, hecha)
     if cambiado:
         write_bytes(path, (codecs.BOM_UTF8 if bom else b"") + nuevo.encode("utf-8"))
@@ -174,6 +179,39 @@ def _tras(lineas, t):
     return k
 
 
+def _cerca(segundo):
+    """Para ordenar por cercanía al minuto `segundo`: las que no citan minuto, al final y en su orden."""
+    return lambda t: (abs(t["segundo"] - segundo) if t["segundo"] is not None and segundo is not None else 1e12, t["i"])
+
+
+def _emparejar(hechas, tareas):
+    """Las tareas sin hacer de `tareas` que hay que marcar: por cada clave, tantas como hechas del viejo con esa clave
+    (menos las que el nuevo ya trae hechas), y de las repetidas, las del minuto más cercano al de cada hecha (una
+    hecha a las 10:00 y otra abierta a las 50:00 siguen así aunque el nuevo las traiga en otro orden; revisión 2)."""
+    marcar = []
+    for clave, viejas in _por_clave(hechas).items():
+        segundos = [t["segundo"] for t in viejas]
+        nuevas = [t for t in tareas if t["clave"] == clave]
+        for t in nuevas:  # las que el nuevo ya trae hechas se llevan la hecha más cercana
+            if t["hecha"] and segundos:
+                segundos.remove(min(segundos, key=lambda s: _cerca(s)(t)))
+        libres = [t for t in nuevas if not t["hecha"]]
+        for s in segundos:
+            if not libres:
+                break
+            t = min(libres, key=_cerca(s))
+            libres.remove(t)
+            marcar.append(t)
+    return marcar
+
+
+def _por_clave(tareas):
+    out = {}
+    for t in tareas:
+        out.setdefault(t["clave"], []).append(t)
+    return out
+
+
 def conservar_hechas(viejo, nuevo):
     """El resumen `nuevo` sin perder lo que estaba hecho en `viejo`:
     (a) sus tareas con el mismo texto normalizado que una hecha del viejo salen ya hechas, tantas como había hechas
@@ -187,14 +225,8 @@ def conservar_hechas(viejo, nuevo):
         return nuevo
     lineas = nuevo.split("\n")
     tareas = extraer(nuevo)
-    quedan = Counter(t["clave"] for t in hechas)
-    for t in tareas:  # las que el nuevo ya trae hechas cuentan primero
-        if t["hecha"] and quedan[t["clave"]] > 0:
-            quedan[t["clave"]] -= 1
-    for t in tareas:
-        if not t["hecha"] and quedan[t["clave"]] > 0:
-            quedan[t["clave"]] -= 1
-            lineas[t["i"]] = _poner(lineas[t["i"]], t, True)
+    for t in _emparejar(hechas, tareas):
+        lineas[t["i"]] = _poner(lineas[t["i"]], t, True)
     en_el_nuevo, sobran = {t["clave"] for t in tareas}, []
     for t in hechas:
         if t["clave"] not in en_el_nuevo:
