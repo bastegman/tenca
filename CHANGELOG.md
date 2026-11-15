@@ -10,6 +10,56 @@ nada de ningún proyecto concreto.
 empresa. Entre paréntesis va el número de cada hallazgo, el mismo que citan los commits; el informe de la auditoría no
 está en este repositorio. «Desarrollo y CI» es para quien mantiene el repositorio: no cambia nada en la app instalada.
 
+### La grabación no se corta sin decirlo, y menos eco del altavoz (14/11/2026)
+
+Puntos 1 y 6 de la revisión del 14/11/2026. Rama `grabadora`.
+
+- **La grabadora ya no se para con el primer fallo al escribir.** Lo que no se puede escribir (el antivirus o OneDrive
+  con el fichero cogido, un disco de red que va y viene) se guarda en memoria y se reintenta hasta 20 s; la franja del
+  directo dice «No se puede escribir en el disco: N s de audio esperando en memoria». Si no se arregla, se para con el
+  motivo («el disco está lleno») y la cabecera del WAV cerrada.
+- **Disco.** No se empieza a grabar con menos de 500 MB libres (lo dice y por qué: una hora ocupa unos 690 MB); con
+  menos de ~2 h, se avisa al empezar. Mientras se graba se mira cada 30 s: la franja del directo lo dice por debajo de
+  2 h y, a los ~15 min, aviso de Windows y uno en la app que no se va solo.
+- **Si la grabadora termina sin que nadie la pare** (se muere, la matan o falla), ya no sale «■ Grabación guardada»:
+  franja roja y aviso que no caduca («Grabación interrumpida a las 10:37: el disco está lleno»), aviso de Windows y el
+  sonido de error. La reunión queda marcada «Grabación interrumpida a las hh:mm · motivo». A los ~2 s sigue grabando
+  en «Nombre (continuación)», en la misma carpeta y con el mismo proyecto, idioma, participantes y directo, como mucho
+  3 veces. La reserva del directo se suelta y la línea de tiempo del micro («Tú») se guarda cada 30 s, no solo al
+  parar.
+- **Tenca no responde.** Los sondeos tienen tope de 5 s y, tras 3 seguidos sin respuesta, sale una franja fija
+  «Tenca no responde: puede que no se esté grabando · Reabrir» que se quita sola al volver. Los errores de red dicen
+  «Tenca no responde» en vez de «Failed to fetch».
+- **Al arrancar**, las grabaciones propias que quedaron abiertas (un corte de luz, un cuelgue, Windows Update) y ya no
+  crecen se cierran y se dice («Se recuperó la grabación X, cortada a las hh:mm»). Solo las que Tenca apuntó al empezar
+  a grabar: nunca un WAV de otro programa que siga grabando.
+- **Voces dobles con altavoces.** El nivelador del micro tomaba el eco de la reunión por tu voz entre dos frases tuyas
+  y lo subía hasta +18 dB: cada voz de los demás quedaba dos veces casi igual de fuerte. Ahora no aprende del eco: con
+  el eco demostrado (la correlación entre micro y salida que ya se medía para avisar), solo de lo que pasa del eco que
+  cabe esperar, es decir, de tu voz, también si habláis a la vez; sin eco (cascos), como antes. Ignora los golpes
+  cortos (una tos) y empieza con una ganancia prudente. Medido con señal sintética: el eco pasa de 0/−2,5 dB a
+  −10/−15 dB frente a la voz directa (también con un ponente que habla sin pausas, si otro habla de golpe más fuerte o
+  con un altavoz Bluetooth), y tu voz se queda donde estaba (también si vuelve por la salida).
+- Si la continuación no llega a arrancar (por ejemplo, con el disco lleno), el aviso fijo lo dice («No se siguió
+  grabando: …») y nunca acaba en «Grabación guardada».
+- Al parar con escrituras pendientes se siguen intentando hasta 8 s, y si aun así se pierde algo, se dice; con el
+  micro silenciado, la continuación también lo va desde el principio; «Parar» en los 2 s antes de la continuación la
+  cancela.
+
+### Descargar desde Releases, con su sha256 (14/11/2026)
+
+- **Nuevo: cada versión se publica como Release** de GitHub, con `Tenca-instalador.zip` y su sha256 en la página. El
+  README y el LEEME mandan al último Release (<https://github.com/bastegman/tenca/releases/latest>) y dicen cómo
+  comprobar el sha256 en Windows (`certutil -hashfile Tenca-instalador.zip SHA256`). Es el zip público: nunca lleva
+  listas de vocabulario.
+- Desarrollo y CI: `scripts/publicar_release.py` prepara la versión de `origin/main` con `git archive` y su
+  `build_zip.py` sin `--vocab`, comprueba que el zip no lleva carpetas `Vocabulario`, ni `.txt` que no sean de la app,
+  ni nada que no esté en git, y con `--publicar` crea el Release y comprueba el sha256 de lo publicado
+  (`tests/test_publicar_release.py`).
+- Desarrollo y CI: `main` protegida con una regla del repositorio (sin force-push, sin borrarla y con los 10 checks de
+  `tests.yml` en verde en el commit que se sube); Dependabot semanal para las acciones y pip
+  (`.github/dependabot.yml`), con las alertas y los arreglos de seguridad activados.
+
 ### Ajustes: una sola forma de guardar y secciones más cortas (14/11/2026)
 
 Puntos 12 y 37 del review del 14/11/2026. Rama `ajustes-uno`.

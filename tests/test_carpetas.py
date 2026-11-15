@@ -42,6 +42,9 @@ class FakeRec:
     def timeline(self):
         return None
 
+    def motivo(self):
+        return "error en la grabadora (prueba)"
+
 
 class DeadRec(FakeRec):
     dead = True

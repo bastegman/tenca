@@ -55,7 +55,8 @@ from common import (APP_ID, APP_NAME, ApiError, BAD_NAME, LOGGER, SRT_TIME, WIND
                     alert, clean_name, default_threads, fmt_srt, fold, is_protected, log, log_exc, natural_key,
                     parse_srt, protect, read_text, save_text, setup_logging, unprotect, wav_duration, write_bytes)
 from common import TOKEN_FILE, TOKEN_HEADER, local_opener, read_token  # sesion local (P1-02) y loopback sin proxy
-from recording import GlobalHotkey, RecorderProcess, cue, mic_meeting_app, notify, teams_mic_estado
+from recording import (Cortes, GlobalHotkey, RecorderProcess, cue, disco_al_empezar, mic_meeting_app, notify,
+                       teams_mic_estado)
 from bandeja import Bandeja
 import window as window_mod
 from window import Window, set_app_id
@@ -1479,7 +1480,8 @@ def public_transcript(data):
 # grabar y el usuario no los ha confirmado ni editado; mientras tanto no salen del PC (participantes_confirmados). En
 # el .md no va como clave propia sino detras de los nombres (PARTICIPANTES_NOTA), por lo mismo que el id del tema.
 NOTE_KEYS = ("titulo", "icono", "etiquetas", "estado", "participantes", "participantes_origen", "proyecto",
-             "workstream", "idioma", "contexto")
+             "workstream", "idioma", "contexto",
+             "interrumpida")  # «hh:mm · motivo»: la grabadora se corto (o Tenca se cerro) sin que nadie la parase
 IDIOMA_RE = re.compile(r"^(auto|[a-z]{2}(-[a-z]{2})?)$")
 NOTE_KEY_RE = re.compile(r"^[a-z][a-z0-9_-]*$")  # una clave de la cabecera (las que no conocemos se conservan)
 ICON_BAD = re.compile(r"[<>&\"'\x00-\x1f\x7f]")
@@ -4901,6 +4903,16 @@ def teams_estado():
 
 
 class App:
+    rec_body = rec_cadena = None  # con que se grabo lo ultimo: la continuacion de una grabacion cortada lo repite
+
+    @property
+    def cortes(self):
+        """Grabaciones cortadas o recuperadas y la lista de las abiertas (recording.Cortes, en DATA_DIR)."""
+        c = self.__dict__.get("_cortes")
+        if c is None:
+            c = self.__dict__["_cortes"] = Cortes(DATA_DIR)
+        return c
+
     def __init__(self):
         os.makedirs(DATA_DIR, exist_ok=True)
         global COMPLETE
@@ -4927,6 +4939,9 @@ class App:
         # grabadora propia: una grabacion y, mientras la ventana de "Grabar" esta abierta, un medidor
         self.rec, self.monitor, self.monitor_seen = None, None, 0.0
         self.rec_lock, self.devices_cache = threading.Lock(), (0.0, None)
+        # grabaciones cortadas (la grabadora termino sola) y las que quedaron abiertas: avisos, continuacion y reparar
+        # al arrancar (punto 1 del review del 14/11/2026). rec_body/rec_cadena: con que se grabo, para la continuacion
+        self._cortes = Cortes(DATA_DIR)
         self.toggle_lock = threading.Lock()
         self.notes_lock, self.meeting, self.meeting_prev = threading.Lock(), None, None
         self.voices_dl = None  # descarga de los modelos de voces en curso (progreso para la interfaz)
@@ -4950,6 +4965,8 @@ class App:
         threading.Thread(target=self._monitor_watchdog, daemon=True).start()
         self.hotkey = GlobalHotkey(lambda: self.rec_toggle({"source": "hotkey"}))
         self.hotkey.start()
+        # las grabaciones propias que quedaron abiertas (Tenca se cerro de golpe): se cierran y se dice
+        threading.Thread(target=self._recuperar_grabaciones, daemon=True, name="recuperar-grabaciones").start()
 
     def rec_toggle(self, b):
         """Ctrl+Alt+R (o el mismo atajo dentro de la app): empieza con la ultima configuracion o para."""
@@ -4959,11 +4976,12 @@ class App:
                     if b.get("start_only"):  # el aviso flotante: si Ctrl+Alt+R se adelantó, no se para la grabación
                         return {"recording": True, "path": rel_of(self.rec.path)}
                     r = self.rec_stop({})
-                    cue("stop")
                     seg = r["seconds"]  # en segundos si no llego al minuto: «1 min» tapaba una grabacion de 5 s
-                    notify("■ Grabación guardada",
-                           f"{f'{int(seg)} s' if seg < 60 else f'{round(seg / 60)} min'} · "
-                           "la transcripción termina sola")
+                    if not r.get("aviso"):  # a medias ya lo ha dicho rec_stop (con su sonido de error)
+                        cue("stop")
+                        notify("■ Grabación guardada",
+                               f"{f'{int(seg)} s' if seg < 60 else f'{round(seg / 60)} min'} · "
+                               "la transcripción termina sola")
                     return dict(r, recording=False)
                 st = self.settings.get()
                 # el mismo plan que enseña la tarjeta de Grabar (plan.py): la reunión en curso (Teams/Outlook, sin
@@ -5329,6 +5347,7 @@ class App:
                "build": BUILD}
         if r and r.alive():
             out.update(path=rel_of(r.path), started=r.started, resumen=getattr(self, "rec_resumen", ""), **r.status)
+            out["sin_estado_s"] = r.sin_estado_s()  # la grabadora atascada (escritura bloqueada): la franja lo dice
             # avisos de la franja del directo (B6): fuente callada y «paro en 30 s»
             out["callada"] = r.callada.estado(time.monotonic()) if getattr(r, "callada", None) else {}
             quedan = self.fin_llamada.quedan(time.monotonic())
@@ -5338,6 +5357,14 @@ class App:
         p = self.parada_auto
         if not out["recording"] and p and time.time() - p["at"] < 120:
             out["parada"] = p  # se paró sola al terminar la llamada: la interfaz lo dice al ver que ya no se graba
+        out["cortes"] = self.cortes.estado()  # cortadas y recuperadas (la interfaz las avisa hasta que las cierres)
+        c = next((x for x in reversed(out["cortes"]) if x["tipo"] == "cortada"), None)
+        if not out["recording"] and r and c and c["path"] == rel_of(r.path):
+            out["cortada"] = c  # la ultima grabacion no se paro: se corto (no es «Grabación guardada»)
+        elif (not out["recording"] and r and r.path and getattr(r, "on_end", None) and not getattr(r, "stopping", True)
+              and not getattr(r, "apuntado", True)):
+            # el proceso ya no esta y aun no se ha apuntado el corte (se esta leyendo lo ultimo): ya es un corte
+            out["cortada"] = {"tipo": "cortada", "path": rel_of(r.path), "pendiente": True}
         if not out["recording"]:
             out["siguiente"] = self._siguiente_pub()
         return out
@@ -5354,7 +5381,8 @@ class App:
             self.monitor = RecorderProcess(None, b.get("mic"), b.get("sys"), APP_DIR, DATA_DIR)
         return {"ok": True}
 
-    def rec_start(self, b):
+    def rec_start(self, b, _cont=None):
+        """_cont: la continuacion de una grabacion cortada (solo _continuar; nunca desde la peticion HTTP)."""
         with self.rec_lock:
             if self.rec and self.rec.alive():
                 raise ApiError("Ya hay una grabación en marcha.")
@@ -5377,10 +5405,11 @@ class App:
             lt = time.localtime()
             label = clean_name(b["name"]) if b.get("name") else ""
             name = time.strftime("%Y-%m-%d %H-%M-%S", lt) + (f" - {label}" if label else "")
+            cont = _cont  # la grabacion se corto: se sigue en la misma carpeta (_rec_terminada)
             # una carpeta por reunion, «AAAA-MM-DD Nombre», dentro de la principal (msg 1158); se crea al grabar
-            mname = fit_meeting_dir(folder, label, lt, name) if por_reunion(self.settings.get()) else None
+            mname = fit_meeting_dir(folder, label, lt, name) if por_reunion(self.settings.get()) and not cont else None
             mdir = free_dir(folder, mname) if mname else None
-            path = os.path.join(mdir or folder, name + ".wav")
+            path = os.path.join(cont["dir"] if cont else mdir or folder, name + ".wav")
             if os.path.exists(path):
                 raise ApiError("Ya existe un archivo con ese nombre.")
             made = mdir is not None and not os.path.isdir(mdir)
@@ -5402,20 +5431,31 @@ class App:
             self.jobs.claimed.add(rel)
             started = False
             try:
+                err_disco, aviso_disco = disco_al_empezar(os.path.dirname(path))  # 691 MB por hora
+                if err_disco:
+                    raise ApiError(err_disco)
+                self.cortes.abierta(path)  # antes de que exista: si Tenca se cae, al arrancar se repara su cabecera
+                if cont and cont.get("corte"):  # antes de que la interfaz vea que graba: «Sigue grabando en …»
+                    self.cortes.cambiar(cont["corte"], continuacion=rel)
                 self.rec = RecorderProcess(path, mic, sys_dev, APP_DIR, DATA_DIR)
+                if cont and cont.get("mute"):  # el micro silenciado: antes de que escriba nada (lee stdin al empezar)
+                    self.rec.send("mute")
                 fin = time.monotonic() + REC_ARRANQUE_S
                 while time.monotonic() < fin:  # espera a que exista el archivo con su cabecera
                     if os.path.isfile(path) and os.path.getsize(path) >= 44 or not self.rec.alive():
                         break
                     time.sleep(0.05)
                 if not self.rec.alive():
-                    raise ApiError("La grabadora no ha podido arrancar (ver %LOCALAPPDATA%\\AudiosApp\\recorder.log).")
+                    raise ApiError(f"La grabadora no ha podido arrancar: {self.rec.motivo()} "
+                                   "(ver %LOCALAPPDATA%\\AudiosApp\\recorder.log).")
                 # desde aqui la grabadora esta grabando: lo que falle ya no la para ni se calla (02/11/2026: un error
                 # tras arrancarla aviso «No se pudo grabar» y dejo la grabacion en marcha sin decirlo, hasta que el
                 # vigilante arranco el directo por su cuenta y la segunda pulsacion la paro)
                 started = True
                 self.parada_auto = None  # «se paró al terminar la llamada» era de la grabación anterior
-                avisos = []
+                avisos = [aviso_disco] if aviso_disco else []
+                self.rec_body, self.rec_cadena = dict(b), cont or {"intentos": 0, "nombre": label}
+                self.rec.on_end = self._rec_terminada  # desde aqui, si se corta sola, se avisa y se sigue
                 preset = b.get("preset") or self.settings.get().get("live_preset") or "medium"
                 v = find_vocab(None, None, b["vocab"]) if b.get("vocab") else None
                 props = {"proyecto": v["project"], "workstream": v["name"], "vocabulario": v["id"]} if v else {}
@@ -5489,7 +5529,8 @@ class App:
                     d.update(rec_sys=sys_dev, live_preset=preset if preset in LIVE_PRESETS else "medium")
                     # el idioma elegido para ESTA reunion va en su .md; el ajuste general solo lo cambia el perfil
                 try:
-                    self.settings.update(upd)
+                    if not cont:  # la continuacion no cambia lo predeterminado
+                        self.settings.update(upd)
                 except Exception as e:
                     log_exc()
                     avisos.append(f"sin guardar los ajustes de la grabación ({e})")
@@ -5504,6 +5545,7 @@ class App:
             finally:
                 if not started:
                     self.jobs.claimed.discard(rel)
+                    self.cortes.cerrada(path)
                     if made:  # la carpeta de la reunion recien creada, si la grabadora no llego a escribir nada
                         try:
                             os.rmdir(mdir)
@@ -5512,8 +5554,8 @@ class App:
                             pass
         self.rec_resumen = " ".join(str(b.get("resumen") or "").split())[:300]  # lo que dice el plan (Inicio, toasts)
         self.siguiente, self._siguiente_cache = None, (0.0, None)  # empieza otra grabación: lo propuesto, fuera
-        try:  # la reunión que se graba: al parar, «la siguiente» es otra (_siguiente)
-            self.grabada = self._que_se_graba(b.get("name"))
+        try:  # la reunión que se graba: al parar, «la siguiente» es otra (_siguiente); la continuación es la misma
+            self.grabada = self.grabada if cont else self._que_se_graba(b.get("name"))
         except Exception:
             log_exc()
             self.grabada = [{"asunto": b["name"], "inicio": None}] if b.get("name") else []
@@ -5539,11 +5581,18 @@ class App:
     def rec_stop(self, b):
         with self.rec_lock:
             r = self.rec
+            if r and not r.alive() and self._cancelar_continuacion(r):  # «Parar» en los 2 s antes de la continuacion
+                return {"path": rel_of(r.path), "seconds": (r.status or {}).get("t", 0)}
             if not r or not r.alive():
                 raise ApiError("No hay ninguna grabación en marcha.")
             secs = r.stop()
             self.rec = None
             self.jobs.claimed.discard(rel_of(r.path))
+            self.cortes.cerrada(r.path)
+        if getattr(r, "fatal", None):  # parada pedida, pero no se pudo escribir lo ultimo: se dice
+            log(f"✖ Grabación parada a medias: {rel_of(r.path)} ({r.fatal})")
+            cue("error")
+            notify("✖ Grabación guardada a medias", r.fatal)
         try:  # cuando hablo yo (micro por encima del audio del PC): sirve para etiquetar «Tu» sin biometria
             tl = r.timeline()
             if tl and os.path.isfile(r.path):
@@ -5560,7 +5609,111 @@ class App:
         if self._movs().get(rel_of(r.path)):  # «solo grabar» no deja trabajos: si tenia otra carpeta, se mueve ya
             threading.Thread(target=self._aplicar_movimientos, args=(rel_of(r.path),), daemon=True,
                              name="mover").start()
-        return {"path": rel_of(r.path), "seconds": secs}
+        return {"path": rel_of(r.path), "seconds": secs, "aviso": getattr(r, "fatal", None)}
+
+    def _rec_terminada(self, r):
+        """La grabadora ha terminado sin que nadie la parase (RecorderProcess.on_end, en su hilo de lectura): se dice
+        (rec_status «cortada», aviso de Windows, sonido de error y «Grabación interrumpida a las hh:mm» en la reunión),
+        se guarda la línea de tiempo del micro, se suelta la reserva y se sigue grabando en una «(continuación)» en la
+        misma carpeta a los ~2 s, como mucho Cortes.MAX_REINTENTOS veces."""
+        rel, motivo, a_las = rel_of(r.path), r.motivo(), time.strftime("%H:%M")
+        cadena = dict(self.rec_cadena or {"intentos": 0, "nombre": ""})
+        parada = getattr(self, "_sin_seguir", None) is r  # «Parar» justo al morir: no se sigue
+        sigue = self.rec is r and cadena["intentos"] < Cortes.MAX_REINTENTOS and not parada
+        # lo primero, antes de tocar el disco: un sondeo que llegue ahora ya ve «cortada»
+        e = self.cortes.apuntar(tipo="cortada", path=rel, nombre=os.path.basename(r.path), a_las=a_las, motivo=motivo,
+                                sigue=sigue, continuacion=None, error="parada a mano" if parada else None)
+        r.apuntado = True  # rec_status deja de dar el «cortada» provisional
+        self.jobs.claimed.discard(rel)
+        self.cortes.cerrada(r.path)
+        try:
+            tl = r.timeline()
+            if tl and os.path.isfile(r.path):
+                voices.write_micro(voices.sidecar_path(r.path), tl)
+        except Exception:
+            log_exc()
+        try:
+            if os.path.isfile(r.path):
+                self.notes_save({"path": rel, "props": {"interrumpida": f"{a_las} · {motivo}"}, "_al_grabar": True})
+        except Exception:
+            log_exc()
+        self.library.at = 0
+        log(f"✖ Grabación interrumpida a las {a_las}: {rel} ({motivo})"
+            + (" · se sigue en una continuación" if sigue else " · no se sigue"))
+        cue("error")
+        notify("✖ Grabación interrumpida", f"A las {a_las}: {motivo}. "
+               + ("Intento seguir grabando en la misma carpeta." if sigue else f"Ya no se graba: abre {APP_NAME}."))
+        if sigue:
+            threading.Thread(target=self._continuar, args=(r, e["id"], cadena), daemon=True,
+                             name="continuar-grabacion").start()
+
+    def _cancelar_continuacion(self, r):
+        """Se cortó y aún no se sigue (los ~2 s de Cortes.REINTENTO_S): ya no se sigue. True si había algo que
+        cancelar."""
+        c = next((x for x in reversed(self.cortes.estado()) if x["tipo"] == "cortada"), None)
+        if c and c["path"] == rel_of(r.path):
+            if not (c["sigue"] and not c["continuacion"]):
+                return False
+            self.cortes.cambiar(c["id"], sigue=False, error="parada a mano")
+        elif not (r.on_end and not r.stopping):  # ni cortada ni a punto de apuntarse como cortada
+            return False
+        self._sin_seguir = r  # tambien si el corte aun no se ha apuntado: _rec_terminada ya no sigue
+        log("■ Parada a mano antes de seguir en la continuación")
+        return True
+
+    def _continuar(self, r, corte, cadena):
+        """La continuación de una grabación cortada: lo mismo (tema, participantes, idioma, directo) en su carpeta."""
+        time.sleep(Cortes.REINTENTO_S)
+        with self.toggle_lock:
+            if self.rec is not r or getattr(self, "_sin_seguir", None) is r:  # se grabo otra cosa o se pidio parar
+                self.cortes.cambiar(corte, sigue=False)
+                return
+            n = cadena["intentos"] + 1
+            nombre = f"{cadena.get('nombre') or ''} {'(continuación)' if n == 1 else f'(continuación {n})'}".strip()
+            sigue_en = dict(cadena, intentos=n, dir=os.path.dirname(r.path), corte=corte,
+                            mute=bool((r.status or {}).get("mic_muted")))
+            body = dict(self.rec_body or {}, name=nombre)
+            try:
+                res = self.rec_start(body, _cont=sigue_en)
+            except Exception as err:
+                msg = err.msg if isinstance(err, ApiError) else f"{err.__class__.__name__}: {err}"
+                self.cortes.cambiar(corte, sigue=False, error=msg, continuacion=None)
+                with self.rec_lock:  # la continuacion no arranco: rec_status vuelve a dar la cortada, no «guardada»
+                    if self.rec is not r and not (self.rec and self.rec.alive()):
+                        self.rec = r
+                log(f"   ✖ no se ha podido seguir grabando: {msg}")
+                cue("error")
+                notify("✖ No se ha podido seguir grabando", msg)
+                return
+        if (r.status or {}).get("mic_muted"):  # el micro estaba silenciado a proposito: tambien en la continuacion
+            try:
+                self.rec_mic({"mute": True})
+            except ApiError:
+                log_exc()
+        log(f"● Sigue grabando tras el corte: {res['path']} ({n} de {Cortes.MAX_REINTENTOS})")
+        notify(f"● {APP_NAME} sigue grabando", f"En «{os.path.basename(res['path'])}», en la misma carpeta.")
+
+    def _recuperar_grabaciones(self):
+        """Al arrancar: las grabaciones propias que quedaron con la cabecera abierta (Tenca se cerró de golpe) se
+        cierran y se dice (Cortes.recuperar: solo las de Tenca y solo si ya no crecen)."""
+        def hecha(p, mtime):
+            hoy = time.strftime("%Y-%m-%d") == time.strftime("%Y-%m-%d", time.localtime(mtime))
+            a_las = time.strftime("%H:%M" if hoy else "%d/%m %H:%M", time.localtime(mtime))
+            motivo = f"{APP_NAME} se cerró mientras grababa (se apagó el PC, un cuelgue o un corte de luz)"
+            rel = None
+            try:
+                rel = rel_of(p)
+                self.notes_save({"path": rel, "props": {"interrumpida": f"{a_las} · {motivo}"}, "_al_grabar": True})
+            except Exception:
+                log_exc()
+            self.cortes.apuntar(tipo="recuperada", path=rel, nombre=os.path.basename(p), a_las=a_las, motivo=motivo,
+                                sigue=False, continuacion=None, error=None)
+            self.library.at = 0
+            log(f"   Se recuperó la grabación {rel or p}, cortada a las {a_las}: cabecera del WAV cerrada")
+        try:
+            self.cortes.recuperar(hecha)
+        except Exception:
+            log_exc()
 
     def shutdown_prepare(self):
         """Antes de terminar el proceso: medidor y grabadora (si quedara alguna) y los trabajos."""

@@ -5,6 +5,8 @@ Fuera de Windows cada pieza se desactiva o se limita a escribir en el log.
 """
 import json
 import os
+import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -135,16 +137,86 @@ def close_wav(path):
         f.write(struct.pack("<I", size - info["data_off"]))
 
 
+# Espacio en disco al empezar a grabar (punto 1 del review del 14/11/2026: no se miraba en ningun sitio). El WAV ocupa
+# 691 MB por hora (48 kHz, estereo, 16 bits); recorder.py lo vuelve a mirar cada 30 s mientras graba.
+WAV_BYTES_S = 48000 * 4
+DISCO_MIN_MB = 500        # por debajo no se empieza
+DISCO_AVISO_MIN = 120     # por debajo de ~2 h se avisa al empezar
+DISCO_FIN_MIN = 15        # y mientras graba, cuando quedan ~15 min
+
+
+def disco_libre(folder):
+    """Bytes libres en el disco de `folder` (None si no se puede saber)."""
+    try:
+        return shutil.disk_usage(folder).free
+    except (OSError, ValueError):
+        return None
+
+
+def minutos_txt(m):
+    return f"{m} min" if m < 90 else f"{m / 60:.1f} h".replace(".", ",")
+
+
+def disco_al_empezar(folder, libre=None):
+    """(error, aviso) para empezar a grabar en `folder`: error si no llega a DISCO_MIN_MB (no se empieza), aviso si
+    no caben ~2 h. (None, None) si hay sitio o no se puede saber."""
+    libre = disco_libre(folder) if libre is None else libre
+    if libre is None:
+        return None, None
+    mb, minutos = int(libre / 1e6), int(libre / WAV_BYTES_S / 60)
+    if mb < DISCO_MIN_MB:
+        return (f"No queda sitio en el disco para grabar: hay {mb} MB libres y hacen falta al menos {DISCO_MIN_MB} MB "
+                "(una hora de reunión ocupa unos 690 MB). Libera espacio o graba en otra carpeta."), None
+    if minutos < DISCO_AVISO_MIN:
+        return None, f"queda poco disco: caben unos {minutos_txt(minutos)} de grabación"
+    return None, None
+
+
+def ultima_linea(path, desde=0, limite=8192):
+    """La ultima linea de recorder.log escrita desde `desde` (bytes) que dice algo de un fallo; None si no hay."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            fin = f.tell()
+            f.seek(max(desde, fin - limite))
+            txt = f.read().decode("utf-8", "replace")
+    except OSError:
+        return None
+    for line in reversed(txt.splitlines()):
+        line = re.sub(r"^\d\d:\d\d:\d\d ", "", line.strip()).lstrip("✖ ").strip()
+        if line and re.search(r"Error|Exception|error|no se puede|se para", line):
+            return line[:200]
+    return None
+
+
 class RecorderProcess:
-    """recorder.py en un proceso aparte: graba (o solo mide niveles) y manda su estado por stdout."""
+    """recorder.py en un proceso aparte: graba (o solo mide niveles) y manda su estado por stdout.
+
+    on_end(self): la grabadora ha terminado sin que nadie la parase (stop() no se llamo): murio, la mataron o se paro
+    por un fallo. motivo() dice por que (su linea «fatal» o la ultima de recorder.log). on_end se pone cuando ya graba
+    (rec_start): si no llega a arrancar, eso lo dice rec_start y no se sigue en una continuacion. Si ya habia terminado
+    al ponerlo, se avisa en ese momento."""
+
+    TIMELINE_S = 30.0  # la linea de tiempo del micro (la de «Tú») se guarda cada 30 s, no solo al parar
+    _on_end, stopping, fatal, avisado, disco_avisado, tl_busy, tl_at = None, False, None, False, False, False, 0.0
+    apuntado = False  # el servidor ya apunto el corte (rec_status deja de dar «cortada» provisional)
+    visto = None  # time.monotonic() del ultimo estado: si deja de llegar, la grabadora esta atascada (sin_estado_s)
 
     def __init__(self, path, mic, sys_dev, app_dir, data_dir):
         self.path, self.started, self.status, self.ended = path, time.time(), {}, False
+        self.stopping, self.fatal, self._on_end = False, None, None
+        self.avisado, self.end_lock = False, threading.Lock()
         self.levels = []  # (t, mic dB, sys dB) cada 0,25 s: cuando hablo yo (para etiquetar «Tu», sin biometria)
         # fuente callada (aviso de la franja del directo): con cada estado; en_llamada lo pone el vigilante de llamadas
         self.callada, self.en_llamada = directo_avisos.Callada(log=log), False
+        self.disco_avisado, self.tl_at, self.tl_busy = False, time.monotonic(), False
+        self.log_path = os.path.join(data_dir, "recorder.log")
+        try:
+            self.log_off = os.path.getsize(self.log_path)
+        except OSError:
+            self.log_off = 0
         args = [path] if path else ["--monitor"]
-        err = open(os.path.join(data_dir, "recorder.log"), "ab")
+        err = open(self.log_path, "ab")
         self.p = subprocess.Popen([sys.executable, "-u", os.path.join(app_dir, "recorder.py"), *args,
                                    "--mic", mic or "default", "--sys", sys_dev or "default"],
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=err, cwd=app_dir,
@@ -157,21 +229,88 @@ class RecorderProcess:
     def _read(self):
         for line in self.p.stdout:
             try:
-                self.status = json.loads(line.decode("utf-8", "replace"))
+                st = json.loads(line.decode("utf-8", "replace"))
             except ValueError:
                 continue
+            if not isinstance(st, dict):
+                continue
+            self.visto = now = time.monotonic()  # una lectura del reloj por estado
+            if st.get("fatal"):  # el porque de un fallo, justo antes de terminar
+                self.fatal = str(st["fatal"])[:200]
+                continue
+            self.status = st
             self.note_levels(self.status)
             if self.path:
                 try:
-                    self.callada.feed(self.status, time.monotonic(), self.en_llamada)
+                    self.callada.feed(self.status, now, self.en_llamada)
+                    self._cada_rato(st, now)
                 except Exception:  # un aviso no puede parar la lectura del estado (ni la grabacion)
                     pass
-        self.ended = True
         if self.path and os.path.isfile(self.path):
             try:
                 close_wav(self.path)  # por si murio sin cerrar la cabecera
             except OSError:
                 pass
+        self.ended = True
+        self._avisar_fin()
+
+    @property
+    def on_end(self):
+        return self._on_end
+
+    @on_end.setter
+    def on_end(self, fn):
+        with self.end_lock:
+            self._on_end = fn
+        self._avisar_fin()  # si ya habia terminado, ahora
+
+    def _avisar_fin(self):
+        if self._on_end is None:  # aun no graba (o es el medidor): nada que avisar; al ponerlo se vuelve a mirar
+            return
+        with self.end_lock:
+            fn = self._on_end
+            if not (self.ended and fn and self.path and not self.stopping) or self.avisado:
+                return
+            self.avisado = True
+        try:
+            fn(self)
+        except Exception as e:  # el aviso de la grabacion cortada no puede romper nada mas
+            log(f"   ✖ aviso de grabación cortada: {e.__class__.__name__}: {e}")
+
+    def _cada_rato(self, st, now):
+        """Con cada estado: la linea de tiempo del micro cada TIMELINE_S (si Tenca se cae, «Tú» no se pierde) y el
+        aviso de Windows cuando quedan ~15 min de disco. La escritura va en otro hilo: este no puede pararse (la
+        tuberia de Windows se llena en ~1,5 s y entonces se para la grabadora)."""
+        if now - self.tl_at >= self.TIMELINE_S and not self.tl_busy and self.levels:
+            self.tl_at, self.tl_busy = now, True
+            threading.Thread(target=self._guardar_timeline, daemon=True, name="micro-timeline").start()
+        m = st.get("disco_min")
+        if isinstance(m, (int, float)) and m <= DISCO_FIN_MIN and not self.disco_avisado:
+            self.disco_avisado = True
+            log(f"   ⚠ queda poco disco: unos {m} min de grabación")
+            notify("⚠ Queda poco disco", f"Caben unos {int(m)} min más de grabación. Libera espacio o la grabación "
+                   "se cortará.")
+
+    def _guardar_timeline(self):
+        try:
+            tl = voices.mic_timeline(self.levels[:])
+            if tl and self.path and os.path.isfile(self.path):
+                voices.write_micro(voices.sidecar_path(self.path), tl)
+        except Exception:
+            pass
+        finally:
+            self.tl_busy = False
+
+    def sin_estado_s(self):
+        """Segundos sin estado de la grabadora (manda uno cada 0,25 s): con un disco de red colgado, por ejemplo, la
+        escritura se bloquea y no avisa de nada."""
+        return round(time.monotonic() - (self.visto or time.monotonic()), 1)
+
+    def motivo(self):
+        """Por que termino la grabadora (para la interfaz): su linea «fatal», la ultima de recorder.log que dice algo
+        de un fallo, o que se cerro de golpe."""
+        return (self.fatal or ultima_linea(self.log_path, self.log_off)
+                or "la grabadora se ha cerrado de golpe, sin dejar motivo")
 
     def note_levels(self, st):
         if not self.path or not isinstance(st, dict) or st.get("t") is None:
@@ -198,6 +337,8 @@ class RecorderProcess:
             return False
 
     def stop(self, timeout=10):
+        with self.end_lock:
+            self.stopping = True  # lo que termine a partir de aqui es una parada pedida, no un corte
         try:
             self.p.stdin.write(b"stop\n")
             self.p.stdin.flush()
@@ -212,6 +353,111 @@ class RecorderProcess:
             if self.path:
                 close_wav(self.path)
         return self.status.get("t", 0)
+
+
+class Cortes:
+    """Grabaciones que se cortaron sin que nadie las parase (la grabadora termino sola) y las que se recuperaron al
+    arrancar (Tenca se cerro de golpe: un corte de luz, un cuelgue, Windows Update). Lo que la interfaz avisa
+    (estado()) y la lista de los WAV propios que estan abiertos (abiertas.json en la carpeta de datos): al arrancar
+    solo se reparan esos, y solo si ya no crecen; nunca un WAV de otro programa (OBS) que siga grabando."""
+
+    MAX_REINTENTOS = 3   # continuaciones automaticas por grabacion (que un fallo que se repite no entre en bucle)
+    REINTENTO_S = 2.0    # lo que se espera antes de seguir en la continuacion
+    GUARDA_S = 12 * 3600  # lo que la interfaz sigue viendo un corte (hasta que lo cierre)
+    QUIETO_S = 3.0       # al arrancar: un WAV que no crece en este tiempo ya no lo escribe nadie
+
+    def __init__(self, data_dir):
+        self.file = os.path.join(data_dir, "grabaciones_abiertas.json")
+        self.lock, self.lista, self.n = threading.Lock(), [], 0
+
+    def _leer(self):
+        try:
+            with open(self.file, encoding="utf-8") as f:
+                d = json.load(f)
+            return [str(p) for p in d if isinstance(p, str)] if isinstance(d, list) else []
+        except (OSError, ValueError):
+            return []
+
+    def _cambiar_abiertas(self, fn):
+        with self.lock:
+            antes = self._leer()
+            ahora = fn(list(antes))
+            if ahora == antes:
+                return
+            try:
+                if ahora:
+                    tmp = self.file + ".tmp"
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        json.dump(ahora, f, ensure_ascii=False)
+                    os.replace(tmp, self.file)
+                elif os.path.exists(self.file):
+                    os.remove(self.file)
+            except OSError as e:
+                log(f"   ✖ no se pudo apuntar la grabación abierta: {e}")
+
+    def abierta(self, path):
+        self._cambiar_abiertas(lambda ps: ps if path in ps else ps + [path])
+
+    def cerrada(self, path):
+        self._cambiar_abiertas(lambda ps: [p for p in ps if p != path])
+
+    def apuntar(self, **kw):
+        with self.lock:
+            self.n += 1
+            e = dict(kw, id=f"{int(time.time() * 1000)}-{self.n}", at=time.time())
+            self.lista = [x for x in self.lista if time.time() - x["at"] < self.GUARDA_S][-19:] + [e]
+            return e
+
+    def cambiar(self, id_, **kw):
+        with self.lock:
+            for x in self.lista:
+                if x["id"] == id_:
+                    x.update(kw)
+
+    def estado(self):
+        with self.lock:
+            return [dict(x) for x in self.lista if time.time() - x["at"] < self.GUARDA_S]
+
+    def recuperar(self, al_recuperar, esperar=None):
+        """Al arrancar: lo que sigue apuntado es una grabacion que Tenca no vio terminar (se cerro grabando: un corte
+        de luz, un cuelgue, la mataron, Windows se apago). Cierra la cabecera de las que quedaron abiertas y ya no
+        crecen, y llama a al_recuperar(ruta, mtime) por cada una, tambien por las que la grabadora llego a cerrar sola
+        (al cerrarse Tenca, la grabadora para y cierra el WAV: el corte hay que decirlo igual). Las que siguen
+        creciendo no se tocan (se miran otra vez al arrancar)."""
+        cand, hechos = [], []
+        for p in self._leer():
+            info = live.wav_info(p) if os.path.isfile(p) else None
+            if not info:
+                self.cerrada(p)  # ya no existe o no es un WAV
+                continue
+            if info.get("data_size") is not None:  # la cerro la grabadora: no hay que tocarla, solo decirlo
+                self.cerrada(p)
+                hechos.append(p)
+                try:
+                    al_recuperar(p, os.path.getmtime(p))
+                except OSError:
+                    pass
+                continue
+            try:
+                cand.append((p, os.path.getsize(p), os.path.getmtime(p)))
+            except OSError:
+                continue
+        if not cand:
+            return hechos
+        time.sleep(self.QUIETO_S if esperar is None else esperar)
+        for p, size, mtime in cand:
+            try:
+                if os.path.getsize(p) != size or os.path.getmtime(p) != mtime:
+                    log(f"   la grabación abierta {os.path.basename(p)} sigue creciendo: no se toca")
+                    continue
+                close_wav(p)
+            except OSError as e:
+                log(f"   ✖ no se pudo cerrar la grabación {os.path.basename(p)}: {e}")
+                continue
+            self.cerrada(p)
+            hechos.append(p)
+            al_recuperar(p, mtime)
+        return hechos
 
 
 # ----------------------------------------------------------------------------- reunion en curso

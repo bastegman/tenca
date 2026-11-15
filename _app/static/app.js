@@ -161,12 +161,22 @@ function hlTerms(text, terms) {
   return out + esc(text.slice(i));
 }
 
-async function api(path, body) {
+/* timeout (ms): tope de la petición entera (los sondeos: 5 s). Sin respuesta (el servidor caído, colgado o sin
+   red) el error dice «Tenca no responde», con noResponde = true, y no el «Failed to fetch» del navegador (review del
+   14/11/2026, punto 1). */
+async function api(path, body, timeout) {
   const opt = body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Audios': '1' }, body: JSON.stringify(body) };
-  const r = await fetch(path, opt);
-  let j;
-  try { j = await r.json(); } catch { j = { error: r.statusText } }
-  if (!r.ok || j.error) throw Object.assign(new Error(j.error || r.statusText), { status: r.status });
+  const ctl = timeout ? new AbortController() : null;
+  if (ctl) opt.signal = ctl.signal;
+  const tm = ctl ? setTimeout(() => ctl.abort(), timeout) : null;
+  let r, j;
+  try {
+    r = await fetch(path, opt);
+    try { j = await r.json(); } catch (e) { if (ctl && ctl.signal.aborted) throw e; j = { error: r.statusText }; }
+  } catch {
+    throw Object.assign(new Error(`${APP_NAME} no responde`), { noResponde: true });
+  } finally { if (tm) clearTimeout(tm); }
+  if (!r.ok || j.error) throw Object.assign(new Error(j.error || r.statusText), { status: r.status });  // 409: Ajustes
   return j;
 }
 
@@ -385,11 +395,25 @@ function liveBanner(a) {
    asi que el resto de la app lo trata como cualquier grabacion en vivo */
 S.rec = { recording: false };
 let recTimer = null, recDialog = false;
+/* Latido: el sondeo de la grabadora es también el de «¿sigue ahí Tenca?». Con tope de 5 s por petición y, tras 3
+   sondeos seguidos sin respuesta, una franja roja fija que se quita sola al volver (review del 14/11/2026, punto 1:
+   con el servidor caído la pantalla seguía «EN VIVO» con los relojes parados y sin un aviso). */
+const LATIDO_MS = 5000, LATIDO_FALLOS = 3;
+S.latido = { fallos: 0, grabando: false };
 async function pollRec() {
   clearTimeout(recTimer);
   if (S.off) return;
   const was = !!S.rec.recording;
-  try { S.rec = await api('/api/rec/status' + (recDialog ? '?monitor=1' : '')); } catch { /* reiniciando */ }
+  let ok = true;
+  try {
+    S.rec = await api('/api/rec/status' + (recDialog ? '?monitor=1' : ''), undefined, LATIDO_MS);
+    S.latido.fallos = 0;
+  } catch (err) {
+    ok = false;  // reiniciándose, colgado o caído: tras LATIDO_FALLOS seguidos se dice
+    if (err.noResponde) { if (!S.latido.fallos) S.latido.grabando = !!S.rec.recording; S.latido.fallos++; }
+  }
+  renderLatido();
+  if (ok) avisarCortes(S.rec.cortes || []);
   // la app se ha actualizado y reiniciado: se recarga sola (sin cortar un dialogo ni un audio que suena)
   if (S.rec.build) {
     S.build = S.build || S.rec.build;
@@ -400,15 +424,87 @@ async function pollRec() {
   renderRecBtn(); updateMeters(); renderMeetChip();
   if (typeof renderDirectoAvisos === 'function') renderDirectoAvisos();  // fuente callada y «paro en 30 s» (directo.js)
   if (typeof renderSiguiente === 'function') renderSiguiente();  // «Ya ha empezado «X»» al parar (hoy.js)
-  recTimer = setTimeout(pollRec, S.rec.recording || recDialog ? 300 : 1500);
+  recTimer = setTimeout(pollRec, !ok ? 1500 : S.rec.recording || recDialog ? 300 : 1500);
 }
 /* empezo o paro la grabacion (tambien con Ctrl+Alt+R desde otro programa) */
 function onRecChange() {
   refreshTree(true); pollJobs(true);
+  const corte = (S.rec.cortes || []).filter(c => c.tipo === 'cortada').pop();
+  if (S.rec.recording && corte && corte.continuacion === S.rec.path) {  // la continuación de una grabación cortada
+    S.recLocal = false;
+    return toast(`● Sigue grabando en «${esc(nfc(corte.continuacion.split('/').pop()))}», en la misma carpeta`, '', () => go('a', S.rec.path));
+  }
+  if (!S.rec.recording && S.rec.cortada) return;  // se ha cortado sola: no es «Grabación guardada» (avisarCortes)
   if (S.recLocal) { S.recLocal = false; return; }  // lo ha pedido esta misma pagina: ya avisa ella
   if (S.rec.recording) toast(`● Grabando${S.rec.resumen ? ` · ${esc(S.rec.resumen)}` : ''} · <b>Ctrl+Alt+R</b> para parar · clic para verla y cambiar el idioma o el contexto`, '', () => go('a', S.rec.path));
   else toast((typeof directoParadaTexto === 'function' && directoParadaTexto(S.rec)) || '■ Grabación guardada · la transcripción termina sola');
 }
+
+/* ---------------------------------------------------------------- franjas fijas: Tenca no responde y grabación cortada */
+function franjasEl() {
+  let el = $('#franjas');
+  if (!el) { el = document.createElement('div'); el.id = 'franjas'; el.className = 'franjas'; el.setAttribute('role', 'alert'); document.body.prepend(el); }
+  return el;
+}
+function franja(id, html) {
+  const box = franjasEl();
+  let el = box.querySelector(`[data-franja="${id}"]`);
+  if (!html) { if (el) el.remove(); return; }
+  if (!el) { el = document.createElement('div'); el.className = 'franja'; el.dataset.franja = id; box.append(el); }
+  if (el.dataset.html !== html) { el.dataset.html = html; el.innerHTML = html; }
+}
+function renderLatido() {
+  const caido = S.latido.fallos >= LATIDO_FALLOS;
+  franja('latido', caido ? `<span><b>${esc(APP_NAME)} no responde</b>${S.latido.grabando ? ': puede que no se esté grabando' : ''}</span>`
+    + '<span class="sp"></span><button class="btn sm" type="button" data-franja-act="reabrir">Reabrir</button>' : '');
+}
+/* «Reabrir»: si el servidor contesta, se recarga la página; si no, se dice qué hacer (la ventana no puede abrirlo) */
+async function latidoReabrir() {
+  try { await api('/api/rec/status', undefined, 3000); location.reload(); }
+  catch { toast(`${esc(APP_NAME)} sigue sin responder. Cierra esta ventana y vuelve a abrir ${esc(APP_NAME)} con el acceso directo del escritorio.`, 'err', null, true); }
+}
+/* Grabaciones cortadas (la grabadora terminó sin que nadie la parase) y recuperadas al arrancar: aviso que no caduca
+   (se cierra con un clic), franja roja hasta cerrarla y, desde el servidor, aviso de Windows y el sonido de error.
+   Lo que ya cerraste no vuelve a salir (localStorage). */
+const CORTES_VISTOS = 'tenca.cortes.vistos';
+function cortesVistos() { try { return JSON.parse(localStorage.getItem(CORTES_VISTOS) || '[]'); } catch { return []; } }
+function corteVisto(id) { const v = cortesVistos().filter(x => x !== id).concat(id).slice(-50); try { localStorage.setItem(CORTES_VISTOS, JSON.stringify(v)); } catch { /* sin almacenamiento */ } }
+function corteTexto(c) {
+  const nombre = `«${esc(nfc(c.nombre || ''))}»`;
+  if (c.tipo === 'recuperada') return `<b>Se recuperó la grabación ${nombre}</b>, cortada a las ${esc(c.a_las)}: ${esc(c.motivo)}.`;
+  // en pasado o en gerundio: el aviso se queda y no puede decir «sigue grabando» cuando ya no (revisión 3)
+  const sigue = c.continuacion ? ` Se siguió grabando en «${esc(nfc(c.continuacion.split('/').pop()))}», en la misma carpeta.`
+    : c.sigue ? ' Intentando seguir en la misma carpeta…'
+      : ` <b>No se siguió grabando</b>${c.error ? `: ${esc(c.error)}` : ''}.`;
+  return `<b>Grabación interrumpida a las ${esc(c.a_las)}</b> (${nombre}): ${esc(c.motivo)}.${sigue}`;
+}
+S.cortesAvisados = new Set();
+function avisarCortes(cortes) {
+  const vistos = cortesVistos(), vivos = cortes.filter(c => !vistos.includes(c.id));
+  for (const c of vivos) {
+    const html = corteTexto(c);
+    if (S.cortesAvisados.has(c.id)) {  // ya está a la vista: si el corte ha cambiado (sigue / no sigue), se rehace
+      $$('.toast[data-corte]').forEach(t => { if (t.dataset.corte === c.id && t.dataset.html !== html) { t.dataset.html = html; t.innerHTML = html + '<span class="toast-x" aria-hidden="true">✕</span>'; } });
+      continue;
+    }
+    S.cortesAvisados.add(c.id);
+    const t = toast(html, 'err', () => { corteVisto(c.id); avisarCortes(S.rec.cortes || []); }, true);
+    t.dataset.corte = c.id; t.dataset.html = html;
+  }
+  const box = franjasEl();
+  box.querySelectorAll('[data-franja^="corte-"]').forEach(el => { if (!vivos.some(c => `corte-${c.id}` === el.dataset.franja)) el.remove(); });
+  for (const c of vivos) franja(`corte-${c.id}`, `<span>${corteTexto(c)}</span><span class="sp"></span>`
+    + (c.path ? `<button class="btn sm" type="button" data-franja-act="ver" data-path="${esc(c.path)}">Ver la reunión</button>` : '')
+    + `<button class="btn sm ghost" type="button" data-franja-act="cerrar" data-id="${esc(c.id)}" title="Cerrar este aviso">✕</button>`);
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-franja-act]');
+  if (!b) return;
+  const act = b.dataset.franjaAct;
+  if (act === 'reabrir') return latidoReabrir();
+  if (act === 'ver') return go('a', b.dataset.path);
+  if (act === 'cerrar') { corteVisto(b.dataset.id); $$('.toast[data-corte]').forEach(t => { if (t.dataset.corte === b.dataset.id) t.remove(); }); avisarCortes(S.rec.cortes || []); }
+});
 async function toggleRec() {
   try { S.recLocal = true; await api('/api/rec/toggle', {}); pollRec(); }
   catch (err) { S.recLocal = false; toast(esc(err.message), 'err'); }
@@ -445,7 +541,7 @@ async function stopRec() {
   try {
     S.recLocal = true;
     const r = await api('/api/rec/stop', {});
-    toast(`Grabación guardada · ${fmtLeft(r.seconds)}`);
+    toast(r.aviso ? `✖ Grabación guardada a medias: ${esc(r.aviso)}` : `Grabación guardada · ${fmtLeft(r.seconds)}`, r.aviso ? 'err' : '', null, !!r.aviso);
     pollRec(); refreshTree(true); pollJobs(true);
   } catch (err) { S.recLocal = false; toast(esc(err.message), 'err'); }
 }
@@ -915,6 +1011,7 @@ function renderAudioHead(a, force) {
   const docs = (a.parent?.docs || []);
   el.innerHTML = `${crumbs(a.folder)}${typeof destinoPendienteHtml === 'function' ? destinoPendienteHtml(a) : ''}
     ${titleRowHtml(a)}
+    ${interrumpidaHtml(a)}
     ${propsHtml(a)}
     <div class="actions">
       <button class="btn primary" data-act="play" data-path="${esc(a.path)}">${I.play}${S.playing === a.path && !audio.paused ? 'Pausa' : 'Reproducir'}</button>
@@ -940,6 +1037,12 @@ function renderAudioHead(a, force) {
         { resume: true, button: `Continuar desde ${fmtClock(a.tx_end)}` })
       : txBox([a], has ? 'Volver a transcribir (entera)' : 'Transcribir esta grabación');
   }
+}
+
+/* la grabadora se cortó (o Tenca se cerró) sin que nadie la parase: lo dice la cabecera de la reunión (props, .md) */
+function interrumpidaHtml(a) {
+  const v = ((a && a.props) || {}).interrumpida;
+  return v ? `<div class="notice err interrumpida">${I.info}Grabación interrumpida a las ${esc(String(v))}</div>` : '';
 }
 
 function renderAudioJob(a) {
@@ -1744,7 +1847,7 @@ async function pollJobs(now) {
   clearTimeout(jobsTimer);
   if (S.off) return;
   try {
-    const r = await api('/api/jobs');
+    const r = await api('/api/jobs', undefined, 5000);  // con tope: una petición colgada no para el sondeo
     onJobs(r.jobs);
     if (typeof onMovimientos === 'function') onMovimientos(r.movimientos);  // cambiar la carpeta en pleno directo
   } catch { /* servidor reiniciandose */ }
@@ -2651,13 +2754,15 @@ function shutdownScreen() {
     <h2 style="margin:16px 0 8px">${esc(APP_NAME)} se ha apagado</h2><p class="muted">Cierra esta ventana. Para volver a usar ${esc(APP_NAME)}, ábrela con el acceso directo del escritorio.</p></div>`;
 }
 
-function toast(html, kind = '', onclick) {
+/* keep: no caduca (se cierra con un clic): la grabación cortada, que no puede irse sola a los 9 s */
+function toast(html, kind = '', onclick, keep) {
   const el = document.createElement('div');
-  el.className = 'toast ' + kind;
-  el.innerHTML = html;
+  el.className = 'toast ' + kind + (keep ? ' keep' : '');
+  el.innerHTML = html + (keep ? '<span class="toast-x" aria-hidden="true">✕</span>' : '');
   el.onclick = () => { onclick && onclick(); el.remove(); };
   $('#toasts').append(el);
-  setTimeout(() => el.remove(), kind === 'err' ? 9000 : 4000);
+  if (!keep) setTimeout(() => el.remove(), kind === 'err' ? 9000 : 4000);
+  return el;
 }
 
 /* ---------------------------------------------------------------- arranque */

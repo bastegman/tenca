@@ -10,6 +10,12 @@ Qué es
 
 INSTALAR (una sola vez, unos 5 minutos, sin permisos de administrador)
 ----------------------------------------------------------------------------------
+  La versión publicada de Tenca se descarga del último Release (Tenca-instalador.zip):
+  https://github.com/bastegman/tenca/releases/latest
+  Si lo bajaste de ahí, en esa página está su sha256. Para comprobar que es ese, en la carpeta
+  donde lo descargaste: certutil -hashfile Tenca-instalador.zip SHA256 tiene que dar la misma
+  línea. Un zip que te pasó otra persona (Compartir Tenca) no tiene sha256 publicado.
+
   1. Antes de descomprimir: clic derecho en el .zip > Propiedades > marca "Desbloquear" > Aceptar. Así
      Windows no marca INSTALAR.bat como "bajado de Internet" y no sale el aviso de "Unknown publisher"
      ("Windows protegió su PC"). Luego descomprime el .zip donde sea (Descargas vale).
@@ -50,6 +56,9 @@ INSTALAR (una sola vez, unos 5 minutos, sin permisos de administrador)
 
 ACTUALIZAR A UNA VERSIÓN NUEVA
 ----------------------------------------------------------------------------------
+  La versión nueva está en el último Release, en el mismo sitio:
+  https://github.com/bastegman/tenca/releases/latest (con su sha256, como dice INSTALAR).
+
   Descomprime el zip nuevo donde sea y ejecuta su INSTALAR.bat. Si ya tenías Tenca (o una versión
   anterior, cuando se llamaba Chuleta o Notas), el instalador la encuentra (por Aplicaciones
   instaladas o por su acceso directo), la cierra (salvo que esté grabando) y actualiza la de siempre,
