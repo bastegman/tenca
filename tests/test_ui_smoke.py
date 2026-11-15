@@ -1732,6 +1732,47 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         self.assertEqual(err, [], (err, red))
         self.assertEqual(red, [], red)
 
+    def test_ajustes_revision_2(self):
+        """Revisión 2 de ajustes-uno: un texto que acaba en espacio dice «Guardado ✓», no «Guardado como «todo el
+        texto»» (P1-A); quitar una clave guardada justo después de escribir otra la quita (las filas se ponen al día en
+        su sitio, P1-B); un texto que no se pudo guardar se reintenta al cerrar (P2-3)."""
+        pg, errores, red = self.pagina()
+        self.addCleanup(self.api_post, "/api/settings", {"cloud": {"extra_keys_by": {"groq": []}}, "prompt": "",
+                                                         "summary": {"extra": ""}})
+        pg.goto(f"{self.base}/?t={self.token}", wait_until="networkidle")
+        pg.wait_for_selector("#main h1:has-text('Hoy')", timeout=15000)
+        pg.evaluate("S.config.procesado = 'api'")
+        pg.click("#btnSettings")
+        pg.click(".aj-nav [data-sec='vocabulario']")
+        pg.fill("#sPrompt", "Acme, Contoso, ")
+        self.guardado_junto_a(pg, "#sPrompt")
+        self.assertNotIn("como", pg.evaluate("document.querySelector('#sPrompt')._ajMarca.textContent"))
+        # dos claves: la primera guardada; escribir otra y, enseguida, quitar la primera
+        pg.click(".aj-nav [data-sec='avanzado']")
+        pg.click("#dkAdd")
+        pg.fill("#dkRows [data-xkey]", "gsk_primera_r2_00000000000000")
+        pg.press("#dkRows [data-xkey]", "Tab")
+        pg.wait_for_selector("#dkRows [data-mask]", state="attached", timeout=8000)
+        pg.click("#dkAdd")
+        pg.fill("#dkRows .dk-row:nth-child(2) [data-xkey]", "gsk_segunda_r2_00000000000000")
+        pg.click("#dkRows .dk-row:first-child [data-xkey-del]")  # sale de la casilla (se guarda) y quita la primera
+        pg.click("#modalSobre:not(.hidden) [data-m='ok']")
+        pg.wait_for_function("api('/api/config').then(c => (c.cloud.extra_keys_by?.groq || []).length === 1"
+                             " && c.cloud.extra_keys_by.groq[0].includes('…') && !c.cloud.extra_keys_by.groq[0]"
+                             ".startsWith('gsk_pri'))", timeout=8000)
+        self.assertEqual(pg.locator("#dkRows .dk-row").count(), 1)
+        # un texto que falla una vez: se queda escrito y se vuelve a intentar al cerrar
+        pg.click(".aj-nav [data-sec='resumen']")
+        pg.route("**/api/settings", lambda r: r.fulfill(status=500, json={"error": "fallo r2"}))
+        pg.fill("#sExtra", "Texto que falla r2")
+        self.guardado_junto_a(pg, "#sExtra", "fallo r2")
+        pg.unroute("**/api/settings")
+        pg.keyboard.press("Escape")
+        pg.wait_for_function("api('/api/config').then(c => c.summary.extra === 'Texto que falla r2')", timeout=8000)
+        err, red = self.limpiar(errores, [r for r in red if "/api/settings" not in r])
+        self.assertEqual(err, [], (err, red))
+        self.assertEqual(red, [], red)
+
 
 if __name__ == "__main__":
     unittest.main()
