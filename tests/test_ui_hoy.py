@@ -621,5 +621,112 @@ class SiguienteReunionTests(Base):
         self.sin_errores(permitidas=("/api/rec/siguiente",))
 
 
+class RevisarSeVaciaTests(Base):
+    """«Para revisar» que se puede vaciar (punto 38 del review del 14/11/2026): «No es de ningún proyecto» es una
+    respuesta que quita la fila; «No se pudo transcribir» dice por qué, con su botón; y «Actualizar» en una llamada dice
+    que la agenda se leerá al colgar (el servidor no relee Outlook mientras: _agenda_paso). Su propio servidor: aquí se
+    responde por reuniones que otras clases esperan ver pendientes."""
+    AJUSTES = {"outlook_on": True}
+    ENV = {"CHULETA_PRUEBAS_OUTLOOK": AGENDA}
+
+    @classmethod
+    def preparar(cls, root):
+        os.makedirs(os.path.join(root, "Alfa", "Vocabulario"), exist_ok=True)
+        with open(os.path.join(root, "Alfa", "Vocabulario", "General.txt"), "w", encoding="utf-8") as f:
+            f.write("Alfa, término\n")
+        now = datetime.now().replace(second=0, microsecond=0)
+        reunion(root, "", now - timedelta(hours=3), "Charla suelta", 10, txt=True)
+        base = reunion(root, "Alfa", now - timedelta(hours=1), "Entrevista fallida", 5,
+                       {"proyecto": "Alfa", "workstream": "General", "titulo": "Entrevista fallida"})
+        cls.fallida = os.path.relpath(base + ".wav", root).replace(os.sep, "/")
+
+    def test_fallo_con_su_motivo_y_sin_proyecto_que_quita_la_fila(self):
+        aviso = {"frase": "Claude Code no tiene la sesión iniciada: entra con tu cuenta y vuelve a probar.",
+                 "accion": {"tipo": "procesado", "etiqueta": "Revisar en Ajustes"}, "tecnico": "Please run /login"}
+        job = {"id": "t1", "path": self.fallida, "name": "a.wav", "preset": "rapido", "engine": "local",
+               "status": "error", "progress": 0, "stage": "Error", "error": "Please run /login", "kind": "transcribe",
+               "created": 1, "elapsed": 3, "aviso": aviso}
+        pg = self.pagina()
+        cuerpo = json.dumps({"jobs": [job], "movimientos": []})
+        pg.route("**/api/jobs", lambda route: route.fulfill(status=200, content_type="application/json", body=cuerpo))
+        self.addCleanup(pg.unroute_all, behavior="ignoreErrors")
+        notas = []
+
+        def peticion(r):
+            if r.url.endswith("/api/notes") and r.method == "POST":
+                notas.append(json.loads(r.post_data))
+        pg.on("request", peticion)
+        pg.reload(wait_until="networkidle")
+        fallida = pg.locator(".hoy-revisar .hr-fila", has_text="Entrevista fallida")
+        fallida.wait_for(timeout=15000)
+        # por qué falló, en la fila (antes solo en la Cola), con el botón de explicar.py junto a «Reintentar»
+        self.assertIn("No se pudo transcribir", fallida.inner_text())
+        self.assertEqual(fallida.locator(".hr-motivo").inner_text(), aviso["frase"])
+        self.assertEqual(fallida.locator(".hr-motivo").get_attribute("title"), "Please run /login")
+        self.assertEqual(fallida.locator("[data-k='transcribir']").inner_text(), "Reintentar")
+        antes = pg.evaluate("location.hash")
+        fallida.locator("[data-cfg-accion='procesado']").click()  # Ajustes › Procesado, sin abrir la reunión
+        pg.wait_for_selector("#modal .dialog.aj section[data-secc='procesado']:not([hidden])", timeout=5000)
+        self.assertEqual(pg.evaluate("location.hash"), antes)
+        pg.keyboard.press("Escape")
+        pg.wait_for_selector("#modal.hidden", state="attached", timeout=5000)
+        # «No es de ningún proyecto»: una respuesta; la fila se va y no vuelve al recargar
+        suelta = pg.locator(".hoy-revisar .hr-fila", has_text="Charla suelta")
+        suelta.locator("[data-k='proyecto']").click()
+        pg.wait_for_selector("#modal:not(.hidden) #hoyProy", timeout=5000)
+        self.assertTrue(pg.is_disabled("#modal [data-m='ok']"))  # sin elegir, «Guardar» no guarda nada
+        pg.click("#modal [data-m='ninguno']")
+        pg.wait_for_selector("#modal.hidden", state="attached", timeout=5000)
+        suelta.wait_for(state="detached", timeout=5000)
+        self.assertIn({"sin_proyecto": "sí"}, [n.get("props") for n in notas])
+        self.captura(pg, "revisar_sin_proyecto")
+        pg.reload(wait_until="networkidle")
+        pg.wait_for_selector(".hoy-revisar .hr-fila:has-text('Entrevista fallida')", timeout=15000)
+        self.assertEqual(suelta.count(), 0)
+        # y si luego se elige uno, el «ninguno» se olvida
+        pg.evaluate("() => { const a = allAudios().find(x => (x.label || '').includes('Charla suelta'));"
+                    " hoyElegirProyecto(a); }")
+        pg.wait_for_selector("#modal:not(.hidden) #hoyProy", timeout=5000)
+        alfa = pg.eval_on_selector("#hoyProy", "s => [...s.options].find(o => o.text.startsWith('General')).value")
+        pg.select_option("#hoyProy", alfa)
+        pg.click("#modal [data-m='ok']")
+        pg.wait_for_selector("#modal.hidden", state="attached", timeout=5000)
+        self.assertEqual(notas[-1]["props"], {"vocabulario": alfa, "sin_proyecto": ""})
+        self.assertNotIn("Charla suelta", pg.evaluate("JSON.stringify(localStorage.getItem('tenca.sinProyecto'))"))
+        self.sin_errores()
+
+    def test_actualizar_en_una_llamada_se_lee_al_colgar(self):
+        pg = self.pagina()
+        pg.wait_for_selector("#hoyAgenda .ag-pie [data-act='hoy-agenda-leer']", timeout=30000)
+        llamada = {"en": True}
+
+        def status(route):
+            r = route.fetch()
+            d = r.json()
+            if llamada["en"]:
+                d["meeting"] = "Teams"
+            route.fulfill(response=r, body=json.dumps(d), content_type="application/json")
+        pg.route("**/api/rec/status*", status)
+        self.addCleanup(pg.unroute_all, behavior="ignoreErrors")
+        pg.wait_for_function("S.rec.meeting === 'Teams'", timeout=10000)
+        hoy = []
+        pg.on("request", lambda r: hoy.append(r.url) if "/api/hoy" in r.url else None)
+        pg.click("#hoyAgenda .ag-pie [data-act='hoy-agenda-leer']")
+        pg.wait_for_selector("#hoyAgenda .ag-pie:has-text('En una llamada no se lee Outlook: se leerá al colgar')",
+                             timeout=5000)
+        self.assertNotIn("Leyendo de Outlook", pg.inner_text("#hoyAgenda .ag-pie"))
+        pg.wait_for_timeout(800)
+        self.assertFalse([u for u in hoy if "refrescar=1" in u], hoy)  # no se pide una lectura que no se hará
+        self.captura(pg, "actualizar_en_llamada")
+        # al colgar: el sondeo de Hoy pide la lectura y el aviso se va
+        llamada["en"] = False
+        pg.wait_for_function("!S.rec.meeting", timeout=10000)
+        with pg.expect_request(lambda r: "/api/hoy?refrescar=1" in r.url, timeout=10000):
+            pg.evaluate("hoyCargar()")
+        pg.wait_for_function("!document.querySelector('#hoyAgenda .ag-pie').textContent.includes('al colgar')",
+                             timeout=10000)
+        self.sin_errores()
+
+
 if __name__ == "__main__":
     unittest.main()

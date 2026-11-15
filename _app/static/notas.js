@@ -1090,7 +1090,10 @@ async function importFiles(files, folder) {
   for (const f of files) {
     toast(`Añadiendo ${esc(f.name)} (${fmtSize(f.size)})…`);
     try {
-      const r = await fetch(`/api/import?folder=${enc(folder)}&name=${enc(f.name)}`, { method: 'POST', headers: { 'X-Audios': '1' }, body: f }).then(x => x.json());
+      const x = await fetch(`/api/import?folder=${enc(folder)}&name=${enc(f.name)}`, { method: 'POST', headers: { 'X-Audios': '1' }, body: f })
+        .catch(() => { throw new Error(`${APP_NAME} no responde`); });
+      const r = await x.json().catch(() => ({ error: x.statusText }));
+      if (x.status >= 500) throw errorInterno(x.status, r, x.statusText);  // sin el texto de Python (punto 11)
       if (r.error) throw new Error(r.error);
       last = r.path;
     } catch (err) { toast(`${esc(f.name)}: ${esc(err.message)}`, 'err'); }

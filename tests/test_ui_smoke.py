@@ -1670,7 +1670,9 @@ class InterfazEnNavegadorTests(unittest.TestCase):
             pg.click(".aj-nav [data-sec='vocabulario']")
             pg.fill("#sPrompt", "Texto largo que no se pierde r1")
             pg.press("#sPrompt", "Tab")
-            self.guardado_junto_a(pg, "#sPrompt", "fallo pasajero r1")
+            # (un 500: la frase de siempre y no el texto técnico, punto 11 del review; el técnico, al pasar por encima)
+            self.guardado_junto_a(pg, "#sPrompt", "Algo ha fallado dentro de")
+            self.assertEqual(pg.evaluate("document.querySelector('#sPrompt')._ajMarca.title"), "fallo pasajero r1")
             self.assertEqual(pg.input_value("#sPrompt"), "Texto largo que no se pierde r1")
             pg.unroute("**/api/settings")
             pg.keyboard.press("Escape")
@@ -1775,7 +1777,7 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         pg.click(".aj-nav [data-sec='resumen']")
         pg.route("**/api/settings", lambda r: r.fulfill(status=500, json={"error": "fallo r2"}))
         pg.fill("#sExtra", "Texto que falla r2")
-        self.guardado_junto_a(pg, "#sExtra", "fallo r2")
+        self.guardado_junto_a(pg, "#sExtra", "Algo ha fallado dentro de")  # (un 500, punto 11)
         pg.unroute("**/api/settings")
         pg.keyboard.press("Escape")
         pg.wait_for_function("api('/api/config').then(c => c.summary.extra === 'Texto que falla r2')", timeout=8000)
@@ -1827,6 +1829,203 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         err, red = self.limpiar(errores, red)
         self.assertEqual(err, [], (err, red))
         self.assertEqual(red, [], red)
+
+    # ---------------------------------------------------------------- errores que se leen (punto 11)
+
+    def test_avisos_de_error_no_caducan_y_se_releen(self):
+        """Punto 11 del review: un aviso de error ya no se va a los 9 s; se cierra con ✕ y lleva el botón de
+        explicar.py, que hace lo suyo sin abrir la reunión. Un 500 dice «Algo ha fallado dentro de Tenca», con el texto
+        de Python plegado en «Detalle». La Cola tiene «Avisos» para releerlos (también tras recargar), y el botón de
+        un error de la Cola funciona (el clic se paraba en la Cola y no llegaba a configurar.js)."""
+        rel = "Proyecto/2026-10-30 10-00-00 - Comité de prueba.wav"
+        aviso = {"frase": "Claude Code no tiene la sesión iniciada: entra con tu cuenta y vuelve a probar.",
+                 "accion": {"tipo": "procesado", "etiqueta": "Revisar en Ajustes"}, "tecnico": "Please run /login"}
+        job = {"id": "t9", "path": rel, "name": "a.wav", "preset": "rapido", "engine": "local", "status": "running",
+               "progress": 0.3, "stage": "Transcribiendo", "error": None, "kind": "transcribe", "created": 1,
+               "elapsed": 5}
+        estado = {"job": job}
+
+        def jobs(route):
+            route.fulfill(status=200, content_type="application/json",
+                          body=json.dumps({"jobs": [estado["job"]], "movimientos": []}))
+
+        def roto(route):
+            route.fulfill(status=500, content_type="application/json",
+                          body=json.dumps({"error": "'NoneType' object has no attribute 'get'"}))
+        pg, errores, red = self.pagina()
+        pg.route("**/api/jobs", jobs)
+        pg.route("**/api/acerca/abrir", roto)
+        self.addCleanup(pg.unroute_all, behavior="ignoreErrors")
+        pg.goto(f"{self.base}/?t={self.token}", wait_until="networkidle")
+        pg.wait_for_selector("#main h1:has-text('Hoy')", timeout=15000)
+        pg.evaluate("sessionStorage.removeItem('tenca.avisos')")
+        estado["job"] = dict(job, status="error", stage="Error", error="Please run /login", aviso=aviso)
+        t = pg.locator("#toasts .toast.err", has_text="No se pudo transcribir")
+        t.wait_for(timeout=15000)
+        self.assertIn("Claude Code no tiene la sesión iniciada", t.inner_text())
+        self.assertEqual(t.locator("button.toast-x[aria-label='Cerrar este aviso']").count(), 1)
+        self.assertEqual(t.locator("[data-cfg-accion='procesado']").inner_text(), "Revisar en Ajustes")
+        time.sleep(9.5)  # se iba a los 9 s
+        self.assertEqual(t.count(), 1)
+        # su botón abre lo suyo (Ajustes › Procesado) y no la reunión; el aviso sigue
+        antes = pg.evaluate("location.hash")
+        t.locator("[data-cfg-accion]").click()
+        pg.wait_for_selector("#modal .dialog.aj section[data-secc='procesado']:not([hidden])", timeout=5000)
+        self.assertEqual(pg.evaluate("location.hash"), antes)
+        self.assertEqual(t.count(), 1)
+        pg.keyboard.press("Escape")
+        pg.wait_for_selector("#modal.hidden", state="attached", timeout=5000)
+        # ✕ lo cierra, sin abrir la reunión
+        t.locator(".toast-x").click()
+        self.assertEqual(t.count(), 0)
+        self.assertEqual(pg.evaluate("location.hash"), antes)
+        # un 500: la frase, y el texto técnico solo al desplegar «Detalle»; el mismo dos veces no se apila
+        llamar = "() => api('/api/acerca/abrir', { que: 'datos' }).catch(e => toast(esc(e.message), 'err'))"
+        pg.evaluate(llamar)
+        pg.evaluate(llamar)
+        f = pg.locator("#toasts .toast.err", has_text="Algo ha fallado dentro de")
+        f.wait_for(timeout=5000)
+        self.assertEqual(f.count(), 1)
+        self.assertNotIn("NoneType", f.inner_text())
+        f.locator("summary:has-text('Detalle')").click()
+        self.assertIn("'NoneType' object has no attribute 'get'", f.locator(".toast-tec").inner_text())
+        self.assertEqual(f.count(), 1)  # desplegar «Detalle» no lo cierra
+        # lo que no pasa por api(): subir un audio (XHR) e importarlo (fetch), con la misma frase (revisión 1, P2-1)
+        pg.route("**/api/import*", roto)
+        pg.route("**/api/subir*", roto)
+        subido = pg.evaluate("""() => sbEnviar('/api/subir?name=b.wav', new File(['x'], 'b.wav'), () => {}, {})
+            .then(() => 'ok', e => [e.message, e.detalle, !!e.interno])""")
+        self.assertEqual(subido, ["Algo ha fallado dentro de Tenca", "'NoneType' object has no attribute 'get'", True])
+        pg.evaluate("importFiles([new File(['x'], 'a.wav')], 'Proyecto')")
+        imp = pg.locator("#toasts .toast.err", has_text="a.wav: Algo ha fallado dentro de")
+        imp.wait_for(timeout=5000)
+        self.assertNotIn("NoneType", imp.inner_text())
+        self.assertEqual(imp.locator("summary:has-text('Detalle')").count(), 1)
+        imp.locator(".toast-x").click()
+        # en pila (revisión 1, P1-3): a la vista solo el último, los de antes detrás de «N avisos más»; los que no
+        # caducan desde antes (keep: «quedan N min de disco»…) siguen a la vista (P1-2)
+        pg.evaluate("toast('Quedan unos 10 min de disco de prueba', 'err', null, true)")
+        pg.evaluate("toast('Segundo error de prueba', 'err')")
+        disco = pg.locator("#toasts .toast.keep", has_text="Quedan unos 10 min")
+        segundo = pg.locator("#toasts .toast.err", has_text="Segundo error de prueba")
+        self.assertTrue(segundo.is_visible())
+        self.assertFalse(f.is_visible())
+        self.assertTrue(disco.is_visible())
+        self.assertEqual(pg.inner_text("#toastMas"), "1 aviso más · Ver en la Cola")
+        segundo.locator(".toast-x").click()  # al cerrar el de la vista, sale el anterior
+        self.assertTrue(f.is_visible())
+        self.assertEqual(pg.locator("#toastMas").count(), 0)
+        self.assertTrue(disco.is_visible())
+        disco.click()  # (el de siempre: un clic lo cierra)
+        self.assertEqual(disco.count(), 0)
+        # con un diálogo abierto, un clic en el aviso no abre nada detrás; sin él, sí
+        pg.evaluate("toast('Error con destino de prueba', 'err', () => { location.hash = '#/r/'; })")
+        destino = pg.locator("#toasts .toast.err", has_text="Error con destino de prueba")
+        pg.click("#btnSettings")
+        pg.wait_for_selector("#modal .dialog.aj", timeout=5000)
+        destino.click()
+        self.assertEqual((pg.evaluate("location.hash"), destino.count()), (antes, 1))
+        pg.keyboard.press("Escape")
+        pg.wait_for_selector("#modal.hidden", state="attached", timeout=5000)
+        destino.click()
+        pg.wait_for_function("location.hash === '#/r/'", timeout=5000)
+        self.assertEqual(destino.count(), 0)
+        # «Ver en la Cola»: abre la Cola en «Avisos», con todos, el último primero; el 500, «2 veces»
+        pg.evaluate("toast('Tercer error de prueba', 'err')")
+        pg.click("#toastMas")
+        pg.wait_for_selector("#jobsPanel:not(.hidden) .ph-avisos", timeout=5000)
+        items = pg.eval_on_selector_all("#jobsPanel .aviso-item", "xs => xs.map(x => x.innerText)")
+        self.assertEqual(len(items), 7, items)
+        self.assertIn("Tercer error de prueba", items[0])
+        self.assertIn("Error con destino de prueba", items[1])
+        self.assertIn("Segundo error de prueba", items[2])
+        self.assertIn("Quedan unos 10 min", items[3])
+        self.assertIn("a.wav: Algo ha fallado dentro de", items[4])
+        self.assertIn("Algo ha fallado dentro de", items[5])
+        self.assertIn("2 veces", items[5])
+        self.assertIn("No se pudo transcribir", items[6])
+        # el botón del error en la Cola (su fila y su aviso) también llega a configurar.js
+        pg.click("#jobsPanel .jitem [data-cfg-accion='procesado']")
+        pg.wait_for_selector("#modal .dialog.aj section[data-secc='procesado']:not([hidden])", timeout=5000)
+        pg.keyboard.press("Escape")
+        pg.wait_for_selector("#modal.hidden", state="attached", timeout=5000)
+        # tras recargar, siguen en la Cola; «Borrar avisos» los quita
+        pg.evaluate("location.hash = '#/'")
+        pg.reload(wait_until="networkidle")
+        pg.wait_for_selector("#main h1:has-text('Hoy')", timeout=15000)
+        pg.click("#btnJobs")
+        pg.wait_for_selector("#jobsPanel .aviso-item", timeout=5000)
+        self.assertEqual(pg.locator("#jobsPanel .aviso-item").count(), 7)
+        pg.click("#jobsPanel [data-jact='avisos-borrar']")
+        self.assertEqual(pg.locator("#jobsPanel .aviso-item, #jobsPanel .ph-avisos").count(), 0)
+        # los 500 de la prueba (y su eco en la consola), y lo que la recarga corta en vuelo: los sondeos, «fallo …»,
+        # sin respuesta (en la CI, /api/config, /api/hoy y /api/vocab, run 43749304334)
+        red = [r for r in red if not any(x in r for x in ("/api/acerca/abrir", "/api/import", "/api/subir"))
+               and not r.startswith("fallo ")]
+        err, red = self.limpiar([e for e in errores if "status of 500" not in e], red)
+        self.assertEqual((err, red), ([], []))
+
+    def test_avisos_con_un_dialogo_al_recargar_y_al_volver(self):
+        """Revisión 2 de interfaz-lote2: con un diálogo abierto, «N avisos más · Ver en la Cola» no sale (la Cola se
+        abría debajo, P1-A), los avisos no bajan tras su fondo aunque la Cola siga abierta, y un clic en un aviso sin
+        destino lo cierra (P2-1); el botón de explicar.py de la Cola la cierra; al recargar, lo que se vuelve a anunciar
+        no se duplica en «Avisos» y lo que se repite de verdad suma (P2-2); «Tenca no responde» se va cuando vuelve a
+        responder (P2-4)."""
+        pg, errores, red = self.pagina()
+        pg.goto(f"{self.base}/?t={self.token}", wait_until="networkidle")
+        pg.wait_for_selector("#main h1:has-text('Hoy')", timeout=15000)
+        pg.evaluate("sessionStorage.removeItem('tenca.avisos')")
+        pg.evaluate("toast('Primero de prueba', 'err'); toast('Segundo de prueba', 'err')")
+        mas = pg.locator("#toastMas")
+        self.assertTrue(mas.is_visible())
+        pg.click("#btnSettings")
+        pg.wait_for_selector("#modal .dialog.aj", timeout=5000)
+        self.assertFalse(mas.is_visible())  # con un diálogo, no: la Cola se abriría debajo de él
+        segundo = pg.locator("#toasts .toast.err", has_text="Segundo de prueba")
+        segundo.click()  # sin destino: se cierra, también con el diálogo abierto
+        self.assertEqual(segundo.count(), 0)
+        pg.keyboard.press("Escape")
+        pg.wait_for_selector("#modal.hidden", state="attached", timeout=5000)
+        # la Cola abierta y un diálogo encima: los avisos siguen por encima de su fondo
+        pg.evaluate("toast('Tercero de prueba', 'err')")
+        pg.click("#btnJobs")
+        pg.wait_for_selector("#jobsPanel:not(.hidden)", timeout=5000)
+        self.assertEqual(pg.evaluate("getComputedStyle(document.querySelector('#toasts')).zIndex"), "35")
+        pg.evaluate("openSettings()")
+        pg.wait_for_selector("#modal .dialog.aj", timeout=5000)
+        self.assertEqual(pg.evaluate("getComputedStyle(document.querySelector('#toasts')).zIndex"), "60")
+        pg.keyboard.press("Escape")
+        pg.wait_for_selector("#modal.hidden", state="attached", timeout=5000)
+        # el botón de explicar.py en la Cola hace lo suyo y la cierra (si abre un diálogo, no queda debajo)
+        pg.evaluate("""() => {
+            const html = cfgAccionHtml({ aviso: { accion: { tipo: 'procesado', etiqueta: 'Revisar' } } });
+            const p = document.querySelector('#jobsPanel'); p.classList.remove('hidden');
+            p.insertAdjacentHTML('beforeend', '<div class="jitem" id="pruebaAccion">' + html + '</div>'); }""")
+        pg.click("#pruebaAccion [data-cfg-accion]")
+        pg.wait_for_selector("#modal .dialog.aj section[data-secc='procesado']:not([hidden])", timeout=5000)
+        pg.wait_for_selector("#jobsPanel.hidden", state="attached", timeout=5000)
+        pg.keyboard.press("Escape")
+        pg.wait_for_selector("#modal.hidden", state="attached", timeout=5000)
+        # al recargar: un aviso que no caduca y se vuelve a anunciar no se duplica; uno que se repite, suma
+        pg.evaluate("toast('Corte de prueba', 'err', null, true); toast('Tercero de prueba', 'err')")
+        pg.evaluate("location.hash = '#/'")
+        pg.reload(wait_until="networkidle")
+        pg.wait_for_selector("#main h1:has-text('Hoy')", timeout=15000)
+        pg.evaluate("toast('Corte de prueba', 'err', null, true); toast('Tercero de prueba', 'err')")
+        lista = pg.evaluate("avisosLista().map(a => [a.html, a.n || 1])")
+        self.assertEqual([x for x in lista if x[0] == "Corte de prueba"], [["Corte de prueba", 1]])
+        self.assertEqual(lista[-1], ["Tercero de prueba", 2])  # (el «Tercero» de antes de la Cola va aparte)
+        # «Tenca no responde»: cuando vuelve a responder, el aviso se va
+        pg.route("**/api/rec/status*", lambda r: r.abort())
+        pg.wait_for_function("S.latido.fallos > 0", timeout=10000)
+        pg.evaluate("toast(esc(APP_NAME + ' no responde'), 'err')")
+        no = pg.locator("#toasts .toast.err", has_text="no responde")
+        self.assertEqual(no.count(), 1)
+        pg.unroute("**/api/rec/status*")
+        no.wait_for(state="detached", timeout=10000)
+        # (la recarga corta peticiones en vuelo: «fallo …», sin respuesta)
+        err, red = self.limpiar(errores, [r for r in red if "/api/rec/status" not in r and not r.startswith("fallo ")])
+        self.assertEqual((err, red), ([], []))
 
 
 if __name__ == "__main__":

@@ -11,9 +11,11 @@ import tempfile
 import threading
 import time
 import unittest
+import unittest.mock
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from support import server  # noqa: F401  (prepara sys.path con _app)
 import aviso  # noqa: E402  (solo sus funciones puras: tkinter se importa dentro de la clase)
@@ -430,6 +432,81 @@ class DecidirAvisoTests(unittest.TestCase):
         self.assertEqual(calendario.decidir_aviso("Teams", False, False, False, None), (False, None))
         self.assertEqual(calendario.decidir_aviso("Teams", False, True, True, None), (False, None))
         self.assertEqual(calendario.decidir_aviso("Zoom", False, True, False, "Teams"), (True, "Zoom"))
+
+
+class _AvisoHandler(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        self.server.posts.append((self.path, json.loads(self.rfile.read(n) or b"{}")))
+        body = b'{"ok": true}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+class AvisoCerrarTests(unittest.TestCase):
+    """La ✕ del aviso flotante (punto 38 del review del 14/11/2026): en «Ya ha empezado «X»» es «Ahora no», como el
+    botón de la app (POST /api/rec/siguiente {descartar: true}); en el de la llamada solo cierra. Sin Tk: los métodos
+    de Aviso sobre un doble con lo que usan."""
+
+    def setUp(self):
+        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), _AvisoHandler)
+        self.srv.posts = []
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.addCleanup(self.srv.server_close)
+        self.addCleanup(self.srv.shutdown)
+        datos = tempfile.mkdtemp(prefix="tenca-aviso-")
+        self.addCleanup(shutil.rmtree, datos, True)
+        env = unittest.mock.patch.dict(os.environ, {"CHULETA_DATOS": datos})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def doble(self, siguiente):
+        class Root:
+            oculta = destruida = False
+
+            def withdraw(self):
+                self.oculta = True
+
+            def after(self, ms, fn):
+                fn()
+
+            def destroy(self):
+                self.destruida = True
+        a = type("A", (), {})()
+        a.args = type("Args", (), {"siguiente": siguiente})()
+        a.url, a.root = f"http://127.0.0.1:{self.srv.server_address[1]}", Root()
+        a.resultado, a.enviando, a.datos = None, False, {}
+        for m in ("cerrar", "_pedir", "_descartar"):
+            setattr(a, m, getattr(aviso.Aviso, m).__get__(a))
+        return a
+
+    def test_en_la_siguiente_reunion_la_x_es_ahora_no(self):
+        a = self.doble("Revisión de presupuesto")
+        aviso.Aviso.cerrar_x(a)
+        self.assertTrue(a.root.oculta)  # se va al momento; la petición, en segundo plano
+        fin = time.time() + 10
+        while a.resultado is None and time.time() < fin:
+            time.sleep(0.05)
+        self.assertEqual(self.srv.posts, [("/api/rec/siguiente", {"descartar": True, "origen": "aviso"})])
+        self.assertEqual((a.resultado, a.datos, a.root.destruida), ("cerrar", {"descartada": True}, True))
+
+    def test_con_el_descarte_en_camino_ni_los_20_s_lo_cortan(self):
+        a = self.doble("Revisión de presupuesto")
+        a.descartando = True
+        aviso.Aviso.cerrar(a, "tiempo")
+        aviso.Aviso.cerrar(a, "sin-servidor")
+        self.assertEqual((a.resultado, a.root.destruida), (None, False))
+
+    def test_en_el_aviso_de_la_llamada_solo_cierra(self):
+        a = self.doble("")
+        aviso.Aviso.cerrar_x(a)
+        self.assertEqual((a.resultado, a.root.destruida, self.srv.posts), ("cerrar", True, []))
 
 
 class FakeProc:

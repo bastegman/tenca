@@ -52,6 +52,9 @@
 .hr-proy.sin { background: var(--warn-soft); color: var(--warn); }
 .hr-sub { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
 .hr-sub .aviso { color: var(--warn); font-weight: 600; }
+/* por qué falló (punto 38), con su botón de explicar.py junto al de la fila */
+.hr-motivo { margin-top: 3px; color: var(--ink-2); font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.hr-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .hr-mas { display: inline-block; margin-top: 8px; color: var(--accent); font-weight: 600; font-size: 13px; }
 .hs-fila .pill.ok { cursor: pointer; }
 @media (max-width: 720px) {
@@ -89,6 +92,7 @@
 .ag-mas { margin-top: 8px; }
 .ag-pie { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin-top: 8px; color: var(--muted); font-size: 12px; }
 .ag-pie .btn { margin-left: auto; }
+.ag-pie .ag-colgar { color: var(--ink-2); font-weight: 600; }
 
 /* sin reuniones todavía */
 .hoy-vacio { padding: 22px 24px; margin-top: 22px; }
