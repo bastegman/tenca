@@ -808,21 +808,45 @@ async function addSegToNotes() {
 }
 
 /* ---------------------------------------------------------------- vista "Reuniones" (base de datos) */
-S.tbl = Object.assign({ q: '', folder: '*', tag: '*', estado: '*', tx: '*', group: 'month', sort: 'desc' }, JSON.parse(localStorage.getItem('tbl') || '{}'));
+S.tbl = Object.assign({ q: '', folder: '*', proy: '*', tag: '*', estado: '*', tx: '*', group: 'month', sort: 'desc' }, JSON.parse(localStorage.getItem('tbl') || '{}'));
 function dbTabs(kind) {
   return `<div class="db-tabs"><a href="#/r/" class="${kind === 'r' ? 'on' : ''}">${I.table}Tabla</a><a href="#/c/" class="${kind === 'c' ? 'on' : ''}">${I.calendar}Calendario</a></div>`;
 }
 function allTags() { const s = new Set(); allAudios().forEach(a => ((a.props || {}).etiquetas || []).forEach(t => s.add(t))); return [...s].sort((x, y) => fold(x).localeCompare(fold(y))); }
+/* el proyecto de una reunión en la tabla (punto 43 del review): el de su cabecera, como en Hoy («Proyecto › Workstream»);
+   el nombre del proyecto, de su lista si se encuentra (una lista de la raíz lleva en la cabecera el nombre de la carpeta).
+   '' = sin proyecto */
+function tblProy(a) {
+  const p = a.props || {};
+  if (!p.workstream) return '';
+  const v = (S.vocab || []).length ? vocabOf(a) : null;
+  return (v && v.project) || p.proyecto || '';
+}
+function tblProyTxt(a) { const pr = tblProy(a), ws = (a.props || {}).workstream; return pr && ws ? `${pr} › ${ws}` : pr || ws || ''; }
+/* qué columnas y filtros tienen datos: «Proyecto» si hay proyectos (si no, «Carpeta», como antes), «Etiquetas» y
+   «Estado» solo si alguna reunión los lleva. Sobre todas las reuniones, no sobre las filtradas: filtrar no quita columnas */
+function tblCols() {
+  const as = allAudios();
+  const proy = (S.vocab || []).length > 0 || as.some(a => tblProy(a));
+  return { proy, carpeta: !proy, tags: as.some(a => ((a.props || {}).etiquetas || []).length > 0), estado: as.some(a => !!(a.props || {}).estado) };
+}
+function tblProyectos() {
+  const s = new Map();
+  (S.vocab || []).forEach(v => v.project && s.set(fold(v.project), v.project));
+  allAudios().forEach(a => { const pr = tblProy(a); if (pr && !s.has(fold(pr))) s.set(fold(pr), pr); });
+  return [...s.values()].sort((x, y) => fold(x).localeCompare(fold(y)));
+}
 function txState(a) { const st = statusOf(a); return st === 'done' ? 'done' : st === 'partial' ? 'partial' : (st === 'rec' || st === 'running' || st === 'queued') ? 'busy' : 'pending'; }
 function tableRows() {
   const t = S.tbl, q = fold(t.q.trim());
   let list = allAudios().filter(a => {
     const p = a.props || {};
     if (t.folder !== '*' && !(a.folder === t.folder || a.folder.startsWith(t.folder + '/'))) return false;
+    if (t.proy !== '*' && (t.proy === '' ? tblProy(a) !== '' : fold(tblProy(a)) !== fold(t.proy))) return false;
     if (t.tag !== '*' && !(p.etiquetas || []).includes(t.tag)) return false;
     if (t.estado !== '*' && (p.estado || '') !== t.estado) return false;
     if (t.tx !== '*' && txState(a) !== t.tx) return false;
-    if (q && !fold([titleOf(a), longTitle(a), a.name, a.folder, (p.etiquetas || []).join(' '), p.participantes || '', p.workstream || '', a.label].join(' ')).includes(q)) return false;
+    if (q && !fold([titleOf(a), longTitle(a), a.name, a.folder, (p.etiquetas || []).join(' '), p.participantes || '', p.workstream || '', tblProy(a), a.label].join(' ')).includes(q)) return false;
     return true;
   });
   const key = a => a.date || new Date(a.mtime * 1000).toISOString();
@@ -839,42 +863,57 @@ function groupKey(a) {
   const g = S.tbl.group;
   if (g === 'month') { const d = aDate(a) || new Date(a.mtime * 1000); return `${MESES[d.getMonth()]} ${d.getFullYear()}`; }
   if (g === 'folder') return homeFolder(a) ? pathLabel(homeFolder(a)) : 'Sin clasificar';
+  if (g === 'proy') return tblProy(a) || 'Sin proyecto';
   if (g === 'estado') return (a.props || {}).estado || 'Sin estado';
   return '';
 }
-function rowHtml(a) {
-  const p = a.props || {}, d = aDate(a);
+function rowHtml(a, cols = { carpeta: true, tags: true, estado: true }) {
+  const p = a.props || {}, d = aDate(a), proy = cols.proy ? tblProyTxt(a) : '';
   return `<tr data-go="a" data-path="${esc(a.path)}" draggable="true" data-drag="${esc(a.path)}">
     <td class="nm"><span class="ticon">${iconOf(a) || I.mic}</span>${esc(titleOf(a) || longTitle(a))}${titleOf(a) ? '' : (a.label ? ` <small class="muted">${esc(nfc(a.label))}</small>` : '')}</td>
     <td class="nw">${d ? `${d.getDate()} ${MES[d.getMonth()]} ${d.getFullYear()} · ${pad(d.getHours())}:${pad(d.getMinutes())}` : '—'}</td>
     <td class="nw num">${fmtDur(estDuration(a))}</td>
-    <td class="muted">${esc(homeFolder(a) ? folderName(homeFolder(a)) : 'Sin clasificar')}</td>
-    <td>${(p.etiquetas || []).map(x => `<span class="tag-chip sm">${esc(x)}</span>`).join('')}</td>
-    <td>${p.estado ? `<span class="pill ${ESTADO_CLS[p.estado] || ''}">${esc(p.estado)}</span>` : ''}</td>
+    ${cols.proy ? `<td class="${proy ? '' : 'muted'}">${esc(proy || 'Sin proyecto')}</td>` : ''}
+    ${cols.carpeta ? `<td class="muted">${esc(homeFolder(a) ? folderName(homeFolder(a)) : 'Sin clasificar')}</td>` : ''}
+    ${cols.tags ? `<td>${(p.etiquetas || []).map(x => `<span class="tag-chip sm">${esc(x)}</span>`).join('')}</td>` : ''}
+    ${cols.estado ? `<td>${p.estado ? `<span class="pill ${ESTADO_CLS[p.estado] || ''}">${esc(p.estado)}</span>` : ''}</td>` : ''}
     <td>${statusPill(a)}</td></tr>`;
 }
+/* los desplegables con su nombre (punto 43 del review: los lectores de pantalla decían «cuadro combinado» a secas) */
+const TBL_NOMBRES = { folder: 'Carpeta', proy: 'Proyecto', tag: 'Etiqueta', estado: 'Estado', tx: 'Transcripción', group: 'Agrupar', sort: 'Orden' };
 function viewTable() {
-  const t = S.tbl, list = tableRows();
-  const sel = (k, opts) => `<select data-tbl="${k}">${opts.map(([v, l]) => `<option value="${esc(v)}"${v === t[k] ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+  const t = S.tbl, cols = tblCols();
+  // un filtro que ya no se enseña no puede seguir filtrando (lo guardado de antes, o la columna que se ha quedado sin datos)
+  if (!cols.carpeta) t.folder = '*';
+  if (!cols.proy) t.proy = '*';
+  if (!cols.tags) t.tag = '*';
+  if (!cols.estado) t.estado = '*';
+  const grupos = [['month', 'Agrupar por mes'], ...(cols.proy ? [['proy', 'Agrupar por proyecto']] : [['folder', 'Agrupar por carpeta']]),
+    ...(cols.estado ? [['estado', 'Agrupar por estado']] : []), ['none', 'Sin agrupar']];
+  if (!grupos.some(([v]) => v === t.group)) t.group = cols.proy && t.group === 'folder' ? 'proy' : 'month';
+  const list = tableRows();
+  const ncol = 4 + (cols.proy ? 1 : 0) + (cols.carpeta ? 1 : 0) + (cols.tags ? 1 : 0) + (cols.estado ? 1 : 0);
+  const sel = (k, opts) => `<select data-tbl="${k}" aria-label="${esc(TBL_NOMBRES[k])}">${opts.map(([v, l]) => `<option value="${esc(v)}"${v === t[k] ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
   let body = '', g = null;
   for (const a of list) {
     const k = groupKey(a);
-    if (S.tbl.group !== 'none' && k !== g) { g = k; body += `<tr class="grp"><td colspan="7">${esc(k)} <span class="muted">${list.filter(x => groupKey(x) === k).length}</span></td></tr>`; }
-    body += rowHtml(a);
+    if (S.tbl.group !== 'none' && k !== g) { g = k; body += `<tr class="grp"><td colspan="${ncol}">${esc(k)} <span class="muted">${list.filter(x => groupKey(x) === k).length}</span></td></tr>`; }
+    body += rowHtml(a, cols);
   }
   main.innerHTML = `<div class="page wide">
     <div class="db-head"><h1>${I.list}Reuniones <span class="sub">${list.length}</span></h1>${dbTabs('r')}</div>
     <div class="db-tools">
-      <input class="input" data-tbl="q" placeholder="Filtrar por título, etiqueta, participante…" value="${esc(t.q)}" autocomplete="off" spellcheck="false">
-      ${sel('folder', [['*', 'Todas las carpetas'], ...flatFolders().filter(f => f.path).map(f => [f.path, '  '.repeat(f.depth - 1) + f.name])])}
-      ${sel('tag', [['*', 'Todas las etiquetas'], ...allTags().map(x => [x, x])])}
-      ${sel('estado', [['*', 'Cualquier estado'], ...ESTADOS])}
+      <input class="input" data-tbl="q" aria-label="Filtrar reuniones" placeholder="Filtrar por título, proyecto, participante…" value="${esc(t.q)}" autocomplete="off" spellcheck="false">
+      ${cols.proy ? sel('proy', [['*', 'Todos los proyectos'], ...tblProyectos().map(x => [x, x]), ['', 'Sin proyecto']]) : ''}
+      ${cols.carpeta ? sel('folder', [['*', 'Todas las carpetas'], ...flatFolders().filter(f => f.path).map(f => [f.path, '  '.repeat(f.depth - 1) + f.name])]) : ''}
+      ${cols.tags ? sel('tag', [['*', 'Todas las etiquetas'], ...allTags().map(x => [x, x])]) : ''}
+      ${cols.estado ? sel('estado', [['*', 'Cualquier estado'], ...ESTADOS]) : ''}
       ${sel('tx', [['*', 'Transcripción: todas'], ['done', 'Transcritas'], ['partial', 'A medias'], ['pending', 'Sin transcribir'], ['busy', 'En marcha']])}
-      ${sel('group', [['month', 'Agrupar por mes'], ['folder', 'Agrupar por carpeta'], ['estado', 'Agrupar por estado'], ['none', 'Sin agrupar']])}
+      ${sel('group', grupos)}
       ${sel('sort', [['desc', 'Más recientes primero'], ['asc', 'Más antiguas primero'], ['dur', 'Más largas primero']])}
     </div>
-    <div class="card db-table"><table><thead><tr><th>Nombre</th><th>Fecha</th><th>Duración</th><th>Carpeta</th><th>Etiquetas</th><th>Estado</th><th>Transcripción</th></tr></thead>
-      <tbody>${body || '<tr><td colspan="7" class="empty">Nada coincide con los filtros</td></tr>'}</tbody></table></div></div>`;
+    <div class="card db-table"><table><thead><tr><th>Nombre</th><th>Fecha</th><th>Duración</th>${cols.proy ? '<th>Proyecto</th>' : ''}${cols.carpeta ? '<th>Carpeta</th>' : ''}${cols.tags ? '<th>Etiquetas</th>' : ''}${cols.estado ? '<th>Estado</th>' : ''}<th>Transcripción</th></tr></thead>
+      <tbody>${body || `<tr><td colspan="${ncol}" class="empty">Nada coincide con los filtros</td></tr>`}</tbody></table></div></div>`;
 }
 main.addEventListener('input', e => { if (e.target.dataset && e.target.dataset.tbl === 'q') tblChange(e.target); });
 main.addEventListener('change', e => { if (e.target.dataset && e.target.dataset.tbl && e.target.dataset.tbl !== 'q') tblChange(e.target); });
