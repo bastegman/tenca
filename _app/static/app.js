@@ -91,7 +91,8 @@ const MES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct
 const DIA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const LANGS = [['es-en', 'Español + inglés (spanglish)'], ['', 'Detectar el idioma (cualquiera)'], ['es', 'Solo español'], ['en', 'Solo inglés'],
   ['pt', 'Portugués'], ['fr', 'Francés'], ['it', 'Italiano'], ['de', 'Alemán'], ['ca', 'Catalán'],
-  ['es-pt', 'Español + portugués (mezcla)'], ['en-pt', 'Inglés + portugués (mezcla)']];
+  ['es-pt', 'Español + portugués (mezcla)'], ['en-pt', 'Inglés + portugués (mezcla)'],
+  ['es-en-pt', 'Español + inglés + portugués (mezcla)']];
 const langSelect = (id, sel) => `<select id="${id}" title="Idioma de la reunión">${LANGS.map(([v, l]) => `<option value="${v}"${v === sel ? ' selected' : ''}>${l}</option>`).join('')}</select>`;
 const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2];
 const MODEL_GB = { 'small': '0,5 GB', 'medium': '1,5 GB', 'large-v3-turbo': '1,6 GB', 'large-v3': '3 GB' };

@@ -274,8 +274,10 @@ class Hoy:
             if self.siguiente:
                 self.siguiente["descartada"] = True
                 self._siguiente_cache = (0.0, None)
-                if getattr(self.vigia, "tipo", None) == "siguiente":
-                    self.vigia.cerrar_aviso()  # el flotante de la misma propuesta, si sigue a la vista
+                # el flotante de la misma propuesta, si sigue a la vista; no si lo pide él mismo (su ✕, origen
+                # «aviso»): ya se está cerrando solo, y matarlo cortaba la respuesta que espera (punto 38)
+                if getattr(self.vigia, "tipo", None) == "siguiente" and b.get("origen") != "aviso":
+                    self.vigia.cerrar_aviso()
                 log("   siguiente reunión: «Ahora no»")
             return {"ok": True}
         aviso = b.get("origen") == "aviso"
@@ -454,6 +456,8 @@ class Hoy:
             apagado = (e["estado"], e["frase"])
         # una sola foto de la agenda para la reunión de ahora y la lista (el hilo puede estar renovándola)
         agenda = ag.publica(activado, apagado) if ag is not None else None
+        if agenda is not None:  # por qué no se relee ahora (_agenda_paso): «Actualizar» lo dice (punto 38)
+            agenda["ocupado"] = self._agenda_ocupada()
         fresca = ag is not None and ag.fresca()
         sug, info = self._reunion_ahora(st, recordar=False, citas=[dict(c) for c in agenda["citas"]]
                                         if agenda and activado and fresca else [])
@@ -479,6 +483,15 @@ class Hoy:
                 log_exc()
             forzado = ag.despertar.wait(60)
 
+    def _agenda_ocupada(self):
+        """"grabando", "llamada" o None: lo que hace que _agenda_paso no relea Outlook ahora (lo está usando la
+        reunión). La interfaz lo usa para decir «se leerá al colgar» en vez de esperar una lectura que no llega."""
+        if getattr(self, "rec", None) and self.rec.alive():
+            return "grabando"
+        if getattr(self, "meeting", None) or getattr(self, "meeting_prev", None):
+            return "llamada"
+        return None
+
     def _agenda_paso(self, forzado=False, entorno=None):
         """Una vuelta del hilo de la agenda. Con el calendario apagado, se olvida lo leído. Mientras se graba o hay una
         llamada no se relee (Outlook es de la reunión y el vigilante lo consulta cada minuto), salvo que aún no haya
@@ -492,9 +505,7 @@ class Hoy:
             return
         # en llamada: la lectura del registro de privacidad (meeting_prev), también con «Avisarme si estoy en una
         # llamada» apagado, que deja meeting en None
-        ocupado = bool(getattr(self, "rec", None) and self.rec.alive()) or bool(
-            getattr(self, "meeting", None) or getattr(self, "meeting_prev", None))
-        if ocupado and ag.datos is not None:
+        if self._agenda_ocupada() and ag.datos is not None:
             return
         sesion = getattr(self, "agenda_sesion", None)
         if sesion is not None:  # pruebas de la interfaz (CHULETA_PRUEBAS_OUTLOOK)

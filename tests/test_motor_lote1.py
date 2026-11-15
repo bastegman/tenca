@@ -12,7 +12,7 @@ from unittest import mock
 
 import numpy as np
 
-from support import APP  # noqa: F401  (pone _app en sys.path)
+from support import APP, server  # noqa: F401  (pone _app en sys.path)
 import bandeja  # noqa: E402
 import directo_avisos  # noqa: E402
 import engines  # noqa: E402
@@ -63,10 +63,11 @@ class MezclaDeTresTests(unittest.TestCase):
             self.assertTrue(engines.IDIOMA_RE.match(code), code)
         for code in ("es-en-pt-fr", "es-", "español", "xx-yy-zz", "es-fr-it"):
             self.assertFalse(engines.IDIOMA_RE.match(code), code)
-        # plan (la tarjeta de grabar) sigue como server.IDIOMA_RE hasta que el servidor la admita (revisión 1, P2-5)
-        for code in ("es-en", "es", "auto"):
+        # plan (la tarjeta de grabar), como server.IDIOMA_RE (revisión 1, P2-5): desde los enganches, los dos la admiten
+        for code in ("es-en-pt", "es-en", "es", "auto"):
             self.assertTrue(plan.IDIOMA_RE.match(code), code)
-        self.assertFalse(plan.IDIOMA_RE.match("es-en-pt"))
+            self.assertTrue(server.IDIOMA_RE.match(code), code)
+        self.assertFalse(plan.IDIOMA_RE.match("es-fr-it"))
         self.assertEqual(plan.idioma_txt("es-en-pt"), "Español + inglés + portugués")
         self.assertFalse(plan.idioma_fijo("es-en-pt"))
 

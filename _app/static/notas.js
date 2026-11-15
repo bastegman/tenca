@@ -361,10 +361,11 @@ function applyTab(a) {
   if (tab === 'notes' && (!S.notes || S.notes.path !== a.path)) loadNotes(a);
   if ((tab === 'sum' || dual) && (!S.sum || S.sum.path !== a.path)) loadSummary(a);
 }
-/* quién hizo el resumen y cuándo, de la cabecera de su .resumen.md (modelo y generado) */
+/* quién hizo el resumen y cuándo, de la cabecera de su .resumen.md (modelo, proveedor y generado). Los de antes del
+   15/11/2026 no llevan proveedor: se deduce del modelo */
 function resumenAutor(m) {
-  const mod = String(m.modelo || '').trim();
-  const quien = !mod ? '' : /claude|sonnet|opus|haiku/i.test(mod) ? `Claude (${mod})` : mod;
+  const mod = String(m.modelo || '').trim(), prov = String(m.proveedor || '').trim();
+  const quien = prov ? (mod ? `${prov} (${mod})` : prov) : !mod ? '' : /claude|sonnet|opus|haiku/i.test(mod) ? `Claude (${mod})` : mod;
   const g = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(m.generado || '');
   const cuando = g ? `el ${+g[3]} ${MES[+g[2] - 1]} ${g[1]} a las ${g[4]}:${g[5]}` : '';
   return `Resumen hecho con IA${quien ? ` por ${esc(quien)}` : ''}${cuando ? ` ${cuando}` : ''}`;

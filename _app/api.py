@@ -154,6 +154,23 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, obj, code=200):
         self._send(code, json.dumps(obj, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
 
+    def _responder(self, obj, code=200):
+        """_json, salvo que quien lo pidio ya no este: el aviso flotante se cierra en cuanto manda su POST, y una
+        pestaña que se recarga corta lo que estaba pidiendo. Sin traza en server.log (antes, cada ✕ del aviso dejaba
+        una)."""
+        try:
+            self._json(obj, code)
+        except ConnectionError:  # BrokenPipe, ConnectionReset y ConnectionAborted (en Windows, WinError 10053/10054)
+            pass
+
+    def _error_interno(self, e):
+        """Un fallo de la app (500): la frase para la persona y el texto de Python aparte, que la interfaz pliega en
+        «Detalle» (punto 11 del review del 14/11/2026). Antes iba solo el texto de Python, y otros clientes (el aviso
+        flotante, los scripts) lo enseñaban tal cual."""
+        log_exc()
+        self._responder({"error": f"Algo ha fallado dentro de {APP_NAME}",
+                         "detalle": f"{e.__class__.__name__}: {e}" if str(e) else e.__class__.__name__}, 500)
+
     def do_GET(self):
         self.body_read = False
         if not self._host_ok():
@@ -173,6 +190,7 @@ class Handler(BaseHTTPRequestHandler):
                   "/api/jobs": a.jobs_list, "/api/rec/devices": a.rec_devices, "/api/rec/status": a.rec_status,
                   "/api/notes": a.notes_get, "/api/tags": a.tags, "/api/summary": a.summary_get,
                   "/api/vocab": a.vocab, "/api/voces": a.voices_state, "/api/hablantes": a.speakers_get,
+                  "/api/hablantes/muestra": a.speaker_sample,
                   "/api/reunion/actual": a.reunion_actual, "/api/calendario/estado": a.calendario_estado,
                   "/api/hoy": a.hoy,
                   "/api/perfil": a.perfil_get,
@@ -197,8 +215,7 @@ class Handler(BaseHTTPRequestHandler):
         except (ConnectionError, BrokenPipeError):
             pass
         except Exception as e:
-            log_exc()
-            self._json({"error": str(e)}, 500)
+            self._error_interno(e)
 
     do_HEAD = do_GET
 
@@ -254,11 +271,11 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/import":  # el cuerpo es el archivo tal cual (puede ser de 1 GB): se copia a trozos
                 r = a.import_file(self, {k: v[0] for k, v in parse_qs(u.query).items()})
                 self.body_read = True  # import_file lo ha leido entero (si se corta, lanza ApiError)
-                return self._json(r)
+                return self._responder(r)
             if u.path == "/api/subir":  # igual, pero subir marca body_read en cuanto lo ha leído entero: un audio
                 # que no se puede leer se contesta al momento, sin esperar a vaciar un cuerpo que ya no queda
                 q = {k: v[0] for k, v in parse_qs(u.query, keep_blank_values=True).items()}
-                return self._json(a.subir(self, q))
+                return self._responder(a.subir(self, q))
             n = int(self.headers.get("Content-Length") or 0)
             if n < 0:
                 raise ApiError("Cuerpo no válido")
@@ -274,14 +291,15 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError("No encontrado", 404)
             t0 = time.time()
             try:
-                self._json(route(body))
+                out = route(body)
             finally:
                 slow_request('POST', u.path, time.time() - t0)
+            # quien lo pidio puede haberse ido ya (el aviso flotante, al pulsar): no es un fallo de la ruta
+            self._responder(out)
         except ApiError as e:
-            self._json({"error": e.msg}, e.code)
-        except Exception as e:
-            log_exc()
-            self._json({"error": str(e)}, 500)
+            self._responder({"error": e.msg}, e.code)
+        except Exception as e:  # tambien un ConnectionError de la propia ruta (la nube cortando): eso si es un 500
+            self._error_interno(e)
 
     def _static(self, path):
         name = "index.html" if path in ("", "/") else path.lstrip("/")

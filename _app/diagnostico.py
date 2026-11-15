@@ -5,6 +5,7 @@ Salio tal cual de server.py al partirlo (15/11/2026); server.py lo reexporta."""
 import re
 
 import engines
+import voices
 from common import APP_NAME
 
 
@@ -129,6 +130,20 @@ DIAG_LINES = (
     "🗣 voces desactivadas",
     "   modelos de voces descargados",
     "   voces.json no se pudo leer ({e}); se aparta como voces.json.ilegible",
+    # el cambio de modelo de huellas (voices.Voices._migrar, rehacer_huellas) y rehacerlas al arrancar (app_voces)
+    "   voces.json no está; se recupera de voces.json.bak",
+    "   voces.json.bak no se pudo leer ({e}); se empieza de cero",
+    "   voces.json: no se pudo escribir ({c})",
+    "   voces.json: modelo de huellas {m}; {n} huellas por rehacer desde sus reuniones",
+    "   huella por rehacer ({t}, {t}): {c}",
+    "   huellas por rehacer: no se pudo escribir voces.json ({c})",
+    "   huellas rehechas con el modelo nuevo: {'rehechas': {n}, 'sin_audio': {n}, 'fallidas': {n}}",
+    "🗣 {n} huella⟦s⟧ de voz por rehacer con el modelo nuevo: se rehacen en segundo plano",
+    "   huellas por rehacer: se espera a que termine lo que está en marcha ({k})",
+    "   huellas por rehacer: faltan los modelos de voces; se descargan primero",
+    "   huellas por rehacer: sin los modelos de voces ({e}); se intentará la próxima vez",
+    "   huellas por rehacer: la librería de voces no carga en este PC ({e})",
+    "🗣 huellas de voz con el modelo nuevo: {n} rehecha⟦s⟧, {n} sin su reunión, {n} por reintentar",
     # arranque, ajustes, grabadora, llamadas y apagado
     "arranque · {u} · carpeta {t} · datos {t} · Python {v}⟦ · pid {n}⟧",
     "=" * 64,  # el recuadro de main() con la URL, la carpeta y como apagar
@@ -248,6 +263,7 @@ DIAG_LINES = (
 )
 DIAG_MODELS = frozenset(
     {x for p in engines.PRESETS for x in (p["id"], p["label"], p.get("live_label"), p.get("model")) if x}
+    | {voices.MODEL_ID}  # el modelo de huellas de «Quién habla» (la linea del cambio de modelo)
     | set(engines.SUMMARY_MODELS) | {m for v in engines.PROVIDERS.values() for m in v.get("models") or []}
     | {engines.LIVE_MODEL_DEFAULT, getattr(engines.Summarizer, "TRANSLATE_MODEL", None), "gpt-4o-mini"}
     | {c.label for c in engines.AGENTES.values()} - {None})
@@ -337,7 +353,7 @@ DIAG_CHECKS = {
     "c": lambda v: v in diag_exceptions(),
     "k": lambda v: all(re.fullmatch(r"[a-z_.]{2,40}", x) for x in v.split(", ")),
     "s": lambda v: all(re.fullmatch(r"[a-z][a-z0-9_]{1,40}", x) for x in v.split(", ")),  # códigos (calendario.py)
-    "l": lambda v: bool(re.fullmatch(r"auto|detectar|[a-z]{2}(?:-[a-z]{2})?", v)),
+    "l": lambda v: bool(re.fullmatch(r"auto|detectar|[a-z]{2}(?:-[a-z]{2}){0,2}", v)),  # hasta la de tres (es-en-pt)
     "a": _diag_meeting_app,
     "u": lambda v: bool(re.fullmatch(r"http://127\.0\.0\.1:\d{2,5}/", v)),
     "v": lambda v: bool(re.fullmatch(r"\d+(?:\.\d+){1,3}[a-z0-9]{0,6}", v)),

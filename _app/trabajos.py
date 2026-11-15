@@ -214,6 +214,22 @@ class PendingPasses(Complete):
 
 
 _SALIDAS_LOCK = threading.Lock()  # temporizadores de la reescritura agrupada de los destinos de salida
+# una sola Voices (voces.json) aunque la pidan dos hilos a la vez: el que rehace las huellas al arrancar
+# (app_voces.rehacer_huellas) y la interfaz. Con dos, cada una con su copia de las personas, la que guardara despues
+# pisaria lo de la otra (revision 3 de motor-lote1, P2-9)
+_VOICES_LOCK = threading.Lock()
+
+
+def proveedor_resumen(st):
+    """Quien hace el resumen, para la cabecera del .resumen.md (proveedor:): la interfaz lo dice encima del resumen
+    («Resumen hecho con IA por Groq…», «…por tu cuenta de Claude…») sin adivinarlo por el nombre del modelo (B5)."""
+    if procesado_de(st) == "agente":
+        cls, _ = agente_de(st)
+        return "tu cuenta de Claude" if cls.tipo == "claude" else f"tu cuenta de {cls.label}"
+    prov = (st.get("cloud") or {}).get("provider") or "groq"
+    if prov == "custom":  # sin el nombre del servidor: puede ser la pasarela de una empresa
+        return "una API compatible con OpenAI"
+    return (engines.PROVIDERS.get(prov) or {}).get("label") or ""
 
 
 class Jobs:
@@ -291,7 +307,9 @@ class Jobs:
     @property
     def voices(self):
         if self._voices is None:
-            self._voices = voices.Voices(os.path.join(DATA_DIR, "voces.json"))
+            with _VOICES_LOCK:
+                if self._voices is None:
+                    self._voices = voices.Voices(os.path.join(DATA_DIR, "voces.json"))
         return self._voices
 
     def active_for(self, path, kinds=("transcribe",)):
@@ -423,11 +441,13 @@ class Jobs:
         if idioma is not None:
             log(f"   {job.name}: el idioma cambió en el directo; el repaso final, con "
                 f"{idioma or 'detección'} (no solo el del final)")
+        # y los cambios de idioma que vio el directo (live: job.idiomas_tramos): cada tramo se repasa con el suyo
+        # (punto 35; engines.CloudEngine.plan_parts)
         self._queue_final_pass(job.path, job.name, job.language, local_part=getattr(job, "local_part", True),
-                               idioma_repaso=idioma)
+                               idioma_repaso=idioma, tramos_idioma=getattr(job, "idiomas_tramos", None))
         return True
 
-    def _queue_final_pass(self, rel, name, language, local_part=True, idioma_repaso=None):
+    def _queue_final_pass(self, rel, name, language, local_part=True, idioma_repaso=None, tramos_idioma=None):
         """El repaso final de esa reunion a la cola: el del directo que acaba de terminar o, al arrancar, el que quedo
         apuntado (_resume_final_passes). Queda apuntado en repasos_pendientes.json hasta que termine: si se apaga
         antes, se retoma al arrancar. local_part: si su directo tuvo algun trozo en local (sin el dato, si: lo seguro).
@@ -436,9 +456,10 @@ class Jobs:
         sin permiso, tampoco con un repaso retomado tras reiniciar (tests/test_integracion.py)."""
         j = Job(rel, name, "nube", language)
         j.final_pass, j.stage, j.local_part = True, "En cola: repaso final en la nube", local_part is not False
-        # el idioma cambió en pleno directo (idioma_repaso): antes de entrar en la cola, que el hilo lo vea. No se
-        # apunta en repasos_pendientes.json: uno retomado tras reiniciar usa el de la reunión al terminar
-        j.idioma_repaso = idioma_repaso
+        # el idioma cambió en pleno directo (idioma_repaso, y en qué segundo: tramos_idioma): antes de entrar en la
+        # cola, que el hilo lo vea. No se apunta en repasos_pendientes.json: uno retomado tras reiniciar usa el de la
+        # reunión al terminar
+        j.idioma_repaso, j.idiomas_tramos = idioma_repaso, list(tramos_idioma or ()) or None
         self._pending().set(rel, local_part=j.local_part)
         with self.lock:
             self.list.append(j)
@@ -776,7 +797,9 @@ class Jobs:
                     job.progress = max(job.progress, frac)
 
             text, model = self._summarizer(st).summarize(segments, meta, cfg, report, lambda: job.cancel)
-            head = f"---\nmodelo: {model}\ngenerado: {time.strftime('%Y-%m-%d %H:%M')}\n---\n\n"
+            prov = proveedor_resumen(st)  # el mismo st que eligió el Summarizer
+            head = (f"---\nmodelo: {model}\n" + (f"proveedor: {prov}\n" if prov else "")
+                    + f"generado: {time.strftime('%Y-%m-%d %H:%M')}\n---\n\n")
             save_text(base + ".resumen.md", head + text.strip() + "\n", "utf-8")
             job.status, job.progress, job.stage = "done", 1.0, "Resumen listo"
             log(f"✔ {job.name}  resumen listo ({(time.time() - job.started):.0f} s, {model})")
@@ -1238,7 +1261,9 @@ class Jobs:
             old = voices.read_sidecar(side) or {}  # lo que el usuario ya dijo de esta reunion (se conserva)
             restore = (side, json.loads(json.dumps(old))) if old else None
             uid = (self.voices.user() or {}).get("id")
-            sin_huellas = {p["id"] for p in self.voices.personas() if not p.get("huellas")}
+            # sin huellas y sin huellas por rehacer: una persona que solo tiene las de antes del cambio de modelo
+            # (voices.Voices._migrar) si tenia huellas, y sus asignaciones de antes del 07/11 pudieron ser automaticas
+            sin_huellas = {p["id"] for p in self.voices.personas() if not p.get("huellas") and not p.get("rehacer")}
             for i in (old.get("hablantes") or {}).values():  # sidecar de antes del 07/11/2026, sin «origen»: una
                 if not i.get("origen") and i.get("persona") in sin_huellas - {uid}:  # persona sin huellas solo
                     i["origen"] = "manual"  # pudo ponerse a mano
@@ -1381,9 +1406,12 @@ class Jobs:
                                                         int(st.get("threads") or default_threads()),
                                                         report, lambda: job.cancel, start=start, about=about)
             else:
+                # el repaso final de un directo que cambió de idioma: cada tramo con el suyo (job.language queda para
+                # un tramo sin idioma propio, el primero si el directo empezó detectando)
                 segs, lang, dur = self.cloud.transcribe(abs_path, job.duration, st["cloud"], job.language,
                                                         vocab, job.id, report, lambda: job.cancel,
-                                                        start=start, about=about)
+                                                        start=start, about=about, tramos_idioma=getattr(
+                                                            job, "idiomas_tramos", None) if job.final_pass else None)
             if job.cancel:
                 raise engines.Cancelled()
             if start:

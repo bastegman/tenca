@@ -16,6 +16,52 @@ from common import ApiError, log, log_exc, save_text
 from rutas import DATA_DIR, alias_of, rel_of, safe
 
 
+MUESTRA_S = 5.0  # «Oír» una voz (B8): unos segundos de ella sola
+REHACER_ESPERA_S = 20.0  # al arrancar, antes de rehacer huellas: que no compita con el arranque
+REHACER_PASO_S = 15.0  # mientras se graba (o hay un directo, una llamada o se identifican voces): se mira cada tanto
+REHACER_DESCARGA_S = 1800.0  # lo que se espera a la descarga de los modelos de voces antes de dejarlo para otra vez
+
+
+def muestra_de(data, h, largo=MUESTRA_S):
+    """{inicio, fin} de unos segundos (como mucho `largo`) en que solo habla h, de los tramos del sidecar: el trozo
+    mas largo de h que no pisa a nadie mas, desde su principio. Si todo lo de h se solapa con otra voz, su tramo mas
+    largo. None si h no tiene tramos."""
+    mios, otros = [], []
+    for t in (data or {}).get("tramos") or []:
+        try:
+            a, b = float(t["inicio"]), float(t["fin"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if b > a:
+            (mios if t.get("h") == h else otros).append((a, b))
+    if not mios:
+        return None
+
+    def unir(tramos):  # ordenados y sin solapes; los que se tocan, juntos (una frase partida en dos tramos)
+        out = []
+        for a, b in sorted(tramos):
+            if out and a <= out[-1][1] + 0.01:
+                out[-1] = (out[-1][0], max(out[-1][1], b))
+            else:
+                out.append((a, b))
+        return out
+    mios, otros, libres, j = unir(mios), unir(otros), [], 0  # se recorren una vez (una de 3 h tiene miles)
+    for a, b in mios:  # lo de h, menos lo que dice otra voz a la vez
+        while j < len(otros) and otros[j][1] <= a:
+            j += 1
+        k = j
+        while k < len(otros) and otros[k][0] < b and a < b:
+            c, d = otros[k]
+            if c > a:
+                libres.append((a, c))
+            a, k = max(a, d), k + 1
+        if b > a:
+            libres.append((a, b))
+    # un trozo suelto de menos de 1 s no se entiende: entonces, el tramo mas largo aunque se oiga a otro a la vez
+    a, b = max([x for x in libres if x[1] - x[0] >= 1.0] or mios, key=lambda x: x[1] - x[0])
+    return {"inicio": round(a, 2), "fin": round(min(b, a + largo), 2)}
+
+
 class Voces:
     # --- quien habla (voces)
     def voices_state(self, q=None):
@@ -61,6 +107,8 @@ class Voces:
         self.settings.update(lambda d: d.update(voices_enabled=on))
         if on and not voices.models_ready(DATA_DIR):
             self._download_models()
+        if on:  # las huellas de un modelo anterior que hubiera, ya con los modelos (rehacer_huellas espera la descarga)
+            threading.Thread(target=self.rehacer_huellas, daemon=True, name="rehacer-huellas").start()
         log(f"🗣 voces {'activadas' if on else 'desactivadas'}")
         return self.voices_state()
 
@@ -79,6 +127,123 @@ class Voces:
                 "frases": data.get("frases", []), "who": data.get("_who", []),
                 "n": len(real), "known": sum(1 for i in real if i.get("persona") and not i.get("provisional")),
                 "personas": self.jobs.voices.public(), "usuario": (self.jobs.voices.user() or {}).get("id")}
+
+    def speaker_sample(self, q):
+        """GET /api/hablantes/muestra?path=&h=: {inicio, fin} para «Oír» esa voz en el bloque «Quién habla» (B8), de
+        los tramos de su sidecar (no hace falta el .srt). La interfaz, sin esto, usa la frase mas larga de la
+        transcripcion."""
+        abs_path = safe(q.get("path"), "file")
+        data = voices.read_sidecar(voices.sidecar_path(abs_path))
+        m = muestra_de(data, q.get("h"))
+        if m is None:
+            raise ApiError("Esa voz ya no está en esta reunión (¿se volvió a identificar?).", 404)
+        return dict(m, creado=(data or {}).get("creado"))
+
+    # --- huellas de un modelo anterior (al actualizar): se rehacen con el de ahora desde el audio de sus reuniones
+    def rehacer_huellas(self, espera=0.0):
+        """Las huellas que voices.Voices._migrar dejo por rehacer (las del modelo anterior no se pueden comparar con
+        las de ahora) se recalculan desde el audio de las reuniones en que se pulso «Recordar», en este hilo y una a
+        una (voices.rehacer_huellas): cada persona conserva id, nombre, «Soy yo» y consentimiento, y vuelve a
+        reconocerse por la voz. Nunca mientras se graba, hay un directo o una llamada o se identifican voces: espera
+        (_rehacer_esperar). Con «Quién habla» apagado no hace nada (al activarlo, voices_toggle lo vuelve a pedir); sin
+        los modelos, primero los baja. Lo que no encuentra o no puede calcular se queda para la proxima vez. La llaman
+        main() al arrancar (espera: que no compita con el arranque) y voices_toggle; dos a la vez, solo una."""
+        lock = self.__dict__.setdefault("_rehacer_lock", threading.Lock())
+        if not lock.acquire(blocking=False):
+            return None
+        try:
+            if espera:
+                time.sleep(espera)
+            return self._rehacer_huellas()
+        except Exception:  # en su hilo: nunca tumba nada; se intenta en el proximo arranque
+            log_exc()
+            return None
+        finally:
+            lock.release()
+
+    def rehacer_huellas_al_arrancar(self):
+        """main(): rehacer_huellas en su hilo, tras REHACER_ESPERA_S."""
+        return self.rehacer_huellas(REHACER_ESPERA_S)
+
+    def _rehacer_huellas(self):
+        if not self.jobs.voices_on():
+            return None
+        v = self.jobs.voices  # abrirlo es lo que migra un voces.json de antes
+        pend = v.pendientes()
+        if not pend:
+            return None
+        ok, why = voices.available()
+        if not ok:
+            log(f"   huellas por rehacer: la librería de voces no carga en este PC ({why})")
+            return None
+        log(f"🗣 {len(pend)} huella{'s' if len(pend) != 1 else ''} de voz por rehacer con el modelo nuevo: se rehacen "
+            "en segundo plano")
+        cancelled = lambda: bool(getattr(self.jobs, "closing", False))  # noqa: E731 (apagando)
+        if not voices.models_ready(DATA_DIR):
+            log("   huellas por rehacer: faltan los modelos de voces; se descargan primero")
+            self._download_models()  # el de Ajustes › Voces, con su progreso (si ya se estaban bajando, ese)
+            fin = time.monotonic() + REHACER_DESCARGA_S
+            while (self.voices_dl or {}).get("running") and time.monotonic() < fin and not cancelled():
+                time.sleep(2)
+            if not voices.models_ready(DATA_DIR):
+                motivo = (self.voices_dl or {}).get("error") or "no han terminado de bajar"
+                log(f"   huellas por rehacer: sin los modelos de voces ({motivo}); se intentará la próxima vez")
+                return None
+        # las reuniones por el nombre de su audio (lo que guardaba «Recordar»): la lista de la biblioteca, la que ve la
+        # interfaz, una vez; sin los audios de OneDrive que solo estan en linea (leerlos los descargaria) ni los que
+        # se estan grabando
+        self.library.refresh(max_age=30)
+        por_nombre = {}
+        for a in list(self.library.flat):
+            if a.get("cloud") or a.get("recording") or not a.get("_spk"):
+                continue
+            por_nombre.setdefault(a.get("name") or os.path.basename(a["path"]), []).append(a["_abs"])
+
+        def calcular(audio, h, side):
+            self._rehacer_esperar(cancelled)
+            if cancelled() or not self.jobs.voices_on():  # apagando, o «Voces» desactivado entretanto: ni una mas
+                return None, None
+            rel = rel_of(audio)
+            ahora = voices.read_sidecar(voices.sidecar_path(audio)) or {}
+            # se volvio a identificar (h ya puede ser otra voz) o se esta identificando: esta vez no
+            if ahora.get("creado") != (side or {}).get("creado") or self.jobs.active_for(rel, kinds=("voces",)):
+                return None, None
+            return self.jobs.speaker_vector(rel, h)
+
+        res = voices.rehacer_huellas(v, lambda nombre: list(por_nombre.get(nombre) or []), calcular, cancelled)
+        log(f"🗣 huellas de voz con el modelo nuevo: {res['rehechas']} rehecha{'s' if res['rehechas'] != 1 else ''}, "
+            f"{res['sin_audio']} sin su reunión, {res['fallidas']} por reintentar")
+        return res
+
+    def _rehacer_ocupado(self):
+        """Por que no se rehacen huellas ahora (un codigo) o None: grabando (la grabadora de la app o OBS), con un
+        directo, en una llamada o identificando voces (dos procesos de voces a la vez no caben en un portatil)."""
+        rec = getattr(self, "rec", None)
+        if rec is not None and rec.alive():
+            return "grabando"
+        with self.jobs.lock:
+            vivos = [j for j in self.jobs.list if j.status in ("queued", "running")]
+        if any(getattr(j, "live", False) for j in vivos):
+            return "directo"
+        if any(j.kind == "voces" for j in vivos):
+            return "identificando_voces"
+        if any(a.get("recording") for a in list(getattr(self.library, "flat", None) or [])):
+            return "grabando"
+        if getattr(self, "meeting", None):
+            return "llamada"
+        return None
+
+    def _rehacer_esperar(self, cancelled):
+        """Espera a que no haya nada de _rehacer_ocupado (o a que se apague la app)."""
+        dicho = None
+        while not cancelled():
+            motivo = self._rehacer_ocupado()
+            if not motivo:
+                return
+            if motivo != dicho:
+                log(f"   huellas por rehacer: se espera a que termine lo que está en marcha ({motivo})")
+                dicho = motivo
+            time.sleep(REHACER_PASO_S)
 
     def _speaker_check(self, abs_path, h, creado=None, data=None):
         """Antes de corregir un hablante: que exista, que no se esten identificando las voces de esa reunion (lo que

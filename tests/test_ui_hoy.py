@@ -636,6 +636,7 @@ class RevisarSeVaciaTests(Base):
             f.write("Alfa, término\n")
         now = datetime.now().replace(second=0, microsecond=0)
         reunion(root, "", now - timedelta(hours=3), "Charla suelta", 10, txt=True)
+        reunion(root, "", now - timedelta(hours=4), "Charla de antes", 10, txt=True)  # «ninguno» de otra versión
         base = reunion(root, "Alfa", now - timedelta(hours=1), "Entrevista fallida", 5,
                        {"proyecto": "Alfa", "workstream": "General", "titulo": "Entrevista fallida"})
         cls.fallida = os.path.relpath(base + ".wav", root).replace(os.sep, "/")
@@ -695,6 +696,32 @@ class RevisarSeVaciaTests(Base):
         self.assertNotIn("Charla suelta", pg.evaluate("JSON.stringify(localStorage.getItem('tenca.sinProyecto'))"))
         self.sin_errores()
 
+    def test_lo_apuntado_en_este_pc_pasa_al_servidor(self):
+        """«No es de ningún proyecto» contestado con una versión que solo lo apuntaba en este PC (localStorage): al
+        abrir Hoy se le manda al servidor, que lo guarda en la reunión, y deja de estar aquí. Desde entonces manda el
+        .md."""
+        pg = self.pagina()
+        ruta = pg.evaluate("allAudios().find(x => (x.label || '').includes('Charla de antes')).path")
+        notas = []
+        pg.on("request", lambda r: notas.append(json.loads(r.post_data)) if r.url.endswith("/api/notes")
+              and r.method == "POST" else None)
+        pg.evaluate("p => localStorage.setItem('tenca.sinProyecto', JSON.stringify([p, 'Otra/que ya no está.wav']))",
+                    ruta)
+        pg.reload(wait_until="networkidle")
+        pg.wait_for_function("JSON.parse(localStorage.getItem('tenca.sinProyecto') || '[]').length === 1",
+                             timeout=10000)
+        self.assertEqual(notas, [{"path": ruta, "props": {"sin_proyecto": "sí"}}])
+        self.assertEqual(pg.evaluate("JSON.parse(localStorage.getItem('tenca.sinProyecto'))"),
+                         ["Otra/que ya no está.wav"])  # la que no está en la lista se queda
+        arbol = json.dumps(self.srv.api("/api/tree"), ensure_ascii=False)
+        self.assertIn('"sin_proyecto": "sí"', arbol)
+        # sin nada en este PC, la fila sigue sin salir: lo dice la reunión
+        pg.evaluate("() => localStorage.removeItem('tenca.sinProyecto')")
+        pg.reload(wait_until="networkidle")
+        pg.wait_for_selector(".hoy-revisar .hr-fila", timeout=15000)
+        self.assertEqual(pg.locator(".hoy-revisar .hr-fila", has_text="Charla de antes").count(), 0)
+        self.sin_errores()
+
     def test_actualizar_en_una_llamada_se_lee_al_colgar(self):
         pg = self.pagina()
         pg.wait_for_selector("#hoyAgenda .ag-pie [data-act='hoy-agenda-leer']", timeout=30000)
@@ -706,9 +733,19 @@ class RevisarSeVaciaTests(Base):
             if llamada["en"]:
                 d["meeting"] = "Teams"
             route.fulfill(response=r, body=json.dumps(d), content_type="application/json")
+
+        def hoy_(route):  # en una llamada, el servidor lo dice también en la agenda (agenda.ocupado)
+            r = route.fetch()
+            d = r.json()
+            if d.get("agenda") is not None:
+                d["agenda"]["ocupado"] = "llamada" if llamada["en"] else None
+            route.fulfill(response=r, body=json.dumps(d), content_type="application/json")
         pg.route("**/api/rec/status*", status)
+        pg.route("**/api/hoy*", hoy_)
         self.addCleanup(pg.unroute_all, behavior="ignoreErrors")
         pg.wait_for_function("S.rec.meeting === 'Teams'", timeout=10000)
+        pg.evaluate("hoyCargar()")
+        pg.wait_for_function("HOY.datos?.agenda?.ocupado === 'llamada'", timeout=10000)
         hoy = []
         pg.on("request", lambda r: hoy.append(r.url) if "/api/hoy" in r.url else None)
         pg.click("#hoyAgenda .ag-pie [data-act='hoy-agenda-leer']")
