@@ -642,6 +642,7 @@ def main():
             elog(f"✖ no se puede crear la grabacion: {e.__class__.__name__}: {e}")
             raise
     t0, written, last = time.perf_counter(), 0, 0.0
+    dicho = [False]  # ya se mando una linea «fatal» con el motivo
     base = int(round((t0 - EPOCH) * SR))  # posicion de la muestra 0 del fichero: lo capturado en t0
     try:
         while True:
@@ -697,6 +698,7 @@ def main():
             time.sleep(0.05)
     except BaseException as e:  # el porque, para el servidor (rec_status: «cortada») y para recorder.log
         if not isinstance(e, (KeyboardInterrupt, SystemExit)):
+            dicho[0] = True
             try:
                 emit({"fatal": motivo_de(e)})
             except (OSError, ValueError):
@@ -718,9 +720,10 @@ def main():
         if w and w.pend_n:
             perdido = w.pend_n / WAV_BYTES_S
             elog(f"✖ {perdido:.1f} s de audio no se han podido escribir")
-            try:  # tambien al parar: el servidor lo dice (si no, solo quedaba en el log)
-                emit({"fatal": f"no se han podido escribir los últimos {perdido:.0f} s de la grabación "
-                      f"({motivo_de(w.error) if w.error else 'error al escribir'})"})
+            try:  # tambien al parar: el servidor lo dice (si no, solo quedaba en el log); si ya dijo el motivo, ese
+                if not dicho[0]:
+                    emit({"fatal": f"no se han podido escribir los últimos {perdido:.0f} s de la grabación "
+                          f"({motivo_de(w.error) if w.error else 'error al escribir'})"})
             except (OSError, ValueError):
                 pass
         if w and w.retried_s:

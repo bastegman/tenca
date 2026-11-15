@@ -69,9 +69,9 @@ class GrabadoraFallosTests(unittest.TestCase):
         "lleno": dict(env={"FAKE_ESCRITURA": "1.5-", "FAKE_RETRY_S": "1.5"}, stop_s=None),
         "poco": dict(env={"FAKE_DISCO_MB": "100"}, stop_s=3),
         # parar mientras falla la escritura: no se tira lo que espera en memoria (revision 1, P2-1)
-        "parar": dict(env={"FAKE_ESCRITURA": "0.5-4"}, stop_s=4),
+        "parar": dict(env={"FAKE_ESCRITURA": "0.5-4"}, stop_s="pendiente"),
         # y si no se arregla en los 8 s de gracia: se dice (revision 2, P2-B)
-        "parar_lleno": dict(env={"FAKE_ESCRITURA": "0.5-"}, stop_s=4),
+        "parar_lleno": dict(env={"FAKE_ESCRITURA": "0.5-"}, stop_s="pendiente"),
     }
 
     @classmethod
@@ -101,8 +101,21 @@ class GrabadoraFallosTests(unittest.TestCase):
         for t in lectores:
             t.start()
         t0 = time.time()
-        if c["stop_s"]:
+        if c["stop_s"] == "pendiente":  # «stop» con la escritura ya fallando (en Windows arrancar tarda: CI 3.12)
+            def fallando():
+                for line in b"".join(out).splitlines():
+                    try:
+                        if (json.loads(line).get("pendiente_s") or 0) >= 0.3:
+                            return True
+                    except ValueError:
+                        pass
+                return False
+            fin = time.time() + 40
+            while time.time() < fin and not fallando() and p.poll() is None:
+                time.sleep(0.1)
+        elif c["stop_s"]:
             time.sleep(c["stop_s"])
+        if c["stop_s"]:
             try:
                 p.stdin.write(b"stop\n")
                 p.stdin.flush()
@@ -137,7 +150,8 @@ class GrabadoraFallosTests(unittest.TestCase):
         r = self.res["lleno"]
         self.assertNotEqual(r["rc"], 0)
         self.assertLess(r["s"], 30)  # se para sola
-        self.assertIn({"fatal": "el disco está lleno"}, r["lines"])
+        # una sola línea «fatal», la del porqué (no la de lo que quedó sin escribir)
+        self.assertEqual([x for x in r["lines"] if x.get("fatal")], [{"fatal": "el disco está lleno"}])
         self.assertIn("✖ la grabadora se para: el disco está lleno", r["log"])
         info = live.wav_info(r["wav"])
         self.assertIsNotNone(info["data_size"])  # reescribir la cabecera no necesita sitio nuevo
