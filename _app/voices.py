@@ -43,6 +43,8 @@ MIN_HUELLA_S = 20.0      # voz acumulada para proponer guardar una huella
 MIN_MATCH_S = 5.0        # voz acumulada para intentar emparejar (entre 5 y 20 s: provisional)
 BREVE_S = 10.0           # clusteres con menos voz: «(breve)», no generan persona
 BLOQUE_S = 1800.0        # audio mas largo se diariza por bloques de <= 30 min enlazados por huella
+ENLACE = 0.55            # coseno para que un grupo de un bloque sea alguien de los anteriores (el de UMBRAL hasta el
+#                          15/11/2026; aparte para poder medirlo con scripts/eval_voces.py --enlace)
 HUELLA_MAX_S = 90.0      # voz que se concatena para una huella (los tramos mas largos primero)
 # Lo mas que se le pasa de una vez al modelo de huellas (TitaNet): su memoria crece con la duracion del trozo y una
 # huella mas larga es la media de las de sus ventanas, ponderada por su duracion. Medido el 09/11/2026 (sherpa-onnx
@@ -510,9 +512,11 @@ def mixed(huellas, umbral=DUDOSO):
 
 
 def diarize(samples16, data_dir, threads=2, progress=None, cancelled=None, shift=0.5, umbral_grupos=UMBRAL_GRUPOS,
-            consolidar=True, participantes=None):
+            consolidar=True, participantes=None, enlace=None):
     """Devuelve {"tramos": [{inicio, fin, h}], "hablantes": {h: {segundos, breve, …}}, "huellas": {h: [floats]},
-    "duracion_s"}. Audio > 30 min: por bloques, enlazando los clusteres de cada bloque por huella (coseno >= umbral)."""
+    "duracion_s"}. Audio > 30 min: por bloques, enlazando los clusteres de cada bloque por huella (coseno >= enlace;
+    None = ENLACE, leido al llamar)."""
+    enlace = ENLACE if enlace is None else float(enlace)
     progress = progress or (lambda **k: None)
     cancelled = cancelled or (lambda: False)
     so = _sherpa()
@@ -555,7 +559,7 @@ def diarize(samples16, data_dir, threads=2, progress=None, cancelled=None, shift
             if bi and vec is not None:  # bloque 2 en adelante: ¿es alguien del bloque anterior?
                 best = max(((cosine(vec, g["vec"]), g) for g in speakers if g["vec"] is not None),
                            key=lambda x: x[0], default=(0.0, None))
-                if best[0] >= UMBRAL:
+                if best[0] >= enlace:
                     target = best[1]
             if target is None:
                 target = {"vec": None, "vecs": [], "segundos": 0.0, "tramos": []}

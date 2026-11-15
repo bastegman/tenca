@@ -22,6 +22,7 @@ import argparse
 import json
 import os
 import sys
+import time
 
 import numpy as np
 
@@ -102,14 +103,31 @@ def score(ref_spans, tramos, hablantes):
             "partes_max": max(parts.values()) if parts else 0}
 
 
-def diarize_cached(wav, data, cache, threads, **kw):
-    """voices.diarize sobre el WAV (con caché por reunión y argumentos)."""
+def con_huellas(emb):
+    """Con otro modelo de huellas de sherpa-onnx (un .onnx de speaker-recongition-models): cambia solo el extractor
+    (voices.model_paths); la segmentación, el clustering y el posproceso son los de la app."""
+    if not emb:
+        return
+    base = voices.model_paths
+
+    def paths(data_dir):
+        return dict(base(data_dir), emb=emb)
+    voices.model_paths = paths
+
+
+def diarize_cached(wav, data, cache, threads, emb=None, **kw):
+    """voices.diarize sobre el WAV (con caché por reunión, modelo de huellas y argumentos)."""
+    kw = {k: v for k, v in kw.items() if v is not None}
     key = os.path.splitext(os.path.basename(wav))[0] + "".join(f"_{k}{v}" for k, v in sorted(kw.items()))
+    if emb:
+        key += "_" + os.path.splitext(os.path.basename(emb))[0]
     path = os.path.join(cache, key + ".json") if cache else None
     if path and os.path.isfile(path):
         with open(path, encoding="utf-8") as f:
             return json.load(f)
+    t0 = time.time()
     res = voices.diarize(voices.load_audio_16k(wav), data, threads=threads, consolidar=False, **kw)
+    res["segundos_calculo"] = round(time.time() - t0, 1)
     if path:
         os.makedirs(cache, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
@@ -117,14 +135,18 @@ def diarize_cached(wav, data, cache, threads, **kw):
     return res
 
 
-def evaluate(pares, data, cache=None, threads=2, umbral_grupos=voices.UMBRAL_GRUPOS, crudo=False, **post):
+def evaluate(pares, data, cache=None, threads=2, umbral_grupos=voices.UMBRAL_GRUPOS, crudo=False, emb=None,
+             enlace=None, **post):
     """{reunion: métricas} y la media, para una configuración."""
     rows = {}
     for wav, rttm in pares:
-        res = diarize_cached(wav, data, cache, threads, umbral_grupos=umbral_grupos)
+        res = diarize_cached(wav, data, cache, threads, emb=emb, umbral_grupos=umbral_grupos, enlace=enlace)
+        calc = res.get("segundos_calculo")
         if not crudo:
             res = voices.consolidate(res, **post)
         rows[os.path.basename(wav)] = score(read_rttm(rttm), res["tramos"], res["hablantes"])
+        if calc is not None:
+            rows[os.path.basename(wav)]["segundos_calculo"] = calc
     tot = {k: round(float(np.mean([r[k] for r in rows.values()])), 3)
            for k in ("der", "confusion", "pureza", "cobertura", "partes_media")}
     tot["hablantes"] = sum(r["hablantes"] for r in rows.values())
@@ -147,15 +169,20 @@ def main(argv=None):
     ap.add_argument("--grande-s", type=float, default=voices.GRANDE_S)
     ap.add_argument("--participantes", type=int, help="pista: cuántos participantes tiene cada reunión")
     ap.add_argument("--crudo", action="store_true", help="sin el posproceso de la app")
+    ap.add_argument("--emb", help="otro modelo de huellas de sherpa-onnx (.onnx) en vez del de la app")
+    ap.add_argument("--enlace", type=float, help=f"coseno del enlace entre bloques de 30 min (app: {voices.ENLACE})")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
     if len(a.pares) % 2:
         raise SystemExit("Pares WAV RTTM")
     pares = list(zip(a.pares[::2], a.pares[1::2]))
-    out = evaluate(pares, a.data, a.cache, a.threads, a.umbral_grupos, a.crudo, fusion=a.fusion,
+    con_huellas(a.emb)
+    out = evaluate(pares, a.data, a.cache, a.threads, a.umbral_grupos, a.crudo, emb=a.emb, enlace=a.enlace,
+                   fusion=a.fusion,
                    absorbe_min=a.absorbe, tope_min=a.tope_min, participantes=a.participantes,
                    fusion_grandes=a.fusion_grandes, grande_s=a.grande_s)
-    out["config"] = {"umbral_grupos": a.umbral_grupos, "crudo": a.crudo, "fusion": a.fusion, "absorbe": a.absorbe,
+    out["config"] = {"umbral_grupos": a.umbral_grupos, "crudo": a.crudo, "emb": os.path.basename(a.emb or "") or None,
+                     "enlace": a.enlace, "fusion": a.fusion, "absorbe": a.absorbe,
                      "tope_min": a.tope_min, "participantes": a.participantes, "fusion_grandes": a.fusion_grandes,
                      "grande_s": a.grande_s}
     print(json.dumps(out, ensure_ascii=False, indent=1 if a.json else None))

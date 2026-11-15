@@ -13,6 +13,7 @@ import sys
 import threading
 import time
 
+import bandeja
 import directo_avisos
 import engines
 import live
@@ -112,10 +113,17 @@ def toast_command(title, body):
 
 
 def notify(title, body):
-    """Notificacion de Windows (por si la ventana de la app no esta a la vista)."""
+    """Notificacion de Windows (por si la ventana de la app no esta a la vista). Con el icono de la bandeja puesto, por
+    su globo (sale con el icono y el nombre de la app); si no, o si el globo no se puede pedir, por PowerShell (sale
+    firmada por «Windows PowerShell»)."""
     if not WINDOWS:
         log(f"   aviso: {title} — {body}")
         return
+    try:
+        if bandeja.globo(toast_text(title), toast_text(body)):
+            return
+    except Exception:  # el aviso no se pierde por el globo: va por PowerShell
+        pass
     argv, env = toast_command(title, body)
     try:
         subprocess.Popen(argv, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

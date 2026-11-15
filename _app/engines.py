@@ -174,13 +174,28 @@ STYLE_PROMPT = {
     # Sin validar aun con audio real; si una reunion es solo en un idioma, fijarlo es mas preciso.
     "es-pt": "Vale, perfecto. Então vamos começar com a agenda de hoje. ¿Os parece bien? Sim, pode seguir.",
     "en-pt": "Okay, perfect. Então vamos começar com a agenda de hoje. Does that work for everyone? Sim, pode seguir.",
+    # los tres (reuniones con hablantes de los tres idiomas): una frase en cada uno, con un término en inglés dentro
+    # de la española como en «mix». Sin validar aun con audio real, como las de dos
+    "es-en-pt": "Vale, perfecto. So, el deadline del workstream es el viernes, ¿no? Então vamos começar com a agenda. "
+                "Okay, let's move on.",
 }
-PAIRS = {"es-en": ("es", "en"), "es-pt": ("es", "pt"), "en-pt": ("en", "pt")}  # mezclas admitidas: "xx-yy"
+# mezclas admitidas: "xx-yy" (dos idiomas) y "es-en-pt" (los tres); el nombre se queda por compatibilidad (server)
+PAIRS = {"es-en": ("es", "en"), "es-pt": ("es", "pt"), "en-pt": ("en", "pt"), "es-en-pt": ("es", "en", "pt")}
+MIXES = PAIRS
+# un idioma ("es"), una mezcla de dos ("es-pt") o de tres ("es-en-pt") o «auto»: lo que acepta Ajustes/la reunion
+IDIOMA_RE = re.compile(r"^(auto|[a-z]{2}(-[a-z]{2})?|es-en-pt)$")
 
 
 def lang_pair(language):
-    """("es", "en") para una mezcla de dos idiomas ("es-en"), None para un idioma fijo o la deteccion."""
+    """("es", "en") para una mezcla de idiomas ("es-en"; ("es", "en", "pt") para "es-en-pt"), None para un idioma
+    fijo o la deteccion."""
     return PAIRS.get(language or "")
+
+
+def mix_code(langs):
+    """El codigo de la mezcla admitida con exactamente esos idiomas ({"pt", "es"} -> "es-pt"), o None."""
+    want = set(langs or ())
+    return next((k for k, par in PAIRS.items() if set(par) == want), None) if len(want) >= 2 else None
 
 
 def style_for(language):
@@ -1563,6 +1578,47 @@ class KeyPool:
 
 # ----------------------------------------------------------------------------- nube
 
+# Repaso en la nube de una reunion que cambia de idioma (review del 14/11/2026, motor 12): Whisper fija el idioma al
+# principio de cada peticion, asi que una parte de 10 min que empieza en ingles y pasa al portugues puede salir entera
+# en ingles. Con una mezcla (o un tramo en que se detectaba), partes de ~1,5 min (60-135 s, cortadas en un silencio);
+# con un idioma fijo, las de siempre. El cupo gratuito de Groq (20 peticiones/min, 7.200 s de audio/h) no cambia: el
+# ritmo lo marca el KeyPool y los segundos de audio son los mismos (Groq cobra al menos 10 s por peticion: con 60 s,
+# nada). Medido sin Groq con faster-whisper (que decide el idioma igual, una vez por peticion): docs en la nota IMPL.
+MEZCLA_PARTE_S = 90
+TRAMO_MIN_S = 10.0   # un tramo de idioma mas corto (dos cambios seguidos) se une al anterior
+TRAMO_AJUSTE_S = 8.0  # el corte entre dos idiomas se lleva al silencio mas cercano a esta distancia como mucho
+
+
+def tramos_idioma(tramos, duration, start=0.0, language=None):
+    """[(a, b, idioma)] relativos al audio que se manda (empieza en `start` de la grabacion), a partir de los cambios
+    de idioma que conocia el directo [(desde_s, idioma o None)] (live: job.idiomas_tramos). Sin cambios: un solo
+    tramo con `language`. Los tramos de menos de TRAMO_MIN_S se unen al anterior; dos seguidos con el mismo idioma,
+    uno."""
+    puntos = []
+    for t, lang in sorted(((float(t), lang or None) for t, lang in (tramos or ())), key=lambda x: x[0]):
+        t = max(0.0, t - start)
+        if t >= duration:
+            continue
+        if puntos and t - puntos[-1][0] < TRAMO_MIN_S:
+            puntos[-1] = (puntos[-1][0], lang)  # el cambio de hace un momento queda corregido por este
+        else:
+            puntos.append((t, lang))
+    if not puntos:
+        return [(0.0, duration, language or None)]
+    puntos[0] = (0.0, puntos[0][1])
+    out = []
+    for k, (t, lang) in enumerate(puntos):
+        if out and out[-1][2] == lang:
+            continue
+        out.append([t, None, lang])
+    for k in range(len(out)):
+        out[k][1] = out[k + 1][0] if k + 1 < len(out) else duration
+    if len(out) > 1 and out[-1][1] - out[-1][0] < TRAMO_MIN_S:  # el ultimo, de unos segundos: con el anterior
+        out[-2][1] = out[-1][1]
+        out.pop()
+    return [tuple(x) for x in out]
+
+
 class CloudEngine:
     def __init__(self, tmp_root, log=None, keys=None):
         self.tmp_root = tmp_root
@@ -1643,10 +1699,11 @@ class CloudEngine:
         return paths
 
     @staticmethod
-    def _cut_points(duration, silences, chunk_s):
-        """Trozos de ~chunk_s segundos, cortando en el silencio mas cercano para no partir palabras."""
+    def _cut_points(duration, silences, chunk_s, desde=0.0):
+        """Trozos de ~chunk_s segundos de desde a duration, cortando en el silencio mas cercano para no partir
+        palabras."""
         mids = [(a + b) / 2 for a, b in silences]
-        cuts, target = [0.0], chunk_s
+        cuts, target = [desde], desde + chunk_s
         while target < duration - 60:
             near = [m for m in mids if m > cuts[-1] + 60 and abs(m - target) <= 45]
             cut = min(near, key=lambda m: abs(m - target)) if near else target
@@ -1654,6 +1711,27 @@ class CloudEngine:
             target = cut + chunk_s
         cuts.append(duration)
         return list(zip(cuts[:-1], cuts[1:]))
+
+    @classmethod
+    def plan_parts(cls, duration, silences, chunk_s, language, tramos=None, start=0.0):
+        """[(a, b, idioma)]: las partes que se mandan, cada una con su idioma. Los cambios de idioma que conocia el
+        directo (tramos, ver tramos_idioma) cortan las partes, en el silencio mas cercano; en un tramo con mezcla, o
+        en que se detectaba en una reunion que cambio de idioma, partes de MEZCLA_PARTE_S; con un idioma fijo (o
+        «detectar» en una reunion sin cambios: un solo idioma casi siempre), de chunk_s."""
+        mids = [(a + b) / 2 for a, b in silences]
+        tr = tramos_idioma(tramos, duration, start, language)
+        bordes = [0.0]
+        for a, _, _ in tr[1:]:
+            near = [m for m in mids if abs(m - a) <= TRAMO_AJUSTE_S and m > bordes[-1] + 1.0]
+            bordes.append(min(near, key=lambda m: abs(m - a)) if near else a)
+        bordes.append(duration)
+        out = []
+        for k, (_, _, lang) in enumerate(tr):
+            a, b = bordes[k], bordes[k + 1]
+            mezcla = bool(lang_pair(lang)) or (lang is None and len(tr) > 1)
+            size = min(chunk_s, MEZCLA_PARTE_S) if mezcla else chunk_s
+            out += [(x, y, lang) for x, y in cls._cut_points(b, silences, size, desde=a)]
+        return out
 
     @staticmethod
     def prompt_for(language, vocab, context=None, about=None):
@@ -1741,7 +1819,10 @@ class CloudEngine:
             self._wait(wait, cancelled)
         raise EngineError(last or "la API no respondió")
 
-    def transcribe(self, path, duration, cfg, language, prompt, job_id, report, cancelled, start=0.0, about=None):
+    def transcribe(self, path, duration, cfg, language, prompt, job_id, report, cancelled, start=0.0, about=None,
+                   tramos_idioma=None):
+        """tramos_idioma: [(desde_s, idioma o None)] de la grabacion, los cambios de idioma que conocia el directo
+        (repaso final): cada tramo se manda con su idioma (plan_parts)."""
         self.endpoint(cfg)  # valida la configuracion antes de convertir nada
         work = os.path.join(self.tmp_root, job_id)
         os.makedirs(work, exist_ok=True)
@@ -1755,7 +1836,7 @@ class CloudEngine:
             if cancelled():
                 raise Cancelled()
             chunk_s = max(60, int(float(cfg.get("chunk_minutes") or 10) * 60))
-            parts = self._cut_points(duration, silences, chunk_s)
+            parts = self.plan_parts(duration, silences, chunk_s, language, tramos_idioma, start)
             n = len(parts)
             if cancelled():
                 raise Cancelled()
@@ -1768,7 +1849,7 @@ class CloudEngine:
             buf, encoded, enc_lock = {"y": y}, [0], threading.Lock()
             del y  # buf lo suelta en cuanto este codificada la ultima parte: no se retiene durante la subida
 
-            def do_part(i, a, b):
+            def do_part(i, a, b, lang):
                 # cada hilo escribe el FLAC de su parte justo antes de subirla: la primera subida empieza en cuanto
                 # esta su parte (no cuando estan las n) y las demas se codifican mientras otras ya suben
                 path = os.path.join(work, f"part_{i:03d}.flac")
@@ -1780,18 +1861,20 @@ class CloudEngine:
                             buf["y"] = None
                     if stop():
                         raise Cancelled()
-                    res = self._post(cfg, path, language, prompt, report, stop, about=about)
+                    res = self._post(cfg, path, lang, prompt, report, stop, about=about)
                 finally:  # subido, fallido o cancelado: el trozo de la reunion no se queda en disco
                     try:
                         os.remove(path)
                     except OSError:
                         pass
-                return i, parse_verbose(res, a, b), res.get("language")
+                # el filtro de ecos, con la frase de estilo de esa parte (la de su idioma o mezcla)
+                return i, clean_segments(parse_verbose(res, a, b), self.prompt_for(lang, prompt, about=about)[1],
+                                         lang if lang and not lang_pair(lang) else None), res.get("language")
 
             results, langs, done = {}, [], 0
             workers = max(1, min(int(cfg.get("parallel") or 3), 8))
             with ThreadPoolExecutor(max_workers=workers) as pool:
-                futures = [pool.submit(do_part, i, a, b) for i, (a, b) in enumerate(parts)]
+                futures = [pool.submit(do_part, i, a, b, lang) for i, (a, b, lang) in enumerate(parts)]
                 try:
                     for f in as_completed(futures):
                         i, segs, lang = f.result()

@@ -673,6 +673,17 @@ def run(job, path, opts, write, log):
     reset(segs[-1][1] if segs else 0.0)  # retoma donde lo dejo una sesion anterior
     st["protegidas"] = len(segs)  # lo retomado no se rehace al cambiar el idioma (switch_language)
     used = [fixed_lang]  # idiomas de la reunion en esta sesion (job.idiomas_directo)
+    # desde donde vale cada idioma [(segundo de la grabacion, idioma o None)]: el repaso final en la nube manda cada
+    # tramo con el suyo (engines.CloudEngine.plan_parts; el servidor lo pasa como tramos_idioma)
+    job.idiomas_tramos = [(round(st["t0"], 2), fixed_lang)]
+
+    def marcar_idioma():
+        """Tras un cambio: el idioma nuevo vale desde lo que se va a (re)transcribir (st["t0"]: el principio de lo que
+        queda por leer o, si se rehace, desde donde se rehace). Lo de despues de ese punto, de un cambio anterior, ya no
+        cuenta."""
+        t = round(st["t0"], 2)
+        tr = [x for x in (getattr(job, "idiomas_tramos", None) or []) if x[0] < t]
+        job.idiomas_tramos = tr + [(t, fixed_lang)]
     # «Lo ultimo suena a …» (B6): con un idioma fijo, en que idioma suenan los trozos; rechazos: los de esta grabacion
     propuesta = job.propuesta = directo_avisos.Propuesta(opts.get("rechazos"))
     last_size, last_growth = -1, time.time()
@@ -827,6 +838,7 @@ def run(job, path, opts, write, log):
                 log(f"   rehaciendo desde el principio con {job.preset}")
             if lang_changed():  # cambiado en la pagina de la reunion: vale ya, tambien para lo ultimo escrito
                 switch_language()
+                marcar_idioma()
             cloud = (engines.PRESETS_BY_ID.get(job.preset) or {}).get("engine") == "cloud"
             if cloud and keys and getattr(job, "translate", False) and translator is None \
                     and opts.get("summarizer") is not None:
