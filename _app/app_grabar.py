@@ -20,6 +20,8 @@ from api import WINDOW
 from biblioteca import IDIOMA_RE, PARTICIPANTES_ORIGENES, TEXTOS_SUGERIDOS, carpetas_reunion
 from carpetas import (display_rel, fecha_subida, fit_meeting_dir, free_dir, por_reunion, project_home,
                       rec_folder_origin, ruta_txt)
+# el plan la busca con globals().get (la regla de la rama de carpetas), como rec_folder_origin: tiene que estar aqui
+from carpetas import meeting_dir_preview  # noqa: F401
 from common import APP_NAME, ApiError, clean_name, log, log_exc
 from instancia import open_ui
 from listas import (LIVE_PRESETS, SIN_AUDIO, _con_o_sin, _norm_dir, _project_dir, ajustes_previstos, check_perfil,

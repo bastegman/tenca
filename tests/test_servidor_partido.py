@@ -200,6 +200,21 @@ class NadaNuevoEnServerTests(unittest.TestCase):
         faltan = [n for n in ("server",) + server.PARTES if f'- "_app/{n}.py"' not in yml]
         self.assertEqual(faltan, [])
 
+    def test_lo_que_se_busca_con_globals_esta_en_su_modulo(self):
+        """globals().get("x") en una parte busca x en ESE modulo: al salir de server.py tiene que haberse llevado x
+        (el plan de grabacion de app_grabar busca asi rec_folder_origin y meeting_dir_preview)."""
+        faltan = []
+        for n in ("server",) + server.PARTES:
+            with open(os.path.join(APP, n + ".py"), encoding="utf-8") as f:
+                arbol = ast.parse(f.read())
+            for x in ast.walk(arbol):
+                if (isinstance(x, ast.Call) and isinstance(x.func, ast.Attribute) and x.func.attr == "get"
+                        and isinstance(x.func.value, ast.Call) and getattr(x.func.value.func, "id", "") == "globals"
+                        and x.args and isinstance(x.args[0], ast.Constant)):
+                    if x.args[0].value not in vars(sys.modules[n]):
+                        faltan.append(f"{n}: {x.args[0].value}")
+        self.assertEqual(faltan, [])
+
     def test_ningun_modulo_importa_server(self):
         """Ejecutado como la app, server es __main__: `import server` cargaria una segunda copia de todo."""
         for n in server.PARTES:
