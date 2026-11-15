@@ -582,6 +582,8 @@ class InterfazEnNavegadorTests(unittest.TestCase):
             pg.fill("#sExtra", "Al cerrar r12")
             pg.evaluate("document.querySelector('#modal [data-m=\"cerrar\"]').click()")
             pg.wait_for_function("api('/api/config').then(c => c.summary.extra === 'Al cerrar r12')", timeout=5000)
+            # el servidor ya lo tiene, pero su respuesta puede seguir en camino: recargar ahora la cortaría
+            pg.wait_for_function("!S.ajPendiente", timeout=5000)
             self.abrir_ajustes(pg)
             self.assertEqual(pg.input_value("#pfContext"), "Antes de salir r12")
             pg.keyboard.press("Escape")
