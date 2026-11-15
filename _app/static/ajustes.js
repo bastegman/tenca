@@ -53,7 +53,7 @@ function bindAjOcultar(d) {
       if (n) { n.textContent = ajOcultarAyuda(r); n.classList.toggle('warn-txt', !!r.error || r.soportado === false); }
       if (d.ajMarca) d.ajMarca(x, r.error ? 'err' : 'ok', r.error ? `Windows no lo ha aplicado: ${r.error}` : '');
       else toast(r.error ? esc(`No se ha podido aplicar: ${r.error}`) : r.activado ? `${esc(APP_NAME)} no saldrá al compartir pantalla` : `${esc(APP_NAME)} vuelve a salir al compartir pantalla`, r.error ? 'err' : '');
-    } catch (err) { x.checked = !on; if (d.ajMarca) d.ajMarca(x, 'err', err.message); else toast(esc(err.message), 'err'); }
+    } catch (err) { x.checked = !on; if (d.ajMarca) d.ajMarca(x, 'err', err.message, err.detalle); else toast(esc(err.message), 'err'); }
     finally { x.disabled = false; }
   };
 }

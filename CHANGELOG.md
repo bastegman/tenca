@@ -44,6 +44,25 @@ Puntos 54, 57 y 35 de la revisión del 14/11/2026. Rama `motor-lote1`.
   el suyo (lo que el directo rehízo al cambiar, hasta ~1 min antes del clic, como la mezcla de los dos); falta
   pasárselo desde el servidor.
 
+### Errores que se leen y «Para revisar» que se vacía (15/11/2026)
+
+Puntos 11 y 38 del review del 14/11/2026. Rama `interfaz-lote2`.
+
+- **Los avisos de error ya no se van solos.** Duraban 9 s, y una frase de cuarenta palabras no da tiempo a leerla.
+  Ahora se cierran con ✕ y, cuando lo hay, llevan el botón que lo arregla («Abrir PowerShell», «Revisar en Ajustes»…).
+  Para que no tapen la página, a la vista queda solo el último; los de antes esperan detrás de «N avisos más · Ver en
+  la Cola» y, al cerrar el de la vista, sale el anterior. El mismo aviso no se apila.
+- **«Avisos» en la Cola**: los últimos 20 avisos de error de la ventana, con su hora, para releerlos después de
+  cerrarlos. Siguen ahí al recargar. Con la Cola abierta, los avisos flotantes quedan por debajo.
+- **Un fallo inesperado dentro de Tenca** ya no enseña el texto de Python o de Windows: dice «Algo ha fallado dentro de
+  Tenca», con el texto técnico plegado en «Detalle» (en Ajustes, al pasar el ratón por encima). También al subir o
+  importar un audio.
+- El botón de un error en la Cola («Abrir PowerShell»…) no hacía nada: el clic no llegaba a su destino.
+- **Hoy › Para revisar**: «No es de ningún proyecto» es una respuesta, y la reunión deja de pedirlo (antes «Sin
+  proyecto» cerraba sin guardar y la fila volvía). «No se pudo transcribir» dice por qué, con su botón. «Actualizar» la
+  agenda durante una llamada dice que se leerá al colgar, y al colgar se lee.
+- **Aviso flotante**: la ✕ de «Ya ha empezado «X»» cuenta como «Ahora no», igual que en la app.
+
 ### La grabación no se corta sin decirlo, y menos eco del altavoz (14/11/2026)
 
 Puntos 1 y 6 de la revisión del 14/11/2026. Rama `grabadora`.

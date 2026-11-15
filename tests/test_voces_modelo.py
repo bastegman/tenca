@@ -289,7 +289,8 @@ class RecordarTrasActualizarTests(unittest.TestCase):
                 " '--data', sys.argv[2]]))")
         r = subprocess.run([sys.executable, "-c", code, APP, tmp], capture_output=True, text=True, timeout=120)
         self.assertEqual(r.returncode, 1, r.stderr)
-        self.assertIn("BAJANDO " + tmp, r.stdout)
+        msgs = [json.loads(line) for line in r.stdout.splitlines() if line.strip().startswith("{")]
+        self.assertIn({"type": "error", "error": "BAJANDO " + tmp}, msgs)  # en Windows, la ruta va con «\\» en el JSON
 
 
 class ModeloFijadoTests(unittest.TestCase):

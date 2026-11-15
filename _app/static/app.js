@@ -163,7 +163,18 @@ function hlTerms(text, terms) {
 
 /* timeout (ms): tope de la petición entera (los sondeos: 5 s). Sin respuesta (el servidor caído, colgado o sin
    red) el error dice «Tenca no responde», con noResponde = true, y no el «Failed to fetch» del navegador (review del
-   14/11/2026, punto 1). */
+   14/11/2026, punto 1).
+   Un fallo inesperado del servidor (500: una excepción de Python o de Windows, que llegaba tal cual al aviso) dice
+   «Algo ha fallado dentro de Tenca», con interno = true y el texto técnico en detalle, que el aviso pliega en
+   «Detalle» (punto 11). Si el servidor ya manda la frase y el detalle por separado ({error, detalle}), se respetan. */
+let falloInternoUltimo = null;  // {frase, detalle, t}: el último 500, para el aviso que lo cuente (detalleInternoHtml)
+/* El error de una respuesta con status >= 500, para api() y para lo que pide sin ella (subir por XHR, /api/import) */
+function errorInterno(status, j, statusText) {
+  const detalle = String((j && j.detalle ? j.detalle : j && j.error) || statusText || `HTTP ${status}`);
+  const frase = j && j.detalle && j.error ? String(j.error) : `Algo ha fallado dentro de ${APP_NAME}`;
+  falloInternoUltimo = { frase, detalle, t: Date.now() };
+  return Object.assign(new Error(frase), { status, interno: true, detalle });
+}
 async function api(path, body, timeout) {
   const opt = body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Audios': '1' }, body: JSON.stringify(body) };
   const ctl = timeout ? new AbortController() : null;
@@ -176,6 +187,7 @@ async function api(path, body, timeout) {
   } catch {
     throw Object.assign(new Error(`${APP_NAME} no responde`), { noResponde: true });
   } finally { if (tm) clearTimeout(tm); }
+  if (r.status >= 500) throw errorInterno(r.status, j, r.statusText);
   if (!r.ok || j.error) throw Object.assign(new Error(j.error || r.statusText), { status: r.status });  // 409: Ajustes
   return j;
 }
@@ -455,6 +467,13 @@ function franja(id, html) {
 }
 function renderLatido() {
   const caido = S.latido.fallos >= LATIDO_FALLOS;
+  if (S.latido.fallos) S.latido.huboFallo = true;
+  else if (S.latido.huboFallo) {  // vuelve a responder: fuera los avisos de error que decían que no (revisión 2, P2-4)
+    S.latido.huboFallo = false;
+    const no = esc(`${APP_NAME} no responde`);
+    const viejos = $$('#toasts .toast.pila').filter(t => (t.dataset.k || '').startsWith(no));
+    if (viejos.length) { viejos.forEach(t => t.remove()); pilaOrden(); }
+  }
   franja('latido', caido ? `<span><b>${esc(APP_NAME)} no responde</b>${S.latido.grabando ? ': puede que no se esté grabando' : ''}</span>`
     + '<span class="sp"></span><button class="btn sm" type="button" data-franja-act="reabrir">Reabrir</button>' : '');
 }
@@ -484,7 +503,7 @@ function avisarCortes(cortes) {
   for (const c of vivos) {
     const html = corteTexto(c);
     if (S.cortesAvisados.has(c.id)) {  // ya está a la vista: si el corte ha cambiado (sigue / no sigue), se rehace
-      $$('.toast[data-corte]').forEach(t => { if (t.dataset.corte === c.id && t.dataset.html !== html) { t.dataset.html = html; t.innerHTML = html + '<span class="toast-x" aria-hidden="true">✕</span>'; } });
+      $$('.toast[data-corte]').forEach(t => { if (t.dataset.corte === c.id && t.dataset.html !== html) { t.dataset.html = html; t.innerHTML = html + TOAST_X; } });
       continue;
     }
     S.cortesAvisados.add(c.id);
@@ -1852,7 +1871,7 @@ main.addEventListener('click', async e => {
     return;
   }
   const g = t.closest('[data-go]');
-  if (g) {
+  if (g && !t.closest('[data-cfg-accion]')) {  // el botón de explicar.py en una fila de Hoy hace lo suyo (configurar.js)
     const params = {};
     if (g.dataset.t) params.t = g.dataset.t;
     if (g.dataset.q) params.q = g.dataset.q;
@@ -2006,17 +2025,19 @@ function applyProgress() {
   });
   renderLiveChip();
 }
+/* el botón de explicar.py de un trabajo con error (configurar.js), en su aviso como en la Cola (punto 11) */
+const jobAccionHtml = j => (typeof cfgAccionHtml === 'function' ? cfgAccionHtml(j) : '');
 function notifyJob(j) {
   if (j.kind === 'voces') {
     const a = S.audios.get(j.path), title = a ? fullTitle(a) : j.name;
     if (j.status === 'done') toast(`🗣 ${esc(j.stage)}: ${esc(title)}`, 'ok', () => go('a', j.path));
-    else toast(`No se pudieron identificar las voces de ${esc(title)}: ${esc(j.aviso?.frase || j.error)}`, 'err', () => go('a', j.path));
+    else toast(`No se pudieron identificar las voces de ${esc(title)}: ${esc(j.aviso?.frase || j.error)}${jobAccionHtml(j)}`, 'err', () => go('a', j.path));
     return;
   }
-  if (j.kind === 'summary') { if (j.status === 'error') toast(`No se pudo resumir: ${esc(j.aviso?.frase || j.error)}`, 'err'); return; }  // el aviso de listo lo da notas.js
+  if (j.kind === 'summary') { if (j.status === 'error') toast(`No se pudo resumir: ${esc(j.aviso?.frase || j.error)}${jobAccionHtml(j)}`, 'err'); return; }  // el aviso de listo lo da notas.js
   const a = S.audios.get(j.path), title = a ? fullTitle(a) : j.name;
   if (j.status === 'done') toast(`<b>✓</b> ${j.live ? 'Grabación transcrita' : 'Transcrito'}: ${esc(title)}`, 'ok', () => go('a', j.path));
-  else toast(`No se pudo transcribir ${esc(title)}: ${esc(j.aviso?.frase || j.error)}`, 'err', () => go('a', j.path));
+  else toast(`No se pudo transcribir ${esc(title)}: ${esc(j.aviso?.frase || j.error)}${jobAccionHtml(j)}`, 'err', () => go('a', j.path));
   if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
     const n = new Notification(j.status === 'done' ? 'Transcripción lista' : 'Error al transcribir', { body: title });
     n.onclick = () => { window.focus(); go('a', j.path); };
@@ -2034,14 +2055,31 @@ function renderJobsPanel() {
       const btn = isActive(j) ? `<button class="btn ghost sm danger" data-jact="cancel" data-id="${j.id}">${j.live ? 'Detener' : 'Cancelar'}</button>`
         : `<span class="pill ${j.status === 'done' ? 'ok' : j.status === 'error' ? 'err' : ''}">${{ done: 'Hecho', error: 'Error', cancelled: 'Cancelado' }[j.status]}</span>`;
       return `<div class="jitem"><span class="n" data-jgo="${esc(j.path)}">${esc(title)}</span>${btn}${bar}${sub}</div>`;
-    }).join('') : '<div class="empty">No hay transcripciones en marcha.<br>Elige un audio y pulsa <b>Transcribir</b>.</div>');
+    }).join('') : '<div class="empty">No hay transcripciones en marcha.<br>Elige un audio y pulsa <b>Transcribir</b>.</div>')
+    + avisosHtml();
+}
+/* «Avisos»: los últimos avisos de error de esta ventana (toast), del más reciente al más antiguo, para releerlos después
+   de cerrarlos, con su botón y su «Detalle» */
+function avisosHtml() {
+  const l = avisosLista();
+  if (!l.length) return '';
+  const hora = t => { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  return `<div class="ph ph-avisos"><b>Avisos</b><button class="btn ghost sm" type="button" data-jact="avisos-borrar">Borrar avisos</button></div>`
+    + [...l].reverse().map(a => `<div class="aviso-item"><span class="t">${hora(a.t)}${a.n > 1 ? ` · ${a.n} veces` : ''}</span><div class="s">${a.html}</div></div>`).join('');
 }
 $('#btnJobs').onclick = e => { e.stopPropagation(); const p = $('#jobsPanel'); p.classList.toggle('hidden'); if (!p.classList.contains('hidden')) renderJobsPanel(); };
 $('#jobsPanel').addEventListener('click', async e => {
+  // el botón de explicar.py de un error (cfgAccionHtml) lo atiende document (configurar.js): sin parar el clic aquí
+  if (e.target.closest('[data-cfg-accion]')) return setTimeout(() => $('#jobsPanel').classList.add('hidden'));
   e.stopPropagation();
   const b = e.target.closest('[data-jact]'), g = e.target.closest('[data-jgo]');
   if (b && b.dataset.jact === 'cancel') { await api('/api/cancel', { id: b.dataset.id }); pollJobs(true); }
   else if (b && b.dataset.jact === 'clear') { await api('/api/jobs/clear', {}); pollJobs(true); }
+  else if (b && b.dataset.jact === 'avisos-borrar') {
+    S.avisos = [];
+    try { sessionStorage.removeItem(AVISOS_CLAVE); } catch { /* sin almacenamiento */ }
+    renderJobsPanel();
+  }
   else if (g) { go('a', g.dataset.jgo); $('#jobsPanel').classList.add('hidden'); }
 });
 document.addEventListener('click', e => { if (!e.target.closest('#jobsPanel, #btnJobs')) $('#jobsPanel').classList.add('hidden'); });
@@ -2481,11 +2519,13 @@ function openSettings(opts) {
       else el.after(s);
       return (el._ajMarca = s);
     };
-    const marcar = (el, estado, txt = '') => {
+    // detalle: el texto técnico de un 500 que vio api(), al pasar por encima de «No se ha guardado: Algo ha fallado…» (punto 11)
+    const marcar = (el, estado, txt = '', detalle = '') => {
       if (!document.body.contains(el)) return;
       const m = marcaDe(el);
       clearTimeout(m.t);
       m.className = 'aj-ok ' + estado;
+      m.title = estado === 'err' && detalle ? detalle : '';
       m.setAttribute('role', estado === 'err' ? 'alert' : 'status');
       // ok: «Guardado ✓» o lo que diga quien guarda («Guardado como «16» ✓» si el servidor ajustó un número)
       m.textContent = { ok: txt || 'Guardado ✓', err: `No se ha guardado: ${txt}`, guardando: 'Guardando…' }[estado] || '';
@@ -2561,7 +2601,7 @@ function openSettings(opts) {
             if (pend.has(el) || textos.has(el)) return;
             if (!esTexto(el) && el.id !== 'dkRows') volver(el);  // (una clave escrita, tampoco se borra)
             else if (err.status !== 409) fallidos.add(el);
-            marcar(el, 'err', err.message);
+            marcar(el, 'err', err.message, err.detalle);
             oculto = oculto || !!el.closest('[hidden]');
           });
           d.ajPlanPedir?.();  // el plan de Al grabar, con lo que se ve otra vez
@@ -2683,7 +2723,7 @@ function openSettings(opts) {
       } catch (err) { res.innerHTML = `<span style="color:var(--err)">✖ ${esc(err.message)}</span> <span class="muted">(tras ${seg()} s)</span>`; }
       finally { clearInterval(timer); btn.disabled = false; }
     };
-    $('#aDatos', d).onclick = () => api('/api/acerca/abrir', { que: 'datos' }).catch(e => toast(e.message, 'err'));
+    $('#aDatos', d).onclick = () => api('/api/acerca/abrir', { que: 'datos' }).catch(e => toast(esc(e.message), 'err'));
     $('#aRepo', d).onclick = e => { e.preventDefault(); api('/api/acerca/abrir', { que: 'repo' }).catch(() => window.open(ac.repo, '_blank')); };
     $('#aDonar', d).onclick = e => { e.preventDefault(); if (ac.donar) api('/api/acerca/abrir', { que: 'donar' }).catch(() => window.open(ac.donar, '_blank')); };
     const cafe = $('#ajCafe', d);
@@ -2691,7 +2731,7 @@ function openSettings(opts) {
     const tenca = $('#aTenca', d);
     if (tenca) tenca.onclick = e => { e.preventDefault(); api('/api/acerca/abrir', { que: 'tenca' }).catch(() => window.open(ac.tenca, '_blank')); };
     $('#aDiag', d).onclick = async () => {
-      try { const r = await api('/api/diagnostico'); await copy(r.texto, 'Diagnóstico copiado: revísalo antes de pegarlo donde pidas ayuda'); } catch (e) { toast(e.message, 'err'); }
+      try { const r = await api('/api/diagnostico'); await copy(r.texto, 'Diagnóstico copiado: revísalo antes de pegarlo donde pidas ayuda'); } catch (e) { toast(esc(e.message), 'err'); }
     };
     const autoLocal = $('#sAutoLocal', d);
     if (autoLocal) autoLocal.addEventListener('change', () => { $('#sAutoLocalAviso', d).hidden = !autoLocal.checked; if (autoLocal.checked) localStorage.setItem('sumOk', '1'); });
@@ -2864,14 +2904,86 @@ function shutdownScreen() {
     <h2 style="margin:16px 0 8px">${esc(APP_NAME)} se ha apagado</h2><p class="muted">Cierra esta ventana. Para volver a usar ${esc(APP_NAME)}, ábrela con el acceso directo del escritorio.</p></div>`;
 }
 
-/* keep: no caduca (se cierra con un clic): la grabación cortada, que no puede irse sola a los 9 s */
+/* Avisos (review del 14/11/2026, punto 11). Los de error no caducan: se cierran con ✕ (a los 9 s no daba tiempo a leer
+   una frase de explicar.py) y quedan en «Avisos», en la Cola, para releerlos. Un clic en el texto hace lo suyo (abrir
+   la reunión, si lo tiene) y lo cierra; en un botón de dentro (el de explicar.py) o en «Detalle», solo lo de ese botón;
+   con un diálogo abierto, no abre nada detrás de él.
+   Van en pila: a la vista solo el último, y los de antes detrás de «N avisos más · Ver en la Cola»; al cerrar el de la
+   vista sale el anterior. Así no tapan la página (revisión 1, P1-3: tres a la vez tapaban botones de Hoy y de
+   Ajustes). El mismo aviso otra vez no se apila: queda el último.
+   keep === true: tampoco caduca, siempre a la vista y fuera de la pila, y cualquier clic, ✕ incluida, hace lo suyo y
+   lo cierra (la grabación cortada: su clic es «visto»; «quedan N min de disco»…). keep === false: un error que sí se
+   va solo, a los 9 s. Los demás avisos, a los 4 s. */
+const TOAST_X = '<button type="button" class="toast-x" aria-label="Cerrar este aviso" title="Cerrar">✕</button>';
+const PILA_MAX = 10, AVISOS_MAX = 20, AVISOS_CLAVE = 'tenca.avisos';
+function avisosLista() {
+  if (!S.avisos) { try { S.avisos = JSON.parse(sessionStorage.getItem(AVISOS_CLAVE) || '[]'); } catch { S.avisos = []; } }
+  return S.avisos;
+}
+/* estado: un aviso de los que no caducan (keep: la grabación cortada, el disco…), que se vuelve a anunciar al recargar
+   la página; si ya está en la lista, no se apunta otra vez (revisiones 1 y 2, P2-6 y P2-2). Lo demás que se repite
+   seguido suma «N veces» */
+function apuntarAviso(html, estado) {
+  const l = avisosLista(), u = l[l.length - 1], t = Date.now();
+  if (estado && l.some(x => x.html === html)) return;
+  if (u && u.html === html) { u.t = t; u.n = (u.n || 1) + 1; } else l.push({ html, t });
+  S.avisos = l.slice(-AVISOS_MAX);
+  try { sessionStorage.setItem(AVISOS_CLAVE, JSON.stringify(S.avisos)); } catch { /* sin almacenamiento */ }
+  if (!$('#jobsPanel').classList.contains('hidden')) renderJobsPanel();
+}
+/* El texto técnico del último 500 que vio api(), plegado en «Detalle», para el aviso que dice su frase justo después (el
+   catch de esa petición). Pasados 5 s, o ya contado, no se pega a otro aviso. */
+function detalleInternoHtml(html) {
+  const f = falloInternoUltimo;
+  if (!f || Date.now() - f.t > 5000 || !html.includes(esc(f.frase))) return '';
+  falloInternoUltimo = null;
+  return `<details class="toast-det"><summary>Detalle</summary><div class="toast-tec">${esc(f.detalle)}</div></details>`;
+}
+function abrirCola() {
+  const p = $('#jobsPanel');
+  p.classList.remove('hidden');
+  renderJobsPanel();
+  $('.ph-avisos', p)?.scrollIntoView({ block: 'nearest' });
+}
+/* la pila de avisos de error: el último a la vista; los de antes, detrás de «N avisos más · Ver en la Cola» */
+function pilaOrden() {
+  const box = $('#toasts');
+  let pila = $$('.toast.pila', box);
+  pila.slice(0, Math.max(0, pila.length - PILA_MAX)).forEach(t => t.remove());  // (siguen en «Avisos»)
+  pila = $$('.toast.pila', box);
+  pila.forEach((t, i) => t.classList.toggle('detras', i < pila.length - 1));
+  let mas = $('#toastMas');
+  const n = pila.length - 1;
+  if (n < 1) return mas?.remove();
+  if (!mas) {
+    mas = Object.assign(document.createElement('button'), { id: 'toastMas', type: 'button', className: 'toast-mas' });
+    mas.onclick = e => { e.stopPropagation(); abrirCola(); };
+  }
+  mas.textContent = `${n} ${n === 1 ? 'aviso más' : 'avisos más'} · Ver en la Cola`;
+  pila[pila.length - 1].before(mas);
+}
 function toast(html, kind = '', onclick, keep) {
+  const err = kind === 'err', fijo = keep === true || (err && keep !== false), box = $('#toasts');
+  if (err) { html += detalleInternoHtml(html); apuntarAviso(html, keep === true); }
+  if (fijo) $$('.toast.fijo', box).forEach(t => { if (t.dataset.k === html) t.remove(); });
   const el = document.createElement('div');
-  el.className = 'toast ' + kind + (keep ? ' keep' : '');
-  el.innerHTML = html + (keep ? '<span class="toast-x" aria-hidden="true">✕</span>' : '');
-  el.onclick = () => { onclick && onclick(); el.remove(); };
-  $('#toasts').append(el);
-  if (!keep) setTimeout(() => el.remove(), kind === 'err' ? 9000 : 4000);
+  el.className = 'toast ' + kind + (fijo ? ' fijo' : '') + (keep === true ? ' keep' : fijo ? ' pila' : '');
+  el.dataset.k = html;
+  el.innerHTML = html + (fijo ? TOAST_X : '');
+  const quitar = () => { el.remove(); if (fijo) pilaOrden(); };
+  el.onclick = e => {
+    const x = e.target.closest('.toast-x');
+    if (keep !== true && x) return quitar();
+    if (keep !== true && e.target.closest('button, a, summary, details, input, select, textarea')) return;
+    // con un diálogo encima no se abre nada detrás (el clic iba a lo tapado): el aviso con destino se queda para
+    // después; el que no tiene, se cierra como siempre (revisión 2, P2-1)
+    if (keep !== true && !$('#modal').classList.contains('hidden')) return onclick && fijo ? undefined : quitar();
+    onclick && onclick();
+    quitar();
+  };
+  box.append(el);
+  if (fijo) pilaOrden();
+  else setTimeout(() => el.remove(), err ? 9000 : 4000);
   return el;
 }
 
@@ -2922,7 +3034,11 @@ function avisoError(msg) {
   try { toast(`Algo ha fallado en la interfaz: ${esc(m)}. Si se repite, cierra la ventana y vuelve a abrir ${esc(APP_NAME)}.`, 'err'); } catch { /* sin toast aun */ }
 }
 window.addEventListener('error', e => avisoError(e.message || (e.error && e.error.message)));
-window.addEventListener('unhandledrejection', e => avisoError((e.reason && e.reason.message) || e.reason));
+window.addEventListener('unhandledrejection', e => {
+  const r = e.reason;  // un fallo de api() sin catch ya es una frase para ti («Tenca no responde», «Algo ha fallado…»)
+  if (r && (r.interno || r.noResponde)) return toast(esc(r.message), 'err');
+  avisoError((r && r.message) || r);
+});
 
 /* Mientras /api/config no contesta, se dice (con los segundos) en vez de dejar la pagina en blanco. */
 function esperandoHtml(seg) {
@@ -2942,7 +3058,7 @@ async function init() {
     await loadVocab();  // temas (<proyecto>/Vocabulario/*.txt…) para los selectores
   } catch (err) {
     clearInterval(lento);
-    main.innerHTML = `<div class="page"><div class="card empty">No se puede conectar con el servidor de la app.<br>Ábrela con el acceso directo <b>${esc(APP_NAME)}</b> del escritorio.<br><br><span class="muted">${esc(err.message)}</span></div></div>`;
+    main.innerHTML = `<div class="page"><div class="card empty">No se puede conectar con el servidor de la app.<br>Ábrela con el acceso directo <b>${esc(APP_NAME)}</b> del escritorio.<br><br><span class="muted">${esc(err.message)}${err.detalle ? `: ${esc(err.detalle)}` : ''}</span></div></div>`;
     return;
   }
   route();

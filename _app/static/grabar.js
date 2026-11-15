@@ -738,7 +738,8 @@ function sbEnviar(url, file, onProg, g) {
     x.onload = () => {
       let j;
       try { j = JSON.parse(x.responseText); } catch { j = { error: x.statusText || 'respuesta no válida' }; }
-      if (x.status >= 400 || j.error) ko(new Error(j.error || x.statusText)); else ok(j);
+      if (x.status >= 500) ko(errorInterno(x.status, j, x.statusText));  // sin el texto de Python (punto 11)
+      else if (x.status >= 400 || j.error) ko(new Error(j.error || x.statusText)); else ok(j);
     };
     x.onerror = () => ko(new Error(`No se ha podido subir: ¿se ha cerrado ${APP_NAME}?`));
     x.send(file);

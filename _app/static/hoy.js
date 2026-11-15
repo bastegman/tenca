@@ -15,7 +15,7 @@
      pollRec con /api/rec/status). La decide el servidor (_siguiente: la reunión de ahora sin la que se grababa) y
      «Grabar» graba esa con su plan, solo si sigue siendo la propuesta.
    Se carga después de app.js, notas.js y grabar.js y usa sus utilidades ($, $$, api, esc, I, S, main, go, toast,
-   allAudios, liveAudios, isLive, jobFor, statusOf, estDuration, fmtDur, fmtClock, aDate, titleOf, nfc, pad, iconOf, MES,
+   allAudios, liveAudios, isLive, jobFor, lastTxJobFor, statusOf, estDuration, fmtDur, fmtClock, aDate, titleOf, nfc, pad, iconOf, MES,
    LANGS, vocabOf, vocabOptions, saveProps, wsPatch, submitTx, openRec, openModal, closeModal, openSettings,
    refreshTree, pollRec, pollJobs, liveBanner, welcomeCard, avisoResumenLocalHtml). app.js lo llama con
    `typeof viewHoy === 'function'`: sin este fichero, Inicio es la lista de antes. */
@@ -55,25 +55,40 @@ function hoyFaltan(min) {
 }
 
 /* ---------------------------------------------------------------- lo que pide algo de ti (Para revisar) */
-const hoySumError = path => { for (let i = S.jobs.length - 1; i >= 0; i--) { const j = S.jobs[i]; if (j.path === path && j.kind === 'summary') return j.status === 'error'; } return false; };
+const hoySumJob = path => { for (let i = S.jobs.length - 1; i >= 0; i--) { const j = S.jobs[i]; if (j.path === path && j.kind === 'summary') return j; } return null; };
+const hoySumError = path => hoySumJob(path)?.status === 'error';
+/* «No es de ningún proyecto» (review del 14/11/2026, punto 38): una respuesta, como elegir uno, que quita la fila. Va al
+   servidor como propiedad de la reunión (sin_proyecto) y se apunta aquí, en localStorage, que es lo que vale mientras
+   el servidor no la guarde (hoy no la guarda: NOTE_KEYS). */
+const HOY_SIN_PROY = 'tenca.sinProyecto';
+function hoySinProySet() {
+  if (!HOY.sinProy) { try { HOY.sinProy = new Set(JSON.parse(localStorage.getItem(HOY_SIN_PROY) || '[]')); } catch { HOY.sinProy = new Set(); } }
+  return HOY.sinProy;
+}
+const hoySinProyecto = a => !!(a.props || {}).sin_proyecto || hoySinProySet().has(a.path);
+function hoyApuntarSinProy(path, si) {
+  const s = hoySinProySet();
+  if (si) s.add(path); else s.delete(path);
+  try { localStorage.setItem(HOY_SIN_PROY, JSON.stringify([...s].slice(-500))); } catch { /* sin almacenamiento */ }
+}
 /* Lo que pide una reunión, en orden: lo que no deja leerla primero (error, a medias, sin transcribir), luego las voces,
    el resumen fallido y el proyecto. El botón es el del primero. null si no pide nada o si está en marcha (la cola y el
    directo ya lo dicen). */
 function hoyRevision(a) {
   if (isLive(a) || a.recording || jobFor(a.path)) return null;
   const st = statusOf(a), motivos = [];
-  let accion = null;
+  let accion = null, fallo = null;  // fallo: el trabajo que falló, para decir por qué en la fila y su botón (punto 38)
   const anota = (texto, aviso, k, label) => { motivos.push({ texto, aviso }); if (!accion && k) accion = { k, label }; };
-  if (st === 'error') anota('No se pudo transcribir', true, 'transcribir', 'Reintentar');
+  if (st === 'error') { anota('No se pudo transcribir', true, 'transcribir', 'Reintentar'); fallo = lastTxJobFor(a.path); }
   else if (st === 'partial') anota(`La transcripción se cortó en ${fmtClock(a.tx_end)}`, true, 'continuar', 'Continuar');
   else if (st === 'pending') anota(`Grabada · sin transcribir (${fmtDur(estDuration(a))})`, false, 'transcribir', 'Transcribir');
   const sinNombre = (a.speakers && a.speakers.sin_nombre) || 0;
   if (sinNombre) anota(`${sinNombre} ${sinNombre === 1 ? 'voz' : 'voces'} sin nombre`, true, 'voces', 'Ponles nombre');
-  if (!a.has_summary && hoySumError(a.path)) anota('No se pudo resumir', true, 'resumir', 'Reintentar el resumen');
-  if ((S.vocab || []).length && !(a.props || {}).workstream) anota('¿De qué proyecto es?', false, 'proyecto', 'Elegir proyecto');
+  if (!a.has_summary && hoySumError(a.path)) { anota('No se pudo resumir', true, 'resumir', 'Reintentar el resumen'); fallo ||= hoySumJob(a.path); }
+  if ((S.vocab || []).length && !(a.props || {}).workstream && !hoySinProyecto(a)) anota('¿De qué proyecto es?', false, 'proyecto', 'Elegir proyecto');
   if (!motivos.length) return null;
   if (a.has_summary) motivos.unshift({ texto: 'Resumen listo', aviso: false });
-  return { a, motivos, accion };
+  return { a, motivos, accion, fallo };
 }
 function hoyRevisar(audios, now) {
   const desde = hoyIniDia(now).getTime() - (HOY_REVISAR_DIAS - 1) * 864e5;
@@ -102,6 +117,15 @@ function hoyAgendaDias(citas, now, ahora) {
 }
 
 /* ---------------------------------------------------------------- cargar */
+/* En una llamada, o grabando, el servidor no relee Outlook (lo está usando la reunión: _agenda_paso). «Actualizar» lo
+   dice («se leerá al colgar») en vez de quedarse 45 s en «Leyendo de Outlook…» y volver a lo de antes sin decir nada
+   (review del 14/11/2026, punto 38). 'llamada', 'grabando' o null. Si /api/hoy lo trae (agenda.ocupado), manda eso. */
+function hoyAgendaOcupada() {
+  const g = HOY.datos?.agenda;
+  if (g && 'ocupado' in g) return g.ocupado || null;
+  if (S.rec?.recording) return 'grabando';
+  return S.rec?.meeting || HOY.datos?.ahora?.teams ? 'llamada' : null;
+}
 const hoyViejo = () => Date.now() - Math.max(HOY.at, HOY.intento || 0) > HOY_CADA_MS;  // (un fallo no se reintenta en bucle)
 /* refrescar: que el servidor relea la agenda ya («Actualizar», «Volver a leer»); otraVez: si hay otra petición en
    camino (que puede traer lo de antes de un cambio), una más al terminar; abrir: al llegar a Hoy, que el servidor relea
@@ -119,6 +143,8 @@ function hoyCargar(refrescar, otraVez, abrir) {
     // (HOY.seq sube: un plan de la anterior que llegue tarde ya no se pinta; revisión 2, P1)
     if (antes !== d.plan?.nombre?.valor) { HOY.pedido = null; HOY.plan = null; HOY.forzarAhora = true; HOY.seq++; }
     if (!HOY.pedido) HOY.plan = null;
+    // «Actualizar» en una llamada: al colgar, se pide la lectura que entonces no se pudo hacer
+    if (HOY.alColgar && !hoyAgendaOcupada()) { HOY.alColgar = null; HOY.otraVez = 'r'; }
     // la agenda se está leyendo, o la has pedido otra vez y aún no ha cambiado: se vuelve a preguntar enseguida
     clearTimeout(HOY.leerTimer);
     const esperando = HOY.hasta && Date.now() < HOY.hasta.t && (d.agenda?.comprobada || null) === HOY.hasta.comprobada;
@@ -324,14 +350,19 @@ function hoyProyTxt(a) {
   const p = a.props || {};
   return p.workstream ? [p.proyecto, p.workstream].filter(Boolean).join(' › ') : '';
 }
+/* por qué falló, en la fila (antes solo en la Cola): la frase de explicar.py, con el texto técnico al pasar por encima */
+function hoyFalloHtml(j) {
+  const frase = j && (j.aviso?.frase || j.error);
+  return frase ? `<div class="hr-motivo" title="${esc(j.error || '')}">${esc(frase)}</div>` : '';
+}
 function hoyRevisarHtml(lista, now) {
   if (!lista.length) return '';
   const filas = lista.slice(0, HOY_REVISAR_MAX).map(r => {
     const a = r.a, proy = hoyProyTxt(a);
     return `<div class="hr-fila" data-go="a" data-path="${esc(a.path)}"><span class="hr-dia">${esc(hoyDiaTxt(hoyFechaDe(a), now))}</span>
-      <div class="hr-t"><div class="hr-n">${iconOf(a) ? iconOf(a) + ' ' : ''}${esc(hoyTitulo(a))}${proy ? `<span class="hr-proy">${esc(proy)}</span>` : (S.vocab || []).length ? '<span class="hr-proy sin">Sin proyecto</span>' : ''}</div>
-      <div class="hr-sub">${r.motivos.map(m => m.aviso ? `<b class="aviso">${esc(m.texto)}</b>` : esc(m.texto)).join(' · ')}</div></div>
-      <button class="btn sm" data-act="hoy-accion" data-k="${r.accion.k}" data-path="${esc(a.path)}">${esc(r.accion.label)}</button></div>`;
+      <div class="hr-t"><div class="hr-n">${iconOf(a) ? iconOf(a) + ' ' : ''}${esc(hoyTitulo(a))}${proy ? `<span class="hr-proy">${esc(proy)}</span>` : !(S.vocab || []).length ? '' : hoySinProyecto(a) ? '<span class="hr-proy">Ningún proyecto</span>' : '<span class="hr-proy sin">Sin proyecto</span>'}</div>
+      <div class="hr-sub">${r.motivos.map(m => m.aviso ? `<b class="aviso">${esc(m.texto)}</b>` : esc(m.texto)).join(' · ')}</div>${hoyFalloHtml(r.fallo)}</div>
+      <div class="hr-acts">${r.fallo && typeof cfgAccionHtml === 'function' ? cfgAccionHtml(r.fallo) : ''}<button class="btn sm" data-act="hoy-accion" data-k="${r.accion.k}" data-path="${esc(a.path)}">${esc(r.accion.label)}</button></div></div>`;
   }).join('');
   const mas = lista.length - HOY_REVISAR_MAX;
   return `<section class="hoy-revisar"><h2>Para revisar <span class="count">${lista.length}</span></h2><div class="card hr-lista">${filas}</div>
@@ -388,7 +419,8 @@ function hoyAgendaHtml() {
       <div class="ag-t"><div class="ag-n">${esc(c.subject || '(sin asunto)')}${tags}</div>${lugar}${prep}</div>${boton}</div>`;
   }).join('')}</div>`).join('');
   const nada = g.estado === 'ok' && !dias.length ? `<div class="ag-nada">No tienes más reuniones en los próximos ${g.dias} días.</div>` : '';
-  const pie = g.leida ? `<div class="ag-pie">${HOY.hasta ? 'Leyendo de Outlook…' : `Leída de Outlook a las ${hoyHora(g.leida)}`}${g.cortada ? ' · solo las primeras citas: tu agenda tiene más' : ''}
+  const colgar = HOY.alColgar && hoyAgendaOcupada();
+  const pie = g.leida ? `<div class="ag-pie">${HOY.hasta ? 'Leyendo de Outlook…' : `Leída de Outlook a las ${hoyHora(g.leida)}`}${g.cortada ? ' · solo las primeras citas: tu agenda tiene más' : ''}${colgar ? ` · <b class="ag-colgar">${colgar === 'grabando' ? 'Mientras se graba no se lee Outlook: se leerá al terminar' : 'En una llamada no se lee Outlook: se leerá al colgar'}</b>` : ''}
     <button class="btn ghost sm" data-act="hoy-agenda-leer" title="Volver a leer la agenda de Outlook">${I.refresh}Actualizar</button></div>` : '';
   return `<h2>Agenda${activo ? ` <span class="count">próximos ${g.dias} días</span>` : ''}</h2>${linea}
     ${filas || nada ? `<div class="card ag-lista">${filas}${nada}</div>` : ''}
@@ -472,18 +504,34 @@ function hoyPreparar(c) {
 }
 
 /* ---------------------------------------------------------------- acciones */
+/* «¿De qué proyecto es?»: uno de la lista o «No es de ningún proyecto», que también es una respuesta y quita la fila
+   (antes «Sin proyecto» cerraba sin guardar y la fila volvía; review del 14/11/2026, punto 38) */
 function hoyElegirProyecto(a) {
+  const opciones = vocabOptions('', 'Elige un proyecto…').replace('<option value="">', '<option value="" disabled selected>');
   openModal(`<h3>¿De qué proyecto es?</h3><div class="help" style="margin:0 0 10px">${esc(hoyTitulo(a))}: su carpeta y su vocabulario serán los del proyecto.</div>
-    <select id="hoyProy" class="input">${vocabOptions('', 'Sin proyecto')}</select>
-    <div class="btns"><button class="btn" data-m="no" type="button">Cancelar</button><button class="btn primary" data-m="ok" type="button">Guardar</button></div>`, d => {
+    <select id="hoyProy" class="input" aria-label="Proyecto">${opciones}</select>
+    <div class="btns"><button class="btn ghost" data-m="ninguno" type="button">No es de ningún proyecto</button><span class="hp-hueco"></span>
+      <button class="btn" data-m="no" type="button">Cancelar</button><button class="btn primary" data-m="ok" type="button" disabled>Guardar</button></div>`, d => {
+    const sel = $('#hoyProy', d), ok = $('[data-m="ok"]', d);
+    sel.addEventListener('change', () => { ok.disabled = !sel.value; });
     d.addEventListener('click', async e => {
       const b = e.target.closest('[data-m]');
       if (!b) return;
-      if (b.dataset.m !== 'ok') return closeModal(false);
-      const v = (S.vocab || []).find(x => x.id === $('#hoyProy', d).value);
-      if (!v) return closeModal(false);
+      if (b.dataset.m === 'no') return closeModal(false);
+      if (b.dataset.m === 'ninguno') {
+        b.disabled = true;
+        hoyApuntarSinProy(a.path, true);
+        await saveProps(a, { sin_proyecto: 'sí' });  // (si falla, ya lo ha dicho; aquí queda apuntado igual)
+        closeModal(true);
+        toast(`«${esc(hoyTitulo(a))}» no es de ningún proyecto: ya no se pregunta`);
+        if (S.route?.kind === 'home') viewHoy();
+        return;
+      }
+      const v = (S.vocab || []).find(x => x.id === sel.value);
+      if (!v) return sel.focus();
       b.disabled = true;
-      const r = await saveProps(a, wsPatch(v));
+      const r = await saveProps(a, Object.assign(wsPatch(v), hoySinProyecto(a) ? { sin_proyecto: '' } : {}));
+      if (r) hoyApuntarSinProy(a.path, false);
       closeModal(!!r);
       if (r) { toast(`🗂 ${esc(v.project)} › ${esc(v.name)}`); refreshTree(true); }
     });
@@ -508,7 +556,13 @@ main.addEventListener('click', e => {
   else if (act === 'hoy-subir') $('#btnSubir')?.click();
   else if (act === 'hoy-ultima' || act === 'hoy-resumen') { S.tab = 'sum'; go('a', b.dataset.path); }
   else if (act === 'hoy-accion' && a) hoyAccion(b.dataset.k, a);
-  else if (act === 'hoy-agenda-leer') { HOY.leyendo = 0; hoyCargar(true, true); hoyPintarVivo(); }
+  else if (act === 'hoy-agenda-leer') {
+    HOY.leyendo = 0;
+    // en una llamada, con una agenda ya leída (sin ninguna, el servidor la lee igual): se dice y se lee al colgar
+    HOY.alColgar = HOY.datos?.agenda?.leida ? hoyAgendaOcupada() : null;
+    hoyCargar(!HOY.alColgar, true);
+    hoyPintarVivo();
+  }
   else if (act === 'hoy-agenda-ajustes') openSettings({ sec: 'calendario' });
   else if (act === 'hoy-agenda-todo') { HOY.todo = true; hoyPintarVivo(true); }
   else if (act === 'hoy-preparar') {
