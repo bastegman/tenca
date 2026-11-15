@@ -70,6 +70,8 @@ class GrabadoraFallosTests(unittest.TestCase):
         "poco": dict(env={"FAKE_DISCO_MB": "100"}, stop_s=3),
         # parar mientras falla la escritura: no se tira lo que espera en memoria (revision 1, P2-1)
         "parar": dict(env={"FAKE_ESCRITURA": "0.5-4"}, stop_s=4),
+        # y si no se arregla en los 8 s de gracia: se dice (revision 2, P2-B)
+        "parar_lleno": dict(env={"FAKE_ESCRITURA": "0.5-"}, stop_s=4),
     }
 
     @classmethod
@@ -149,6 +151,14 @@ class GrabadoraFallosTests(unittest.TestCase):
         info = live.wav_info(r["wav"])
         self.assertAlmostEqual(info["data_size"] / recorder.WAV_BYTES_S, done["t"], delta=0.01)
         self.assertNotIn("no se han podido escribir", r["log"])
+
+    def test_parar_con_el_disco_lleno_lo_dice(self):
+        r = self.res["parar_lleno"]
+        fatal = [x["fatal"] for x in r["lines"] if x.get("fatal")]
+        self.assertEqual(len(fatal), 1, r["log"])
+        self.assertRegex(fatal[0],
+                         r"^no se han podido escribir los últimos \d+ s de la grabación \(el disco está lleno\)$")
+        self.assertIsNotNone(live.wav_info(r["wav"])["data_size"])
 
     def test_poco_disco_se_dice(self):
         r = self.res["poco"]
@@ -366,6 +376,32 @@ class CorteServidorTests(TempTree):
         self.assertEqual((c["sigue"], c["error"], c["continuacion"]), (False, "parada a mano", None))
         self.assertFalse(self.a.rec_status({})["recording"])
 
+    def test_parar_justo_al_morir_no_sigue(self):
+        # revision 2, P3: «Parar» cuando el proceso ya no esta pero el corte aun no se ha apuntado
+        self.ctl_(modos=["muere", "vive"])
+        motivo = recording.RecorderProcess.motivo
+
+        def lento(rp):
+            time.sleep(1.0)
+            return motivo(rp)
+        with mock.patch.object(recording.RecorderProcess, "motivo", lento):
+            r = self.start()
+            self.assertTrue(esperar(lambda: self.a.rec_status({}).get("cortada", {}).get("pendiente")))
+            self.assertEqual(self.a.rec_stop({})["path"], r["path"])
+            time.sleep(3.0)
+        self.assertEqual(len(self.arranques()), 1)
+        c = self.a.cortes.estado()[-1]
+        self.assertEqual((c["sigue"], c["error"]), (False, "parada a mano"))
+
+    def test_parada_a_medias_se_dice(self):
+        self.ctl_(modos=["pierde"])
+        self.start()
+        time.sleep(0.6)
+        self.a.rec_stop({})
+        self.assertTrue(any(t == "✖ Grabación guardada a medias" and "últimos 3 s" in b for t, b in self.avisos),
+                        self.avisos)
+        self.assertEqual(self.a.cortes.estado(), [])  # no es un corte: se paró a mano
+
     def test_la_continuacion_no_se_pide_desde_fuera(self):
         # «_continuacion» en el cuerpo de /api/rec/start ya no vale: graba donde dice la carpeta, no en otro sitio
         self.ctl_(modos=["vive"])
@@ -443,10 +479,12 @@ class CortadaPendienteTests(unittest.TestCase):
         a.__dict__["_cortes"] = recording.Cortes(tempfile.mkdtemp(prefix="tenca-cortes-"))
         self.addCleanup(shutil.rmtree, a.cortes.file.rsplit(os.sep, 1)[0], True)
         a.rec = types.SimpleNamespace(path=os.path.join(server.ROOT, "x.wav"), alive=lambda: False,
-                                      on_end=lambda r: None, stopping=False)
+                                      on_end=lambda r: None, stopping=False, apuntado=False)
         st = a.rec_status({})
         self.assertEqual((st["recording"], st["cortada"]["pendiente"]), (False, True))
         a.rec.stopping = True  # parada pedida: no es un corte
+        self.assertNotIn("cortada", a.rec_status({}))
+        a.rec.stopping, a.rec.apuntado = False, True  # ya apuntado (y quiza ya caducado): nada provisional
         self.assertNotIn("cortada", a.rec_status({}))
 
 
@@ -497,8 +535,10 @@ class RecuperarTests(TempTree):
         vistas = []
         with mock.patch.object(recording, "log"):
             hechas = cortes.recuperar(lambda p, mt: vistas.append((p, mt)), esperar=0.6)
-        self.assertEqual(hechas, [propia])
-        self.assertEqual([v[0] for v in vistas], [propia])
+        # la cerrada tambien se dice: la grabadora la cerro al cerrarse Tenca, pero el corte nadie lo vio
+        self.assertEqual(hechas, [cerrada, propia])
+        self.assertEqual([v[0] for v in vistas], [cerrada, propia])
+        self.assertEqual(live.wav_info(cerrada)["data_size"], 192000)  # no se toca
         self.assertIsNotNone(live.wav_info(propia)["data_size"])
         self.assertAlmostEqual(live.wav_info(propia)["data_size"] / recorder.WAV_BYTES_S, 1.0, delta=0.01)
         self.assertIsNone(live.wav_info(obs)["data_size"])
@@ -537,17 +577,24 @@ def _norm(x, nivel):
 
 
 def _simular(T, otros, yo, eco, nuevo):
-    """La mezcla bloque a bloque con el nivelador nuevo (MicLeveler, con la salida en crudo) o el de antes (Leveler):
-    la ganancia del micro y de la salida en cada muestra."""
+    """La mezcla bloque a bloque con el nivelador nuevo (MicLeveler, con la salida en crudo y la puerta de eco ya
+    llamada, como en recorder.main) o el de antes (Leveler): la ganancia del micro y de la salida en cada muestra."""
+    import eco as eco_mod
     n = T * SR
     mic = eco + yo + _norm(np.random.default_rng(9).standard_normal(n).astype(np.float32), -70.0)
     lm = (recorder.MicLeveler if nuevo else recorder.Leveler)(*recorder.GAIN_RANGE["mic"])
     ls = recorder.Leveler(*recorder.GAIN_RANGE["sys"])
+    puerta = eco_mod.Gate("eco de los altavoces en el micro", 0.25, 0.003, act=False)
     gm, gs = np.zeros(n, np.float32), np.zeros(n, np.float32)
     for i in range(0, n - B + 1, B):
         m, s = np.repeat(mic[i:i + B, None], 2, 1), np.repeat(otros[i:i + B, None], 2, 1)
         a0, b0 = lm.gain, ls.gain
-        lm(m, ref=s) if nuevo else lm(m)
+        if nuevo:
+            puerta(m, s)
+            lm.eco = puerta
+            lm(m, ref=s)
+        else:
+            lm(m)
         ls(s)
         gm[i:i + B], gs[i:i + B] = np.linspace(a0, lm.gain, B), np.linspace(b0, ls.gain, B)
     return gm, gs
@@ -640,6 +687,48 @@ class MicLevelerTests(unittest.TestCase):
         # revision 1, P1-2: musica continua (o el ruido de fondo de alguien) y el habla el 85 % desde el principio
         r = _caso(40, lambda t: np.ones_like(t), lambda t: ((t % 4) < 3.4).astype(float), -50.0, -42.0, musica=True)
         self.assertGreater(r["nuevo"]["voz"], min(r["viejo"]["voz"], recorder.TARGET_DB) - 2.0, r)
+
+    def test_un_ponente_sin_pausas_con_el_callado(self):
+        # revision 2, P1-A: un ponente que habla seguido (sin silencios) y el usuario callado: el eco no sube
+        T = 40
+        t = np.arange(T * SR) / SR
+        otros = _norm(voz(T, 120, 1, on=lambda t: np.ones_like(t)), -20.0)
+        eco = np.zeros(len(t), np.float32)
+        d = int(0.03 * SR)
+        eco[d:] = otros[:-d] * 10 ** (-22 / 20)
+        gm, _ = _simular(T, otros, np.zeros(len(t), np.float32), eco, True)
+        self.assertAlmostEqual(20 * math.log10(gm[-1]), recorder.MIC_PRUDENTE_DB, places=3)
+
+    def test_su_voz_que_vuelve_por_la_salida(self):
+        # revision 2, P1-B: con cascos, su voz vuelve por la salida (otro participante con altavoz, o «Escuchar este
+        # dispositivo»): la salida suena justo cuando el habla; su voz no puede quedarse en la ganancia prudente
+        T = 40
+        n = T * SR
+        t = np.arange(n) / SR
+        on = lambda t: ((t % 8) < 4.5).astype(float)  # noqa: E731
+        yo = _norm(voz(T, 180, 2) * on(t), -36.0)
+        otros = np.zeros(n, np.float32)
+        d = int(0.25 * SR)
+        otros[d:] = yo[:-d] * 10 ** (6 / 20)  # vuelve a 250 ms, mas fuerte que en el micro
+        res = {}
+        for k in ("nuevo", "viejo"):
+            gm, _ = _simular(T, otros, yo, np.zeros(n, np.float32), k == "nuevo")
+            sel = (on(t) > 0) & (t > 10)
+            res[k] = _db((yo * gm)[sel])
+        self.assertGreater(res["nuevo"], min(res["viejo"], recorder.TARGET_DB) - 2.0, res)
+
+    def test_tras_hablar_un_ponente_largo_no_sube_el_eco(self):
+        # revision 2, P2-A: habla 10 s y luego escucha a un ponente sin pausas: la ganancia no vuelve a +18 dB
+        T = 70
+        n = T * SR
+        t = np.arange(n) / SR
+        otros = _norm(voz(T, 120, 1, on=lambda t: np.ones_like(t)), -20.0) * (t >= 10)
+        yo = _norm(voz(T, 180, 2), -30.0) * (t < 10)
+        eco = np.zeros(n, np.float32)
+        d = int(0.03 * SR)
+        eco[d:] = otros[:-d] * 10 ** (-22 / 20)
+        gm, _ = _simular(T, otros.astype(np.float32), yo.astype(np.float32), eco, True)
+        self.assertLess(20 * math.log10(gm[-1]), 10.0)  # antes: +18 a los 30 s
 
     def test_un_nan_no_rompe_la_mezcla(self):
         # revision 1, P2-3: con una muestra NaN del micro, la ganancia quedaba en NaN y la mezcla entera tambien

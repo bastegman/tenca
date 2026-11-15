@@ -266,6 +266,7 @@ class Gate:
         self.erls = deque(maxlen=600)  # (nivel de ref en su sitio - nivel de x) con ref sonando: 6 s
         self.erl, self.lag, self.enabled, self.cand, self.off = 10.0, None, False, None, 0.0
         self.gain, self.since, self.ducked = 1.0, 0, 0.0
+        self.copia = 0.0  # en la ultima llamada, fraccion de trozos de 10 ms en los que `x` no pasa de la copia
         self.log = log or (lambda msg: None)
 
     def analyze(self):
@@ -310,6 +311,7 @@ class Gate:
         d = int(round((self.lag or 0) / (SR_C / 100)))  # retardo en trozos de 10 ms
         out = x
         sono = False
+        n_fr = n_copia = 0
         for a in range(0, len(x), self.FRAME):
             b = min(len(x), a + self.FRAME)
             lx, lr = db(x[a:b]), db(ref[a:b])
@@ -319,9 +321,12 @@ class Gate:
             active = src > SILENT_DB
             sono = sono or active
             target = 1.0
+            n_fr += 1
             if active and self.lag is not None:
                 if h[len(h) - 1 - d] > SILENT_DB:
                     self.erls.append(h[len(h) - 1 - d] - lx)
+                if lx < src - self.erl + self.MARGIN_DB:  # solo la copia (el nivelador del micro no aprende de esto)
+                    n_copia += 1
                 if self.act and self.enabled and lx < src - self.erl + self.MARGIN_DB:
                     target = 10 ** (-self.duck_db() / 20)
             if target < self.gain:   # bajar rapido (un trozo); subir algo mas despacio (~50 ms)
@@ -335,6 +340,7 @@ class Gate:
             if g < 1.0:
                 self.ducked += (b - a) / SR
             self.gain = g
+        self.copia = n_copia / n_fr if n_fr else 0.0
         return out, sono
 
     def duck_db(self):

@@ -93,25 +93,25 @@ class Leveler:
 # El micro con altavoces: entre dos frases suyas el micro solo recoge el eco de la reunion (20-25 dB por debajo). Con
 # el nivelador de arriba la estimacion bajaba en ~1,7 s, tomaba el eco por su voz y lo subia hasta +18 dB: cada voz de
 # los demas quedaba dos veces casi igual de fuerte (medido el 14/11/2026: eco a 0/-2,5 dB de la voz directa, la queja
-# de «escucho las voces dos veces»). Este aprende solo de lo que es su voz: lo que entra por el micro con la reunion
-# callada (la salida, lo mas fuerte de los ultimos REF_COLA_S por el retardo de la sala, por debajo de REF_CALLA_DB).
-# Con la reunion sonando no aprende: ni sube con el eco ni baja con el (ni con otro que hable mas fuerte o un aviso).
-# Sube hacia la mediana del ultimo segundo de su voz (una tos no la mueve; la primera vez, con 0,6 s de voz en 2 s) y
-# baja como antes, ~1,5 s, porque solo puede ser el. Hasta oirle, una ganancia prudente.
-# Si la reunion no calla nunca (musica, un video, el ruido de fondo de alguien: MIC_SIEMPRE_S seguidos sin 0,3 s de
-# silencio) no hay de donde aprender sin el eco: entonces aprende de todo, como antes, pero baja despacio (MIC_BAJA_S)
-# para que el eco entre dos frases suyas no se la lleve. Asi su voz nunca queda por debajo de lo de antes.
+# de «escucho las voces dos veces»). Este no aprende del eco: con el eco demostrado (eco.Gate, la correlacion entre
+# micro y salida, que ya se mide para avisar), solo de lo que pasa del eco que cabe esperar (la salida con su retardo,
+# menos la atenuacion medida del camino, mas 6 dB): su voz, tambien si hablan a la vez. Sin eco demostrado (cascos),
+# de todo, como antes; mientras aun no se sabe (los primeros MIC_SIN_ECO_S con la reunion sonando), solo de lo que
+# entra con la reunion callada. Sube hacia la mediana del ultimo segundo de su voz (una tos no la mueve; la primera
+# vez, con 0,6 s de voz en 2 s). Baja como antes (~1,5 s), salvo con la reunion sonando y eco visto: despacio
+# (MIC_BAJA_S), para que un trozo de eco mal clasificado no se la lleve. Hasta oirle, una ganancia prudente.
 # No es cancelacion de eco: no toca el audio, solo decide de que bloques aprende la ganancia.
 MIC_PRUDENTE_DB = 6.0   # ganancia hasta oir su voz (antes, hasta +18 dB sobre el eco de lo primero que sonase)
-MIC_BAJA_S = 30.0       # constante de tiempo al bajar si la reunion no calla nunca (antes ~1,7 s siempre)
-MIC_BAJA_SOLO_S = 1.5   # ...y al bajar con la reunion callada (solo puede ser el: como antes)
+MIC_BAJA_S = 30.0       # constante de tiempo al bajar con la reunion sonando y eco visto (antes ~1,7 s siempre)
+MIC_BAJA_SOLO_S = 1.5   # ...y en los demas casos (como antes)
 MIC_SUBE_S = 0.3
 MIC_VENTANA_S = 1.0     # sube hacia la mediana de su voz en este ultimo segundo...
 MIC_VOZ_MIN_S = 0.4     # ...si en el hay al menos esto de voz
 MIC_INICIO = (2.0, 0.6)  # la primera vez: al menos 0,6 s de su voz en los ultimos 2 s
-MIC_SIEMPRE_S = 8.0     # la reunion «no calla nunca» si en estos ultimos segundos no ha callado REF_COLA_S
+MIC_SIN_ECO_S = 8.0     # con la reunion sonando tanto tiempo sin eco demostrado: no hay eco (cascos)
 REF_CALLA_DB = -50.0    # la reunion (la salida, en crudo) calla por debajo de esto...
 REF_COLA_S = 0.3        # ...desde hace esto (la cola del eco en la sala)
+ECO_COPIA = 0.5         # un bloque en el que mas de la mitad no pasa del eco que cabe esperar es eco
 
 
 def block_db(x):
@@ -124,34 +124,37 @@ def block_db(x):
 
 
 class MicLeveler(Leveler):
-    """Leveler del micro que aprende solo de su voz (ver arriba). ref: la salida en crudo del mismo bloque."""
+    """Leveler del micro que no aprende del eco (ver arriba). ref: la salida en crudo del mismo bloque; eco: el
+    eco.Gate «eco de los altavoces en el micro», ya llamado con este bloque (lo pone mezclar)."""
 
     def __init__(self, lo, hi):
         super().__init__(lo, hi)
         self.gain = 10 ** (min(max(MIC_PRUDENTE_DB, lo), hi) / 20)
-        self.t, self.dur, self.solo, self.siempre = 0.0, 0.0, False, False
+        self.t, self.dur, self.solo, self.lento = 0.0, 0.0, False, False
+        self.eco, self.eco_visto, self.sonando_s = None, False, 0.0
         self.refs = deque()     # (t, dB de la salida) de los ultimos REF_COLA_S
         self.recent = deque()   # (t, duracion, dB) de los bloques de su voz de los ultimos MIC_INICIO[0] s
-        self.hist = deque()     # (t, duracion, sonando) de los ultimos MIC_SIEMPRE_S
 
     def _mine(self, db, ref_db):
-        """¿De este bloque se aprende? (su voz con la reunion callada; todo si la reunion no calla nunca)"""
+        """¿De este bloque se aprende?"""
         if ref_db is not None:
             self.refs.append((self.t, ref_db))
         while self.refs and self.refs[0][0] < self.t - REF_COLA_S:
             self.refs.popleft()
         ref = max((r[1] for r in self.refs), default=None)
         sounding = ref is not None and ref > REF_CALLA_DB
-        self.hist.append((self.t, self.dur, sounding))
-        while self.hist and self.hist[0][0] - self.hist[0][1] < self.t - MIC_SIEMPRE_S:
-            self.hist.popleft()
-        visto = self.t - (self.hist[0][0] - self.hist[0][1]) if self.hist else 0.0
-        callado = sum(h[1] for h in self.hist if not h[2])
-        self.siempre = sounding and visto >= MIC_SIEMPRE_S - 0.1 and callado < REF_COLA_S
-        self.solo = not sounding
+        if sounding:
+            self.sonando_s += self.dur
+        g = self.eco
+        self.eco_visto = self.eco_visto or bool(g is not None and g.enabled)
+        self.solo, self.lento = not sounding, sounding and self.eco_visto
         if db <= GATE_DB or (self.level is not None and db <= self.level - 15):
             return False
-        return self.solo or self.siempre
+        if not sounding:
+            return True
+        if self.eco_visto and g is not None and g.lag is not None:
+            return g.copia < ECO_COPIA  # pasa del eco que cabe esperar: es su voz
+        return not self.eco_visto and self.sonando_s >= MIC_SIN_ECO_S  # sin eco a la vista: cascos
 
     def __call__(self, x, update=True, ref=None):
         import numpy as np
@@ -173,7 +176,7 @@ class MicLeveler(Leveler):
                     self.level = float(np.median([r[2] for r in self.recent]))
             elif sum(r[1] for r in last) >= MIC_VOZ_MIN_S:
                 cand = float(np.median([r[2] for r in last]))
-                tau = MIC_SUBE_S if cand > self.level else MIC_BAJA_SOLO_S if self.solo else MIC_BAJA_S
+                tau = MIC_SUBE_S if cand > self.level else MIC_BAJA_S if self.lento else MIC_BAJA_SOLO_S
                 self.level += (cand - self.level) * (1 - math.exp(-dur / tau))
         target = self.gain
         if self.level is not None:
@@ -183,8 +186,9 @@ class MicLeveler(Leveler):
         return x * ramp
 
 
-def mezclar(parts, levelers, mic_muted=False):
-    """La mezcla de un bloque: cada fuente con su nivelador (el del micro mira la salida en crudo) y el limitador."""
+def mezclar(parts, levelers, mic_muted=False, eco=None):
+    """La mezcla de un bloque: cada fuente con su nivelador (el del micro mira la salida en crudo y `eco`, el
+    eco.Gate del micro ya llamado con este bloque) y el limitador."""
     import numpy as np
     n = len(next(iter(parts.values())))
     mix = np.zeros((n, 2), np.float32)
@@ -192,7 +196,11 @@ def mezclar(parts, levelers, mic_muted=False):
         if k == "mic" and mic_muted:
             continue
         lev = levelers[k]
-        mix += lev(part, ref=parts.get("sys")) if isinstance(lev, MicLeveler) else lev(part)
+        if isinstance(lev, MicLeveler):
+            lev.eco = eco
+            mix += lev(part, ref=parts.get("sys"))
+        else:
+            mix += lev(part)
     soft_limit(mix)
     np.clip(mix, -1.0, 1.0, out=mix)
     return mix
@@ -652,7 +660,8 @@ def main():
                     except Exception as e:  # un fallo aqui no puede parar la grabacion
                         gates[0] = False
                         elog(f"✖ eco: {e.__class__.__name__}: {e}: se deja de medir")
-                mix = mezclar(parts, levelers, muted["mic"])  # micro y reunion a un volumen parecido
+                # micro y reunion a un volumen parecido (el micro, sin aprender del eco que mide la puerta)
+                mix = mezclar(parts, levelers, muted["mic"], echo if gates[0] else None)
                 if w:
                     w.write((mix * 32767).astype("<i2").tobytes())
                 written += n
@@ -707,7 +716,13 @@ def main():
         if both:
             elog(f"eco al terminar: micro {echo.status()} · salida {mon.status()}")
         if w and w.pend_n:
-            elog(f"✖ {w.pend_n / WAV_BYTES_S:.1f} s de audio no se han podido escribir")
+            perdido = w.pend_n / WAV_BYTES_S
+            elog(f"✖ {perdido:.1f} s de audio no se han podido escribir")
+            try:  # tambien al parar: el servidor lo dice (si no, solo quedaba en el log)
+                emit({"fatal": f"no se han podido escribir los últimos {perdido:.0f} s de la grabación "
+                      f"({motivo_de(w.error) if w.error else 'error al escribir'})"})
+            except (OSError, ValueError):
+                pass
         if w and w.retried_s:
             elog(f"escrituras reintentadas: {w.retried_s:.1f} s con el audio en memoria")
         if f:

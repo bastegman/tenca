@@ -8,6 +8,7 @@ _app/recorder.py y hace lo que diga el fichero JSON de FAKE_REC_CTL, una entrada
   muere  igual, pero a los muere_s se muere de golpe con un traceback en stderr (como un OSError que nadie captura)
   fatal  igual, pero dice el motivo («fatal»: el disco esta lleno) antes de terminar, como recorder.py
   nace   no llega a grabar: se muere al arrancar
+  pierde como vive, pero al parar dice que no pudo escribir lo ultimo («fatal»), como recorder.py con el disco lleno
 
 Fuera de FAKE_REC_CTL (--list, --monitor) hace lo minimo para que la app no se queje."""
 import json
@@ -75,6 +76,8 @@ def main():
                 sys.stderr.flush()
             os._exit(1)  # de golpe: sin cerrar la cabecera
         time.sleep(0.25)
+    if modo == "pierde":
+        out.write(json.dumps({"fatal": "no se han podido escribir los últimos 3 s de la grabación (prueba)"}) + "\n")
     if f:
         size = f.tell()
         f.seek(4)

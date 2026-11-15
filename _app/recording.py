@@ -199,6 +199,7 @@ class RecorderProcess:
 
     TIMELINE_S = 30.0  # la linea de tiempo del micro (la de «Tú») se guarda cada 30 s, no solo al parar
     _on_end, stopping, fatal, avisado, disco_avisado, tl_busy, tl_at = None, False, None, False, False, False, 0.0
+    apuntado = False  # el servidor ya apunto el corte (rec_status deja de dar «cortada» provisional)
     visto = None  # time.monotonic() del ultimo estado: si deja de llegar, la grabadora esta atascada (sin_estado_s)
 
     def __init__(self, path, mic, sys_dev, app_dir, data_dir):
@@ -418,22 +419,32 @@ class Cortes:
             return [dict(x) for x in self.lista if time.time() - x["at"] < self.GUARDA_S]
 
     def recuperar(self, al_recuperar, esperar=None):
-        """Al arrancar: cierra la cabecera de los WAV propios que quedaron abiertos y ya no crecen, y llama a
-        al_recuperar(ruta, mtime) por cada uno. Los que siguen creciendo no se tocan (se miran otra vez al arrancar)."""
-        cand = []
+        """Al arrancar: lo que sigue apuntado es una grabacion que Tenca no vio terminar (se cerro grabando: un corte
+        de luz, un cuelgue, la mataron, Windows se apago). Cierra la cabecera de las que quedaron abiertas y ya no
+        crecen, y llama a al_recuperar(ruta, mtime) por cada una, tambien por las que la grabadora llego a cerrar sola
+        (al cerrarse Tenca, la grabadora para y cierra el WAV: el corte hay que decirlo igual). Las que siguen
+        creciendo no se tocan (se miran otra vez al arrancar)."""
+        cand, hechos = [], []
         for p in self._leer():
             info = live.wav_info(p) if os.path.isfile(p) else None
-            if not info or info.get("data_size") is not None:
-                self.cerrada(p)  # ya no existe, no es un WAV o se cerro bien
+            if not info:
+                self.cerrada(p)  # ya no existe o no es un WAV
+                continue
+            if info.get("data_size") is not None:  # la cerro la grabadora: no hay que tocarla, solo decirlo
+                self.cerrada(p)
+                hechos.append(p)
+                try:
+                    al_recuperar(p, os.path.getmtime(p))
+                except OSError:
+                    pass
                 continue
             try:
                 cand.append((p, os.path.getsize(p), os.path.getmtime(p)))
             except OSError:
                 continue
         if not cand:
-            return []
+            return hechos
         time.sleep(self.QUIETO_S if esperar is None else esperar)
-        hechos = []
         for p, size, mtime in cand:
             try:
                 if os.path.getsize(p) != size or os.path.getmtime(p) != mtime:

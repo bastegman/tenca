@@ -5352,7 +5352,8 @@ class App:
         c = next((x for x in reversed(out["cortes"]) if x["tipo"] == "cortada"), None)
         if not out["recording"] and r and c and c["path"] == rel_of(r.path):
             out["cortada"] = c  # la ultima grabacion no se paro: se corto (no es «Grabación guardada»)
-        elif not out["recording"] and r and r.path and getattr(r, "on_end", None) and not getattr(r, "stopping", True):
+        elif (not out["recording"] and r and r.path and getattr(r, "on_end", None) and not getattr(r, "stopping", True)
+              and not getattr(r, "apuntado", True)):
             # el proceso ya no esta y aun no se ha apuntado el corte (se esta leyendo lo ultimo): ya es un corte
             out["cortada"] = {"tipo": "cortada", "path": rel_of(r.path), "pendiente": True}
         if not out["recording"]:
@@ -5428,6 +5429,8 @@ class App:
                 if cont and cont.get("corte"):  # antes de que la interfaz vea que graba: «Sigue grabando en …»
                     self.cortes.cambiar(cont["corte"], continuacion=rel)
                 self.rec = RecorderProcess(path, mic, sys_dev, APP_DIR, DATA_DIR)
+                if cont and cont.get("mute"):  # el micro silenciado: antes de que escriba nada (lee stdin al empezar)
+                    self.rec.send("mute")
                 fin = time.monotonic() + REC_ARRANQUE_S
                 while time.monotonic() < fin:  # espera a que exista el archivo con su cabecera
                     if os.path.isfile(path) and os.path.getsize(path) >= 44 or not self.rec.alive():
@@ -5577,6 +5580,10 @@ class App:
             self.rec = None
             self.jobs.claimed.discard(rel_of(r.path))
             self.cortes.cerrada(r.path)
+        if getattr(r, "fatal", None):  # parada pedida, pero no se pudo escribir lo ultimo: se dice
+            log(f"✖ Grabación parada a medias: {rel_of(r.path)} ({r.fatal})")
+            cue("error")
+            notify("✖ Grabación guardada a medias", r.fatal)
         try:  # cuando hablo yo (micro por encima del audio del PC): sirve para etiquetar «Tu» sin biometria
             tl = r.timeline()
             if tl and os.path.isfile(r.path):
@@ -5602,10 +5609,12 @@ class App:
         misma carpeta a los ~2 s, como mucho Cortes.MAX_REINTENTOS veces."""
         rel, motivo, a_las = rel_of(r.path), r.motivo(), time.strftime("%H:%M")
         cadena = dict(self.rec_cadena or {"intentos": 0, "nombre": ""})
-        sigue = self.rec is r and cadena["intentos"] < Cortes.MAX_REINTENTOS
+        parada = getattr(self, "_sin_seguir", None) is r  # «Parar» justo al morir: no se sigue
+        sigue = self.rec is r and cadena["intentos"] < Cortes.MAX_REINTENTOS and not parada
         # lo primero, antes de tocar el disco: un sondeo que llegue ahora ya ve «cortada»
         e = self.cortes.apuntar(tipo="cortada", path=rel, nombre=os.path.basename(r.path), a_las=a_las, motivo=motivo,
-                                sigue=sigue, continuacion=None, error=None)
+                                sigue=sigue, continuacion=None, error="parada a mano" if parada else None)
+        r.apuntado = True  # rec_status deja de dar el «cortada» provisional
         self.jobs.claimed.discard(rel)
         self.cortes.cerrada(r.path)
         try:
@@ -5633,10 +5642,13 @@ class App:
         """Se cortó y aún no se sigue (los ~2 s de Cortes.REINTENTO_S): ya no se sigue. True si había algo que
         cancelar."""
         c = next((x for x in reversed(self.cortes.estado()) if x["tipo"] == "cortada"), None)
-        if not (c and c["path"] == rel_of(r.path) and c["sigue"] and not c["continuacion"]):
+        if c and c["path"] == rel_of(r.path):
+            if not (c["sigue"] and not c["continuacion"]):
+                return False
+            self.cortes.cambiar(c["id"], sigue=False, error="parada a mano")
+        elif not (r.on_end and not r.stopping):  # ni cortada ni a punto de apuntarse como cortada
             return False
-        self._sin_seguir = r
-        self.cortes.cambiar(c["id"], sigue=False, error="parada a mano")
+        self._sin_seguir = r  # tambien si el corte aun no se ha apuntado: _rec_terminada ya no sigue
         log("■ Parada a mano antes de seguir en la continuación")
         return True
 
@@ -5649,7 +5661,8 @@ class App:
                 return
             n = cadena["intentos"] + 1
             nombre = f"{cadena.get('nombre') or ''} {'(continuación)' if n == 1 else f'(continuación {n})'}".strip()
-            sigue_en = dict(cadena, intentos=n, dir=os.path.dirname(r.path), corte=corte)
+            sigue_en = dict(cadena, intentos=n, dir=os.path.dirname(r.path), corte=corte,
+                            mute=bool((r.status or {}).get("mic_muted")))
             body = dict(self.rec_body or {}, name=nombre)
             try:
                 res = self.rec_start(body, _cont=sigue_en)
