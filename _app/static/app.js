@@ -2792,7 +2792,8 @@ function shutdownScreen() {
 /* Avisos (review del 14/11/2026, punto 11). Los de error no caducan: se cierran con ✕ (a los 9 s no daba tiempo a leer
    una frase de explicar.py) y quedan en «Avisos», en la Cola, para releerlos. Un clic en el texto hace lo suyo (abrir
    la reunión, si lo tiene) y lo cierra; en un botón de dentro (el de explicar.py) o en «Detalle», solo lo de ese botón.
-   El mismo aviso otra vez no se apila (queda el último) y a la vista hay como mucho AVISOS_A_LA_VISTA.
+   El mismo aviso otra vez no se apila (queda el último) y a la vista hay como mucho AVISOS_A_LA_VISTA (uno menos en
+   una ventana baja). Con la Cola abierta quedan por debajo de ella (app.css).
    keep === true: tampoco caduca, y cualquier clic, ✕ incluida, hace lo suyo y lo cierra (la grabación cortada: su clic
    es «visto»). keep === false: un error que sí se va solo, a los 9 s. Los demás avisos, a los 4 s. */
 const TOAST_X = '<button type="button" class="toast-x" aria-label="Cerrar este aviso" title="Cerrar">✕</button>';
@@ -2808,7 +2809,7 @@ function apuntarAviso(html) {
   try { sessionStorage.setItem(AVISOS_CLAVE, JSON.stringify(S.avisos)); } catch { /* sin almacenamiento */ }
   if (!$('#jobsPanel').classList.contains('hidden')) renderJobsPanel();
 }
-/* El texto técnico del último 500 (api), plegado en «Detalle», para el aviso que dice su frase justo después (el catch
+/* El texto técnico del último 500 que vio api(), plegado en «Detalle», para el aviso que dice su frase justo después (el catch
    de esa petición). Pasados 5 s, o ya contado, no se pega a otro aviso. */
 function detalleInternoHtml(html) {
   const f = falloInternoUltimo;
@@ -2822,7 +2823,8 @@ function toast(html, kind = '', onclick, keep) {
   if (fijo) {
     $$('.toast.fijo', box).forEach(t => { if (t.dataset.k === html) t.remove(); });
     const vistos = $$('.toast.fijo:not([data-corte])', box);
-    vistos.slice(0, Math.max(0, vistos.length - AVISOS_A_LA_VISTA + 1)).forEach(t => t.remove());
+    const max = innerHeight < 700 ? AVISOS_A_LA_VISTA - 1 : AVISOS_A_LA_VISTA;  // ventana baja: que no tapen la página
+    vistos.slice(0, Math.max(0, vistos.length - max + 1)).forEach(t => t.remove());
   }
   const el = document.createElement('div');
   el.className = 'toast ' + kind + (fijo ? ' fijo' : '') + (keep === true ? ' keep' : '');
@@ -2887,7 +2889,11 @@ function avisoError(msg) {
   try { toast(`Algo ha fallado en la interfaz: ${esc(m)}. Si se repite, cierra la ventana y vuelve a abrir ${esc(APP_NAME)}.`, 'err'); } catch { /* sin toast aun */ }
 }
 window.addEventListener('error', e => avisoError(e.message || (e.error && e.error.message)));
-window.addEventListener('unhandledrejection', e => avisoError((e.reason && e.reason.message) || e.reason));
+window.addEventListener('unhandledrejection', e => {
+  const r = e.reason;  // un fallo de api() sin catch ya es una frase para ti («Tenca no responde», «Algo ha fallado…»)
+  if (r && (r.interno || r.noResponde)) return toast(esc(r.message), 'err');
+  avisoError((r && r.message) || r);
+});
 
 /* Mientras /api/config no contesta, se dice (con los segundos) en vez de dejar la pagina en blanco. */
 function esperandoHtml(seg) {

@@ -621,6 +621,8 @@ const pad = n => String(n).padStart(2, '0'), nfc = s => s;
 const MES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 const aDate = a => a.date ? new Date(a.date) : null, titleOf = a => (a.props && a.props.titulo) || '';
 const iconOf = () => '', isLive = a => !!a.live, jobFor = p => S.jobs.find(j => j.path === p && j.activo);
+const lastTxJobFor = p => S.jobs.filter(j => j.path === p && j.kind !== 'voces' && j.kind !== 'summary').pop();
+const localStorage = {d: {}, getItem(k) { return this.d[k] ?? null; }, setItem(k, v) { this.d[k] = String(v); }};
 const statusOf = a => a.st, estDuration = a => a.dur || 60, fmtClock = s => `${Math.floor(s / 60)}:${pad(s % 60)}`;
 const fmtDur = s => `${Math.round(s / 60)} min`;
 """
@@ -952,7 +954,9 @@ class HoyJsTests(unittest.TestCase):
 
     def test_para_revisar(self):
         out = self.node("""const now = new Date(2026, 10, 9, 10, 30);
-          S.jobs = [{path: 'c', activo: true}, {path: 'f', kind: 'summary', status: 'error'}];
+          S.jobs = [{path: 'c', activo: true},
+            {path: 'f', kind: 'summary', status: 'error', aviso: {frase: 'Sin cupo'}},
+            {path: 'e', kind: 'transcribe', status: 'error', error: 'Please run /login', aviso: {frase: 'Sin sesión'}}];
           const A = [
             {path: 'a', date: '2026-11-09T09:00:00', st: 'pending', props: {workstream: 'General'}, dur: 120},
             {path: 'b', date: '2026-11-08T09:00:00', st: 'done', has_summary: true, props: {workstream: 'G'},
@@ -964,17 +968,22 @@ class HoyJsTests(unittest.TestCase):
             {path: 'g', date: '2026-11-04T09:00:00', st: 'done', props: {workstream: 'G'}, has_summary: true},
             {path: 'h', date: '2026-10-01T09:00:00', st: 'pending', props: {}},
             {path: 'i', date: '2026-11-09T07:00:00', st: 'partial', tx_end: 125, props: {workstream: 'G'}},
-            {path: 'j', date: '2026-11-09T06:00:00', st: 'pending', props: {}, live: true}];
-          const fila = r => [r.a.path, r.accion.k, r.motivos.map(m => m.texto).join(' · ')];
+            {path: 'j', date: '2026-11-09T06:00:00', st: 'pending', props: {}, live: true},
+            {path: 'k', date: '2026-11-09T05:00:00', st: 'done', props: {sin_proyecto: 'sí'}},
+            {path: 'l', date: '2026-11-09T04:00:00', st: 'done', props: {}}];
+          hoyApuntarSinProy('l', true);  // «No es de ningún proyecto» con un servidor que aún no lo guarda
+          const fila = r => [r.a.path, r.accion.k, r.motivos.map(m => m.texto).join(' · '),
+            r.fallo?.aviso?.frase || null];
           console.log(JSON.stringify(hoyRevisar(A, now).map(fila)));""")
         self.assertEqual(out, [
-            ["a", "transcribir", "Grabada · sin transcribir (2 min)"],
-            ["i", "continuar", "La transcripción se cortó en 2:05"],
-            ["b", "voces", "Resumen listo · 2 voces sin nombre"],
-            ["d", "proyecto", "¿De qué proyecto es?"],
-            ["e", "transcribir", "No se pudo transcribir · ¿De qué proyecto es?"],
-            ["f", "resumir", "No se pudo resumir"],
-        ])  # c (en la cola), g (nada que hacer), h (hace más de 30 días) y j (en directo) no salen
+            ["a", "transcribir", "Grabada · sin transcribir (2 min)", None],
+            ["i", "continuar", "La transcripción se cortó en 2:05", None],
+            ["b", "voces", "Resumen listo · 2 voces sin nombre", None],
+            ["d", "proyecto", "¿De qué proyecto es?", None],
+            ["e", "transcribir", "No se pudo transcribir · ¿De qué proyecto es?", "Sin sesión"],
+            ["f", "resumir", "No se pudo resumir", "Sin cupo"],
+        ])  # c (en la cola), g (nada que hacer), h (hace más de 30 días), j (en directo) y k y l («No es de ningún
+        # proyecto», por la cabecera o apuntado aquí) no salen; e y f dicen por qué fallaron (punto 38)
 
     def test_esta_semana_y_agenda(self):
         out = self.node("""const now = new Date(2026, 10, 11, 10, 30);  // miércoles

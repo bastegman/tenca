@@ -15,7 +15,7 @@
      pollRec con /api/rec/status). La decide el servidor (_siguiente: la reunión de ahora sin la que se grababa) y
      «Grabar» graba esa con su plan, solo si sigue siendo la propuesta.
    Se carga después de app.js, notas.js y grabar.js y usa sus utilidades ($, $$, api, esc, I, S, main, go, toast,
-   allAudios, liveAudios, isLive, jobFor, statusOf, estDuration, fmtDur, fmtClock, aDate, titleOf, nfc, pad, iconOf, MES,
+   allAudios, liveAudios, isLive, jobFor, lastTxJobFor, statusOf, estDuration, fmtDur, fmtClock, aDate, titleOf, nfc, pad, iconOf, MES,
    LANGS, vocabOf, vocabOptions, saveProps, wsPatch, submitTx, openRec, openModal, closeModal, openSettings,
    refreshTree, pollRec, pollJobs, liveBanner, welcomeCard, avisoResumenLocalHtml). app.js lo llama con
    `typeof viewHoy === 'function'`: sin este fichero, Inicio es la lista de antes. */
