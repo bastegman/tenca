@@ -594,7 +594,7 @@ class AjustesDelProyectoDeLaRaizTests(unittest.TestCase):
 
     def test_el_arranque_lo_migra(self):
         src = codigo_del_servidor()
-        init = src[src.index("class App:"):src.index("self.library = Library(")]
+        init = src[src.index("class App("):src.index("self.library = Library(")]
         self.assertIn("self._migrar_nombre_raiz()", init)
         self.assertLess(init.index("self._load_links()"), init.index("self._migrar_nombre_raiz()"))
 

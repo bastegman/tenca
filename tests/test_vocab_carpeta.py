@@ -396,7 +396,7 @@ class RutasTests(CarpetaTests):
         src = codigo_del_servidor()
         cfg = src[src.index("    def config(self, q):"):src.index("    def tree(self, q):")]
         self.assertIn('"vocab_links": self._vocab_links_public()', cfg)
-        init = src[src.index("class App:"):src.index("    def rec_toggle(self, b):")]
+        init = src[src.index("class App("):src.index("    def rec_toggle(self, b):")]
         self.assertIn("self._load_vocab_links()", init)
 
     def test_reveal_abre_la_carpeta_conectada(self):
