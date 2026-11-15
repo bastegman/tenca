@@ -40,6 +40,8 @@ Puntos 1 y 6 de la revisión del 14/11/2026. Rama `grabadora`.
   cortos (una tos) y empieza con una ganancia prudente. Medido con señal sintética: el eco pasa de 0/−2,5 dB a
   −10/−15 dB frente a la voz directa (también con un ponente que habla sin pausas, si otro habla de golpe más fuerte o
   con un altavoz Bluetooth), y tu voz se queda donde estaba (también si vuelve por la salida).
+- Si la continuación no llega a arrancar (por ejemplo, con el disco lleno), el aviso fijo lo dice («No se siguió
+  grabando: …») y nunca acaba en «Grabación guardada».
 - Al parar con escrituras pendientes se siguen intentando hasta 8 s, y si aun así se pierde algo, se dice; con el
   micro silenciado, la continuación también lo va desde el principio; «Parar» en los 2 s antes de la continuación la
   cancela.

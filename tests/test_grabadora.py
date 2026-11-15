@@ -312,7 +312,7 @@ class CorteServidorTests(TempTree):
         self.assertLess(st["sin_estado_s"], 2.0)  # manda estado cada 0,25 s
         self.assertEqual(st["cortes"][-1]["continuacion"], cont)
         self.assertIn("error", self.sonidos)
-        self.assertTrue(any(t == "✖ Grabación interrumpida" and "Sigo grabando" in b for t, b in self.avisos),
+        self.assertTrue(any(t == "✖ Grabación interrumpida" and "Intento seguir grabando" in b for t, b in self.avisos),
                         self.avisos)
         # parar a mano la continuacion no es otro corte
         self.a.rec_stop({})
@@ -401,6 +401,17 @@ class CorteServidorTests(TempTree):
         self.assertTrue(any(t == "✖ Grabación guardada a medias" and "últimos 3 s" in b for t, b in self.avisos),
                         self.avisos)
         self.assertEqual(self.a.cortes.estado(), [])  # no es un corte: se paró a mano
+
+    def test_la_continuacion_que_no_arranca_sigue_siendo_cortada(self):
+        # revision 3, P2-A: la continuacion muere al arrancar; rec_status no puede quedarse sin «cortada» (la interfaz
+        # diria «Grabación guardada»)
+        self.ctl_(modos=["muere", "nace"])
+        r = self.start()
+        self.assertTrue(esperar(lambda: self.a.cortes.estado() and self.a.cortes.estado()[-1].get("error")))
+        st = self.a.rec_status({})
+        self.assertFalse(st["recording"])
+        self.assertEqual((st["cortada"]["path"], st["cortada"]["sigue"]), (r["path"], False))
+        self.assertIn("no ha podido arrancar", st["cortada"]["error"])
 
     def test_la_continuacion_no_se_pide_desde_fuera(self):
         # «_continuacion» en el cuerpo de /api/rec/start ya no vale: graba donde dice la carpeta, no en otro sitio
@@ -559,7 +570,7 @@ class RecuperarTests(TempTree):
         self.assertRegex(c["a_las"], r"^\d\d:\d\d$")
         props, _ = server.parse_notes(server.read_text(os.path.splitext(p)[0] + ".md"))
         self.assertTrue(props["interrumpida"].startswith(c["a_las"] + " · "), props)
-        self.assertIn("se cerró sin terminar la grabación", props["interrumpida"])
+        self.assertIn("se cerró mientras grababa", props["interrumpida"])
 
 
 # ----------------------------------------------------------------------------- 4. el nivelador del micro
@@ -798,12 +809,12 @@ class TextosInterfazTests(unittest.TestCase):
                 "motivo": "el disco está lleno"}
         self.assertEqual(texto(dict(base, sigue=True)),
                          "<b>Grabación interrumpida a las 10:37</b> («2026-11-14 10-00-00 - Comité.wav»): el disco "
-                         "está lleno. Sigo grabando en la misma carpeta…")
-        self.assertTrue(texto(dict(base, sigue=True, continuacion="Alfa/2026-11-14 10-37-02 - Comité (continuación)"
-                                   ".wav")).endswith(" Sigue grabando en «2026-11-14 10-37-02 - Comité (continuación)"
-                                                     ".wav», en la misma carpeta."))
+                         "está lleno. Intentando seguir en la misma carpeta…")
+        cont = "2026-11-14 10-37-02 - Comité (continuación).wav"
+        self.assertTrue(texto(dict(base, sigue=True, continuacion="Alfa/" + cont)).endswith(
+            f" Se siguió grabando en «{cont}», en la misma carpeta."))
         self.assertTrue(texto(dict(base, sigue=False, error="No queda sitio")).endswith(
-            " <b>Ya no se graba</b>: No queda sitio."))
+            " <b>No se siguió grabando</b>: No queda sitio."))
         self.assertEqual(texto(dict(base, tipo="recuperada", motivo="Tenca se cerró")),
                          "<b>Se recuperó la grabación «2026-11-14 10-00-00 - Comité.wav»</b>, cortada a las 10:37: "
                          "Tenca se cerró.")

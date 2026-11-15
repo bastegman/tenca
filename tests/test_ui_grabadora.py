@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """La grabación cortada y «Tenca no responde» en un navegador real (Playwright + Chromium), con la app de verdad y una
 grabadora de mentira (tests/fake_recorder/recorder.py copiada encima de _app/recorder.py) que se muere a los 1,5 s y
-vuelve a grabar en la continuación (review del 14/11/2026, punto 1; lo vio Steve con caida.py):
+vuelve a grabar en la continuación (review del 14/11/2026, punto 1; se vio matando el servidor con la app abierta):
 
 - la grabadora se muere: franja roja «Grabación interrumpida a las hh:mm» con el motivo, un aviso que no se va solo
   (sigue a los 10 s; los de error se iban a los 9 s) y nunca «■ Grabación guardada»; sigue grabando en la
@@ -117,6 +117,24 @@ class GrabacionCortadaUI(unittest.TestCase):
         time.sleep(2.5)
         self.assertEqual(pg.locator("[data-franja^='corte-']").count(), 0)
         pg.evaluate("() => api('/api/rec/stop', {})")
+        self.assertEqual(self.errores, [])
+
+    def test_1b_la_continuacion_que_no_arranca(self):
+        # revision 3: el aviso fijo decía «Sigo grabando…» para siempre aunque la continuación no arrancase, y la
+        # página acababa en «■ Grabación guardada»
+        self.poner(["muere", "nace"])
+        pg = self.pagina()
+        self.grabar(pg)
+        # (el corte de la prueba anterior también sale: el servidor los guarda 12 h y esta página no lo ha cerrado)
+        pg.wait_for_function("() => [...document.querySelectorAll('.toast.keep')].some(t => "
+                             "t.textContent.includes('No se siguió grabando'))", timeout=25000)
+        self.assertFalse(pg.evaluate("() => [...document.querySelectorAll('.toast.keep')].some(t => "
+                                     "t.textContent.includes('Intentando seguir'))"))
+        self.assertIn("No se siguió grabando", pg.locator("[data-franja^='corte-']").last.inner_text())
+        time.sleep(2)
+        self.assertFalse(pg.evaluate("() => window.__toasts.some(t => t.includes('Grabación guardada'))"),
+                         pg.evaluate("() => window.__toasts"))
+        self.captura(pg, "continuacion_no_arranca")
         self.assertEqual(self.errores, [])
 
     def test_2_sin_respuesta_franja_que_se_quita_sola(self):

@@ -4968,11 +4968,12 @@ class App:
                     if b.get("start_only"):  # el aviso flotante: si Ctrl+Alt+R se adelantó, no se para la grabación
                         return {"recording": True, "path": rel_of(self.rec.path)}
                     r = self.rec_stop({})
-                    cue("stop")
                     seg = r["seconds"]  # en segundos si no llego al minuto: «1 min» tapaba una grabacion de 5 s
-                    notify("■ Grabación guardada",
-                           f"{f'{int(seg)} s' if seg < 60 else f'{round(seg / 60)} min'} · "
-                           "la transcripción termina sola")
+                    if not r.get("aviso"):  # a medias ya lo ha dicho rec_stop (con su sonido de error)
+                        cue("stop")
+                        notify("■ Grabación guardada",
+                               f"{f'{int(seg)} s' if seg < 60 else f'{round(seg / 60)} min'} · "
+                               "la transcripción termina sola")
                     return dict(r, recording=False)
                 st = self.settings.get()
                 # el mismo plan que enseña la tarjeta de Grabar (plan.py): la reunión en curso (Teams/Outlook, sin
@@ -5600,7 +5601,7 @@ class App:
         if self._movs().get(rel_of(r.path)):  # «solo grabar» no deja trabajos: si tenia otra carpeta, se mueve ya
             threading.Thread(target=self._aplicar_movimientos, args=(rel_of(r.path),), daemon=True,
                              name="mover").start()
-        return {"path": rel_of(r.path), "seconds": secs}
+        return {"path": rel_of(r.path), "seconds": secs, "aviso": getattr(r, "fatal", None)}
 
     def _rec_terminada(self, r):
         """La grabadora ha terminado sin que nadie la parase (RecorderProcess.on_end, en su hilo de lectura): se dice
@@ -5633,7 +5634,7 @@ class App:
             + (" · se sigue en una continuación" if sigue else " · no se sigue"))
         cue("error")
         notify("✖ Grabación interrumpida", f"A las {a_las}: {motivo}. "
-               + ("Sigo grabando en la misma carpeta." if sigue else f"Ya no se graba: abre {APP_NAME}."))
+               + ("Intento seguir grabando en la misma carpeta." if sigue else f"Ya no se graba: abre {APP_NAME}."))
         if sigue:
             threading.Thread(target=self._continuar, args=(r, e["id"], cadena), daemon=True,
                              name="continuar-grabacion").start()
@@ -5669,6 +5670,9 @@ class App:
             except Exception as err:
                 msg = err.msg if isinstance(err, ApiError) else f"{err.__class__.__name__}: {err}"
                 self.cortes.cambiar(corte, sigue=False, error=msg, continuacion=None)
+                with self.rec_lock:  # la continuacion no arranco: rec_status vuelve a dar la cortada, no «guardada»
+                    if self.rec is not r and not (self.rec and self.rec.alive()):
+                        self.rec = r
                 log(f"   ✖ no se ha podido seguir grabando: {msg}")
                 cue("error")
                 notify("✖ No se ha podido seguir grabando", msg)
@@ -5687,7 +5691,7 @@ class App:
         def hecha(p, mtime):
             hoy = time.strftime("%Y-%m-%d") == time.strftime("%Y-%m-%d", time.localtime(mtime))
             a_las = time.strftime("%H:%M" if hoy else "%d/%m %H:%M", time.localtime(mtime))
-            motivo = f"{APP_NAME} se cerró sin terminar la grabación (un corte de luz, un cuelgue o Windows Update)"
+            motivo = f"{APP_NAME} se cerró mientras grababa (se apagó el PC, un cuelgue o un corte de luz)"
             rel = None
             try:
                 rel = rel_of(p)

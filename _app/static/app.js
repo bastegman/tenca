@@ -472,18 +472,24 @@ function corteVisto(id) { const v = cortesVistos().filter(x => x !== id).concat(
 function corteTexto(c) {
   const nombre = `«${esc(nfc(c.nombre || ''))}»`;
   if (c.tipo === 'recuperada') return `<b>Se recuperó la grabación ${nombre}</b>, cortada a las ${esc(c.a_las)}: ${esc(c.motivo)}.`;
-  const sigue = c.continuacion ? ` Sigue grabando en «${esc(nfc(c.continuacion.split('/').pop()))}», en la misma carpeta.`
-    : c.sigue ? ' Sigo grabando en la misma carpeta…'
-      : ` <b>Ya no se graba</b>${c.error ? `: ${esc(c.error)}` : ''}.`;
+  // en pasado o en gerundio: el aviso se queda y no puede decir «sigue grabando» cuando ya no (revisión 3)
+  const sigue = c.continuacion ? ` Se siguió grabando en «${esc(nfc(c.continuacion.split('/').pop()))}», en la misma carpeta.`
+    : c.sigue ? ' Intentando seguir en la misma carpeta…'
+      : ` <b>No se siguió grabando</b>${c.error ? `: ${esc(c.error)}` : ''}.`;
   return `<b>Grabación interrumpida a las ${esc(c.a_las)}</b> (${nombre}): ${esc(c.motivo)}.${sigue}`;
 }
 S.cortesAvisados = new Set();
 function avisarCortes(cortes) {
   const vistos = cortesVistos(), vivos = cortes.filter(c => !vistos.includes(c.id));
   for (const c of vivos) {
-    if (S.cortesAvisados.has(c.id)) continue;
+    const html = corteTexto(c);
+    if (S.cortesAvisados.has(c.id)) {  // ya está a la vista: si el corte ha cambiado (sigue / no sigue), se rehace
+      $$('.toast[data-corte]').forEach(t => { if (t.dataset.corte === c.id && t.dataset.html !== html) { t.dataset.html = html; t.innerHTML = html + '<span class="toast-x" aria-hidden="true">✕</span>'; } });
+      continue;
+    }
     S.cortesAvisados.add(c.id);
-    toast(corteTexto(c), 'err', () => { corteVisto(c.id); avisarCortes(S.rec.cortes || []); }, true).dataset.corte = c.id;
+    const t = toast(html, 'err', () => { corteVisto(c.id); avisarCortes(S.rec.cortes || []); }, true);
+    t.dataset.corte = c.id; t.dataset.html = html;
   }
   const box = franjasEl();
   box.querySelectorAll('[data-franja^="corte-"]').forEach(el => { if (!vivos.some(c => `corte-${c.id}` === el.dataset.franja)) el.remove(); });
@@ -535,7 +541,7 @@ async function stopRec() {
   try {
     S.recLocal = true;
     const r = await api('/api/rec/stop', {});
-    toast(`Grabación guardada · ${fmtLeft(r.seconds)}`);
+    toast(r.aviso ? `✖ Grabación guardada a medias: ${esc(r.aviso)}` : `Grabación guardada · ${fmtLeft(r.seconds)}`, r.aviso ? 'err' : '', null, !!r.aviso);
     pollRec(); refreshTree(true); pollJobs(true);
   } catch (err) { S.recLocal = false; toast(esc(err.message), 'err'); }
 }
