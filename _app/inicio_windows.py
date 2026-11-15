@@ -9,8 +9,7 @@ import shutil
 import struct
 
 from common import APP_NAME, WINDOWS, log, log_exc
-
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
+from rutas import APP_DIR
 
 
 def shell_folder(csidl):

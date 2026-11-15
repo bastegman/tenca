@@ -76,16 +76,29 @@ SERVER, WINDOW = None, None  # los pone main(): el servidor HTTP y la ventana pr
 
 # ----------------------------------------------------------------------------- server.py como fachada
 # server.py se partio en modulos el 15/11/2026 (punto 23 del review). Regla desde entonces: nada nuevo aqui; cada cosa
-# en su modulo. server.py reexporta lo que salio (server.X sigue valiendo) y mantiene iguales las copias de cada nombre:
+# en su modulo (y el modulo, en PARTES). server.py reexporta lo que salio (server.X sigue valiendo) y mantiene iguales
+# las copias de cada nombre:
 # - lo que main() fija al arrancar (COMPARTIDAS): main() asigna con `global` y despues llama a _compartir();
-# - una asignacion desde fuera (`server.PORT = …`, mock.patch.object(server, "f", …) en los tests) llega tambien a los
-#   modulos de PARTES que tenian el mismo objeto (_Fachada): como antes, cuando todo ese codigo estaba aqui.
+# - solo cuando server se importa como modulo (los tests, scripts/rendimiento_bench.py), no al ejecutarlo como la app:
+#   una asignacion desde fuera (`server.PORT = …`, mock.patch.object(server, "f", …)) llega tambien a los modulos de
+#   PARTES que tenian el mismo objeto (_Fachada), como cuando todo ese codigo estaba aqui. Un mismo nombre en server y
+#   en un modulo de PARTES es siempre el mismo objeto (test_servidor_partido lo comprueba).
 PARTES = ("api", "diagnostico", "inicio_windows", "rutas")  # los modulos que salieron de server.py
 COMPARTIDAS = ("PORT", "URL", "DATA_DIR", "SERVER", "WINDOW")
+# no APP_DIR (los tests lo cambian); con realpath: ejecutado como script, __file__ es la ruta tal cual y el de
+# los modulos importados, la de sys.path[0], que en macOS y Linux viene sin enlaces (/var -> /private/var)
+_AQUI = os.path.normcase(os.path.dirname(os.path.realpath(__file__)))
 
 
 def _partes():
-    return [m for m in (sys.modules.get(n) for n in PARTES) if m is not None]
+    """Los modulos de PARTES ya importados (los de esta carpeta: nunca otro del mismo nombre)."""
+    out = []
+    for n in PARTES:
+        m = sys.modules.get(n)
+        f = getattr(m, "__file__", None)
+        if m is not None and f and os.path.normcase(os.path.dirname(os.path.realpath(f))) == _AQUI:
+            out.append(m)
+    return out
 
 
 def _compartir(*nombres):
@@ -97,6 +110,10 @@ def _compartir(*nombres):
 
 
 class _Fachada(type(sys)):
+    """server importado como modulo: setattr(server, k, v) pone v tambien en los modulos de PARTES que tenian el mismo
+    objeto que server (o siempre, si k es de COMPARTIDAS). Un nombre que server no tenia (mock.patch.object con
+    create=True) no llega a ninguno, y por eso su delattr tampoco tiene nada que deshacer."""
+
     def __setattr__(self, k, v):
         antes = vars(self).get(k, _Fachada)  # _Fachada: «no estaba» (ningun modulo lo tiene)
         super().__setattr__(k, v)
@@ -105,7 +122,8 @@ class _Fachada(type(sys)):
                 setattr(m, k, v)
 
 
-sys.modules[__name__].__class__ = _Fachada
+if __name__ != "__main__":  # la app (python server.py) no lo necesita: nadie le asigna nada desde fuera
+    sys.modules[__name__].__class__ = _Fachada
 
 # lo que acompana a cada audio (se mueve y borra con el): texto, subtitulos, notas, resumen, hablantes y su exportacion
 SIDE_EXTS = (".txt", ".srt", ".md", ".resumen.md", voices.SIDECAR_EXT, ".hablantes.txt")
