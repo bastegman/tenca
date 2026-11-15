@@ -262,7 +262,14 @@ class Reuniones:
                     elif k == "participantes_origen":  # solo «sugeridos por»; vacio = confirmados
                         v = str(v or "").strip().lower()
                         v = v if v in PARTICIPANTES_ORIGENES else ""
+                    elif k == "sin_proyecto":  # «No es de ningún proyecto» (Hoy, punto 38): «sí» o se quita
+                        v = "sí" if str(v or "").strip().lower() in ("sí", "si", "true", "1") or v is True else ""
                     props[k] = v
+            # elegir un proyecto contesta a «¿De qué proyecto es?»: el «ninguno» de antes se olvida; y una reunión que
+            # ya tiene su proyecto (workstream, lo que mira Hoy) no es «de ninguno» (revisión 1, P2-6)
+            pide = b.get("props") or {}
+            if props.get("workstream") or any(pide.get(k) for k in ("proyecto", "workstream", "vocabulario")):
+                props.pop("sin_proyecto", None)
             # escribir (o confirmar tal cual) los participantes los hace del usuario: ya pueden ir al resumen y a los
             # destinos. Solo siguen «sugeridos» si quien los guarda dice de donde vienen (rec_start)
             if "participantes" in (b.get("props") or {}) and "participantes_origen" not in (b.get("props") or {}):
@@ -369,7 +376,8 @@ class Reuniones:
             if a.get("_sum"):  # y en el resumen con IA
                 try:
                     hits = [{"start": None, "text": "✨ " + l} for l, f in self.transcripts.doc_lines(a["_sum"])
-                            if all(t in f for t in terms) and not l.startswith(("---", "modelo:", "generado:"))] + hits
+                            if all(t in f for t in terms)
+                            and not l.startswith(("---", "modelo:", "proveedor:", "generado:"))] + hits
                 except OSError:
                     pass
             if a.get("_md"):  # tambien en las notas y propiedades (titulo, etiquetas, participantes)

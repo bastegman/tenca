@@ -428,7 +428,9 @@ Orientativos; los vigentes, en `console.groq.com/settings/limits`.
   pyannote 3.0 (MIT) y CAM++ de 3D-Speaker (`campplus_sv_zh_en_16k-common_advanced`, Alibaba; Apache License 2.0
   según su ficha en ModelScope; el `.onnx` lo publica el proyecto sherpa-onnx). Hasta noviembre de 2026 las huellas
   eran de TitaNet-S (NVIDIA NeMo): al actualizar, las guardadas dejan de usarse (no se comparan huellas de dos
-  modelos), los nombres se conservan y cada persona vuelve a tener huella con el siguiente «Recordar».
+  modelos), los nombres se conservan y la app las rehace sola, en segundo plano y nunca mientras se graba, desde el
+  audio de las reuniones en que se pulsó «Recordar». Si esa reunión ya no está, la persona vuelve a tener huella con el
+  siguiente «Recordar».
 - Las copias en otras carpetas escriben texto (nunca audio) en las carpetas que tú elijas, sin los participantes
   sugeridos que no hayas confirmado: si están sincronizadas (OneDrive, SharePoint), ese texto sale de tu PC por esa vía.
   Al borrar una reunión, sus documentos que nadie haya cambiado allí van también a la papelera.

@@ -858,8 +858,10 @@ def public_transcript(data):
 # el .md no va como clave propia sino detras de los nombres (PARTICIPANTES_NOTA), por lo mismo que el id del tema.
 NOTE_KEYS = ("titulo", "icono", "etiquetas", "estado", "participantes", "participantes_origen", "proyecto",
              "workstream", "idioma", "contexto",
-             "interrumpida")  # «hh:mm · motivo»: la grabadora se corto (o Tenca se cerro) sin que nadie la parase
-IDIOMA_RE = re.compile(r"^(auto|[a-z]{2}(-[a-z]{2})?)$")
+             "interrumpida",  # «hh:mm · motivo»: la grabadora se corto (o Tenca se cerro) sin que nadie la parase
+             "sin_proyecto")  # «sí»: «No es de ningún proyecto» en Hoy (punto 38); elegir un proyecto lo quita
+# un idioma, una mezcla de dos o la de los tres («es-en-pt», punto 54): el de engines, el mismo en todo el servidor
+IDIOMA_RE = engines.IDIOMA_RE
 NOTE_KEY_RE = re.compile(r"^[a-z][a-z0-9_-]*$")  # una clave de la cabecera (las que no conocemos se conservan)
 ICON_BAD = re.compile(r"[<>&\"'\x00-\x1f\x7f]")
 ICON_MAX = 8  # code points: cabe cualquier emoji compuesto (banderas, tonos de piel, familias con ZWJ)
