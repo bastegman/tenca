@@ -84,7 +84,8 @@ class CompartidasTests(unittest.TestCase):
                    and any(isinstance(t, ast.Attribute) and t.attr == "__class__" for t in n.targets)]
         self.assertEqual(len(cambios), 1)
         guarda = next(n for n in arbol.body if isinstance(n, ast.If) and cambios[0] in n.body)
-        self.assertTrue(ast.unparse(guarda.test).startswith("__name__ != '__main__' and "), ast.unparse(guarda.test))
+        self.assertEqual(ast.unparse(guarda.test), "__name__ != '__main__' and getattr(sys.modules.get(__name__), "
+                                                   "'__dict__', None) is globals()")
 
     def test_cada_asignacion_global_se_comparte(self):
         """En server.py, cada asignacion a una de COMPARTIDAS dentro de una funcion (main(), App.__init__), tambien en
@@ -94,9 +95,17 @@ class CompartidasTests(unittest.TestCase):
             arbol = ast.parse(f.read())
         compartidas = set(server.COMPARTIDAS)
 
+        def expresiones(st):
+            """Lo que es de la propia sentencia: no los cuerpos anidados (body, orelse…), que son bloques suyos."""
+            for campo, valor in ast.iter_fields(st):
+                for v in valor if isinstance(valor, list) else [valor]:
+                    if isinstance(v, ast.AST) and not isinstance(v, (ast.stmt, ast.excepthandler)):
+                        yield from ast.walk(v)
+
         def asignados(st):
-            dianas = st.targets if isinstance(st, ast.Assign) else [st.target] if isinstance(st, ast.AugAssign) else []
-            dianas += [n.target for n in ast.walk(st) if isinstance(n, ast.NamedExpr)]  # x := … dentro de la sentencia
+            dianas = list(st.targets) if isinstance(st, ast.Assign) else \
+                [st.target] if isinstance(st, ast.AugAssign) else []
+            dianas += [n.target for n in expresiones(st) if isinstance(n, ast.NamedExpr)]  # x := …
             return {x.id for t in dianas for x in ast.walk(t) if isinstance(x, ast.Name)} & compartidas
 
         def compartir(st):
@@ -147,7 +156,9 @@ class ArranqueComoLaAppTests(unittest.TestCase):
     def test_lo_de_la_linea_de_ordenes_llega_a_las_partes(self):
         tmp = tempfile.mkdtemp(prefix="tenca-partido-")
         self.addCleanup(shutil.rmtree, tmp, True)
-        real = os.path.join(tmp, "real", "_app")  # una copia: con el enlace, ROOT es la carpeta real (revision 2, N1)
+        # una copia en el temporal: el servidor de prueba no mira el repo (en macOS y Linux, con el enlace, ROOT es la
+        # carpeta real; en Windows, la del enlace: las dos estan en el temporal)
+        real = os.path.join(tmp, "real", "_app")
         shutil.copytree(APP, real, ignore=shutil.ignore_patterns("__pycache__"))
         app = os.path.join(tmp, "enlace")
         try:
@@ -187,8 +198,9 @@ class ArranqueComoLaAppTests(unittest.TestCase):
             with open(os.path.join(tmp, "salida.log"), encoding="utf-8") as fh:
                 self.fail("no arrancó: " + fh.read()[-1500:])
         self.assertNotIn(403, vistos, "el Handler no tiene el puerto de --port (api.PORT sin _compartir)")
-        # DATA_DIR y SERVER llegan a apagado: Apagar borra el sesion.token de --data (remove_token(DATA_DIR, …)) y
-        # termina el proceso con 0
+        # DATA_DIR llega a apagado: Apagar borra el sesion.token de --data (remove_token(DATA_DIR, …)) y el proceso
+        # termina con 0. SERVER no se ve desde fuera (shutdown sale con os._exit(0) igual): lo guarda el test estatico
+        # de las asignaciones (revision 3)
         self.assertTrue(os.path.isfile(os.path.join(datos, "sesion.token")))
         req = urllib.request.Request(f"http://127.0.0.1:{port}/api/apagar", data=b"{}", method="POST",
                                      headers={"X-Chuleta-Token": token, "X-Audios": "1",
