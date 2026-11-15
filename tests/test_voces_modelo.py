@@ -15,6 +15,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import unittest.mock
 
 import numpy as np
 
@@ -149,6 +150,38 @@ class MigracionTests(unittest.TestCase):
             self.assertEqual(len(voices.Voices(self.path).personas()), 4, i)
             self.assertEqual(len(voices.Voices(self.path).pendientes()), 4, i)  # una sola migración
 
+    def test_un_fallo_al_escribir_no_deja_copias_y_olvidar_las_borra(self):
+        # revisión 3, P2-1: el .tmp de una escritura que no se pudo poner en su sitio llevaba huellas
+        v = voices.Voices(self.path)
+        p = v.create("Persona Delta", consentimiento="2026-11-15T10:00:00")
+        real = os.replace
+
+        def falla(a, b):
+            if str(a).endswith(".tmp"):
+                raise PermissionError("antivirus")
+            return real(a, b)
+        with unittest.mock.patch.object(voices.os, "replace", falla):
+            with self.assertRaises(PermissionError):
+                v.remember(p["id"], vec(1), 30.0, "r.wav", "2026-11-15T10:00:00")
+        restos = [f for f in os.listdir(self.tmp) if f.endswith(".tmp")]
+        self.assertEqual(restos, [])
+        with open(self.path + ".77.1.tmp", "w") as f:  # uno de una version anterior o de un cierre a mitad
+            f.write("huellas")
+        open(self.path + ".tmp", "w").close()
+        v.forget_all()
+        self.assertEqual(sorted(f for f in os.listdir(self.tmp) if f.startswith("voces.json")), ["voces.json"])
+
+    def test_ilegible_no_se_recupera_de_la_copia_ni_se_pisa(self):
+        # revisión 3, P2-2: voces.json ilegible y apartado: la siguiente vez se empieza de cero, no con el .bak viejo
+        with open(self.path, "w") as f:
+            f.write("{roto")
+        shutil.copy(VIEJO, self.path + ".bak")
+        self.assertIsNotNone(voices.Voices(self.path).error)
+        self.assertTrue(os.path.isfile(self.path + ".ilegible"))
+        self.assertEqual(voices.Voices(self.path).personas(), [])
+        with open(self.path + ".ilegible") as f:
+            self.assertEqual(f.read(), "{roto")
+
     def test_sin_el_fichero_se_recupera_de_la_copia(self):
         os.replace(self.path, self.path + ".bak")  # una escritura de antes cortada entre las dos operaciones
         v = voices.Voices(self.path)
@@ -204,6 +237,12 @@ class MigracionTests(unittest.TestCase):
         with open(voices.sidecar_path(audio), "w", encoding="utf-8") as f:
             f.write('{"hablantes": [1, 2]}')
         voices.rehacer_huellas(v, lambda n: [audio], lambda a, h, d: (vec(3), 40.0))
+        # revisión 3, P2-4: segundos raros en el sidecar o un vector con None tampoco lanzan
+        voices.write_sidecar(voices.sidecar_path(audio), {"hablantes": {
+            "h1": {"persona": alfa, "origen": "manual", "segundos": "mucho"},
+            "h2": {"persona": alfa, "origen": "manual", "segundos": None}}})
+        out = voices.rehacer_huellas(v, lambda n: [audio], lambda a, h, d: ([None] * voices.DIM, 40.0))
+        self.assertGreaterEqual(out["fallidas"], 1)
 
     def test_buscar_los_audios_por_su_nombre(self):
         raiz = os.path.join(self.tmp, "Reuniones")

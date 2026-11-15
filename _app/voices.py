@@ -75,10 +75,11 @@ UMBRAL_GRUPOS = 0.6      # corte del clustering de sherpa-onnx (distancia coseno
 # y la misma pureza, y quien habla poco sigue en su grupo en las 6 reuniones con ella. Con TitaNet, 0,65 ya juntaba a
 # dos personas.
 FUSION = 0.60            # coseno entre las huellas de dos grupos para unirlos
-TOPE_MIN = 0.55          # con el numero de participantes como pista: nunca se une por debajo de este coseno (con
-#                          0,3 una pista demasiado baja juntaba a personas distintas). Con TitaNet era 0,65; por
-#                          encima de FUSION la pista no hace nada. Con CAM++, 0,50-0,65 dan lo mismo en dev y 0,55
-#                          baja de 10 a 8 los hablantes de mas en el resto del banco, con la misma pureza
+TOPE_MIN = 0.65          # con el numero de participantes como pista: nunca se une por debajo de este coseno (con
+#                          0,3 una pista demasiado baja juntaba a personas distintas; con 0,65, da igual si se queda
+#                          corta). Con CAM++ y FUSION 0,60 la pista ya no une nada mas (lo une todo el paso 1): en dev,
+#                          0,50-0,65 dan lo mismo, y por debajo de 0,62 (el coseno maximo medido entre dos personas
+#                          distintas con CAM++) una pista corta podria juntar a dos. Se deja en 0,65
 FUSION_GRANDES = 0.70    # el de FUSION cuando los dos grupos tienen >= GRANDE_S: sus dos huellas son fiables (con
 GRANDE_S = 30.0          # TitaNet, dos hombres distintos de 57 y 70 s llegaban a 0,72; ese caso no se ha medido con
 #                          CAM++)
@@ -783,10 +784,11 @@ class Voices:
 
     def _load(self, path):
         if not os.path.isfile(path):
-            if not os.path.isfile(path + ".bak"):
-                return
             # sin voces.json pero con su copia: una escritura que se corto entre las dos (antes del 15/11/2026 la copia
-            # se hacia moviendo el fichero): se recupera de la copia
+            # se hacia moviendo el fichero): se recupera de la copia. No si se aparto por ilegible (entonces se empieza
+            # de cero, como siempre)
+            if not os.path.isfile(path + ".bak") or os.path.exists(path + ".ilegible"):
+                return
             log("   voces.json no está; se recupera de voces.json.bak")
             path = path + ".bak"
         try:
@@ -798,6 +800,9 @@ class Voices:
             self.data.update(saved)
         except Exception as e:  # no se pisa: se aparta y se empieza de cero
             self.error = f"{e.__class__.__name__}: {e}"
+            if path != self.path:  # la copia tampoco se lee: se deja donde esta (no pisa un .ilegible)
+                log(f"   voces.json.bak no se pudo leer ({self.error}); se empieza de cero")
+                return
             log(f"   voces.json no se pudo leer ({self.error}); se aparta como voces.json.ilegible")
             try:
                 os.replace(path, self.path + ".ilegible")
@@ -884,18 +889,27 @@ class Voices:
         with self.lock:
             body = protect(json.dumps(self.data, ensure_ascii=False).encode("utf-8"))
             tmp = f"{self.path}.{os.getpid()}.{threading.get_ident()}.tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                f.write(body)
-            if backup and os.path.isfile(self.path):
-                try:
-                    shutil.copyfile(self.path, self.path + ".bak")
-                except OSError:
-                    pass
-            os.replace(tmp, self.path)
-            if not backup:
-                for suffix in (".bak", ".ilegible"):
+            try:
+                with open(tmp, "w", encoding="utf-8") as f:
+                    f.write(body)
+                if backup and os.path.isfile(self.path):
                     try:
-                        os.remove(self.path + suffix)
+                        shutil.copyfile(self.path, self.path + ".bak")
+                    except OSError:
+                        pass
+                os.replace(tmp, self.path)
+            finally:  # si no se pudo poner en su sitio, no se queda una copia con huellas por ahi
+                if os.path.exists(tmp):
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass
+            if not backup:  # olvidar: ninguna copia con las huellas borradas (tampoco un .tmp de un fallo de antes)
+                import glob
+                for extra in [self.path + ".bak", self.path + ".ilegible", self.path + ".tmp"] + \
+                        glob.glob(glob.escape(self.path) + ".*.tmp"):
+                    try:
+                        os.remove(extra)
                     except OSError:
                         pass
 
@@ -1095,9 +1109,15 @@ def hablante_de(data, pid, segundos=None):
              and i.get("origen") == "manual" and not i.get("provisional")]
     if not cands:
         return None
-    if segundos is None or len(cands) == 1:
+    if len(cands) == 1:
         return cands[0][0]
-    return min(cands, key=lambda c: abs(float(c[1].get("segundos") or 0) - float(segundos)))[0]
+
+    def num(x):
+        try:
+            return float(x)
+        except (TypeError, ValueError):
+            return 0.0
+    return min(cands, key=lambda c: abs(num(c[1].get("segundos")) - num(segundos)))[0]
 
 
 def rehacer_huellas(v, buscar, calcular, cancelled=None):
@@ -1128,8 +1148,11 @@ def rehacer_huellas(v, buscar, calcular, cancelled=None):
                     continue
                 try:
                     vec, secs = calcular(audio, h, data)
-                    if vec is not None and len(vec) != DIM:
-                        raise ValueError(f"la huella no tiene {DIM} valores")
+                    if vec is not None:
+                        vec = [float(x) for x in vec]
+                        secs = float(secs) if secs is not None else None
+                        if len(vec) != DIM:
+                            raise ValueError(f"la huella no tiene {DIM} valores")
                 except Exception as e:  # sin memoria, cancelada, sin el audio: se queda por rehacer
                     log(f"   huella por rehacer ({reunion}, {h}): {e.__class__.__name__}")
                     estado = "fallidas"
