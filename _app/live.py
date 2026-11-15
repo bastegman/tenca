@@ -25,6 +25,7 @@ import numpy as np
 import directo_avisos
 import engines
 from common import log
+import informe  # el informe tecnico de la reunion (punto 32): trozos, tramos y esperas
 
 SR = 16000
 OPEN = 0xFFFFFFFF
@@ -821,6 +822,7 @@ def run(job, path, opts, write, log):
                 stage("Whisper no respondía: reiniciándolo…")
         else:
             log("   se salta un trozo que Whisper no consigue transcribir")
+            st["saltado"] = True
             return []
         if res["language"] != lang:
             log(f"   idioma: {res['language']}" + (f" ({res['prob']:.0%})" if res.get("prob") else ""))
@@ -885,6 +887,7 @@ def run(job, path, opts, write, log):
                     stage(msg)
                     publish(None, paused=True)
                     time.sleep(POLL_S)
+                    informe.pausa(job, POLL_S)
                     continue
                 if paused_logged:
                     log("   directo reanudado: vuelve a haber cupo")
@@ -934,6 +937,7 @@ def run(job, path, opts, write, log):
                 new = None
                 if voice >= DIRECT_MIN_VOICE_S:  # menos de 1 s de voz: musica/ruido, Whisper solo inventaria
                     tm = {"prep": perf_counter() - t_iter}
+                    fallo = st["saltado"] = False
                     try:
                         new = transcribe(audio, t0 + a / SR, tm, voice)
                     except engines.Cancelled:
@@ -950,13 +954,14 @@ def run(job, path, opts, write, log):
                         # salta, la grabacion sigue y el repaso final lo recupera; si Groq ha bloqueado la clave, la
                         # siguiente vuelta entra en pausa. Tambien un fallo inesperado (una respuesta rara del proxy)
                         err = str(e) if isinstance(e, engines.EngineError) else f"{e.__class__.__name__}: {e}"
-                        new, job.live_error = [], err
+                        new, job.live_error, fallo = [], err, True
                         if err != st.get("last_error"):
                             st["last_error"] = err
                             log(f"   trozo sin transcribir ({err}); se sigue con el siguiente")
                         # err ya es una frase con lo que ha pasado y que hacer (engines.cloud_http_error…)
                         stage(f"Sin respuesta de la nube: {err.rstrip('.')}. Se sigue con el siguiente trozo; el "
                               "repaso final recupera el texto.")
+                    informe.trozo(job, cloud, cfg, t0 + a / SR, len(audio) / SR, not (fallo or st["saltado"]))
                     if job.restart:  # se pidio rehacer mientras tanto: este trozo ya no vale
                         continue
                     if lang_cuts():  # cambio el idioma con la peticion en vuelo (a la nube no se le corta): fuera

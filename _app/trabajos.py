@@ -19,6 +19,7 @@ import uuid
 
 import engines
 import explicar
+import informe
 import live
 import salidas
 import voices
@@ -375,11 +376,12 @@ class Jobs:
             preset = "medium"
         if preset == "nube" and procesado_de(st) != "api":
             preset = "medium"  # la nube esta desactivada en Ajustes: en local
+        cae = False  # pedido en la nube y empieza en este PC: el informe tecnico lo cuenta (punto 32)
         if preset == "nube":
             try:
                 engines.CloudEngine.endpoint(st["cloud"])
             except engines.EngineError as e:
-                preset = "medium"  # sin API key: en local
+                preset, cae = "medium", True  # sin API key: en local
                 # y se dice: hasta fix-lento caia en silencio a Whisper en el PC (medium, ~1 GB y la CPU ocupada
                 # durante toda la reunion) y se veia como «la nube va lenta» o «cargando» (fix-groq, 10/11/2026)
                 log(f"   directo: la nube no está lista ({e}); se transcribe en este PC con {preset}")
@@ -388,6 +390,9 @@ class Jobs:
             raise ApiError("Ese audio ya se está transcribiendo.")
         job = Job(rel, os.path.basename(rel), preset, meeting_setup(abs_path, st)["language"] or None)
         job.engine, job.live, job.recording = "live", True, True
+        job.informe = informe.ApuntesDirecto()  # lo que live.run apunta por trozo para el informe tecnico (punto 32)
+        if cae:
+            informe.caida_a_local(job)
         job.translate_to = traduccion_destino(rel, st)  # el ultimo de esta reunion o el idioma del resumen (msg 1152)
         # algun trozo en local (o, al retomar tras un reinicio, lo de antes sin constar que fuera en la nube): el
         # resumen automatico no lo sube a la nube sin permiso (CloudText, Jobs.auto_summary)
@@ -619,6 +624,7 @@ class Jobs:
             job.recording = False
             job.finished = time.time()
             self.library.at = 0
+            informe.directo(job, abs_path, self)  # con la reunion aun ocupada: no se mueve mientras se escribe
 
     def submit(self, paths, preset, language, resume=False):
         """resume: las que se quedaron a medias se continuan desde donde acaba el texto (el resto, enteras).
@@ -814,6 +820,7 @@ class Jobs:
                 en_nube = (engines.PRESETS_BY_ID.get(j.preset) or {}).get("engine") == "cloud"
                 if j.status == "running" and j.live and en_nube:
                     j.preset, j.local_part = "medium", True
+                    informe.caida_a_local(j)
                     cambiados.append(j)
                 elif j.status == "queued" and (j.engine == "cloud" or j.kind == "summary"):
                     j.status, j.stage = "cancelled", "Cancelado: la nube se ha desactivado en Ajustes"
@@ -1336,7 +1343,17 @@ class Jobs:
                 job.status, job.stage, job.error = "error", "Error", str(e) or e.__class__.__name__
                 job.finished = job.finished or time.time()
             finally:
+                self._informe_trabajo(job)  # antes de soltarla: no se mueve mientras se escribe
                 self._release(job.path)
+
+    def _informe_trabajo(self, job):
+        """El informe tecnico de la reunion (punto 32): al terminar una transcripcion de la cola o el repaso final."""
+        if job.kind != "transcribe" or job.status not in informe.ESTADOS:
+            return
+        try:
+            informe.trabajo(job, safe(job.path, "file"), self, (self.settings.get() or {}).get("cloud"))
+        except Exception:  # noqa: BLE001  el informe nunca rompe la cola
+            pass
 
     def _run(self, job):
         job.status, job.started, job.stage = "running", time.time(), "Empezando…"

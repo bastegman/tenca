@@ -23,6 +23,72 @@ PKG_ROOT = APP_NAME  # carpeta raiz del zip instalable (Tenca/INSTALAR.bat, Tenc
 # (prefijo 10.54830 en Crossref) y sobrevive a un cambio de su web
 TENCA_URL = "https://doi.org/10.54830/bmnhn.v61.2012.161"
 
+# Acerca de > «Buscar versión nueva» (punto 60 del review del 14/11/2026): UNA peticion a la API de Releases de GitHub
+# cuando se pulsa, nunca sola. Los Releases los crea scripts/publicar_release.py con el tag vAAAA.MM.DD-<sha corto> y
+# la app lleva «AAAA-MM-DD · sha corto» en _app/version.txt (build_zip): se comparan el sha y, si no es el mismo, la
+# fecha. Sin claves ni datos del usuario: solo un User-Agent con el nombre de la app (GitHub lo exige)
+RELEASES_API = "https://api.github.com/repos/bastegman/tenca/releases/latest"
+RELEASES_URL = REPO_URL + "/releases"
+TAG_RE = re.compile(r"v(\d{4})\.(\d{2})\.(\d{2})-([0-9a-f]{7,40})")
+VERSION_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})(?: · ([0-9a-f]{7,40}))?")
+VERSION_TIMEOUT = (10, 15)  # s para conectar y para la respuesta
+
+
+def comparar_version(tuya, tag):
+    """«al_dia» (el mismo sha), «nueva» (la publicada es de un dia posterior), «posterior» (la tuya es de despues de
+    la ultima publicada: un zip de main sin Release), «mismo_dia» (otra del mismo dia: no se sabe cual va antes) o
+    «sin_version» (una copia de trabajo, sin version.txt: lleva fecha y hora del codigo). ValueError si el tag no es
+    de los que crea publicar_release.py."""
+    m = TAG_RE.fullmatch(str(tag or ""))
+    if not m:
+        raise ValueError(f"tag inesperado: {str(tag)[:40]}")
+    fecha_u, sha_u = "-".join(m.groups()[:3]), m.group(4)
+    v = VERSION_RE.fullmatch(str(tuya or "").strip())
+    if not v or not v.group(4):
+        return "sin_version"
+    fecha_t, sha_t = "-".join(v.groups()[:3]), v.group(4)
+    if sha_t.startswith(sha_u) or sha_u.startswith(sha_t):
+        return "al_dia"
+    return "nueva" if fecha_u > fecha_t else ("posterior" if fecha_u < fecha_t else "mismo_dia")
+
+
+def ultima_version(get=None):
+    """La ultima version publicada: {"tag", "version" («AAAA-MM-DD · sha»), "url" (la pagina del Release), "fecha"}.
+    Una sola peticion. Si no se puede saber, ValueError con la frase para el usuario."""
+    if get is None:
+        import requests
+        get = requests.get
+    # CHULETA_PRUEBAS_URL_RELEASES: un GitHub falso en local (tests/test_ui_lote2a.py); nunca en la app de verdad
+    api = os.environ.get("CHULETA_PRUEBAS_URL_RELEASES") or RELEASES_API
+    try:
+        r = get(api, timeout=VERSION_TIMEOUT, allow_redirects=True,
+                headers={"Accept": "application/vnd.github+json", "User-Agent": APP_NAME,
+                         "X-GitHub-Api-Version": "2022-11-28"})
+    except Exception as e:  # noqa: BLE001  sin red, proxy, certificados, DNS…
+        raise ValueError(f"No se ha podido consultar GitHub ({e.__class__.__name__}): sin conexión o la red no lo "
+                         "deja. Vuelve a probar más tarde.")
+    code = getattr(r, "status_code", None)
+    if code == 404:
+        raise ValueError("Todavía no hay ninguna versión publicada.")
+    if code in (403, 429):
+        raise ValueError("GitHub no deja consultar ahora (demasiadas consultas desde esta red). Prueba en un rato.")
+    if code != 200:
+        raise ValueError(f"GitHub ha respondido HTTP {code}. Vuelve a probar más tarde.")
+    try:
+        d = r.json()
+    except ValueError:
+        d = None
+    tag = d.get("tag_name") if isinstance(d, dict) else None
+    m = TAG_RE.fullmatch(str(tag or ""))
+    if not m:
+        raise ValueError("GitHub ha respondido algo que no es una versión de la app.")
+    url = d.get("html_url") if isinstance(d.get("html_url"), str) else ""
+    if not url.startswith(RELEASES_URL + "/"):  # solo una pagina de Releases de este repo (se abre en el navegador)
+        url = RELEASES_URL + "/tag/" + tag
+    fecha = d.get("published_at") if isinstance(d.get("published_at"), str) else ""
+    return {"tag": tag, "version": f"{'-'.join(m.groups()[:3])} · {m.group(4)}", "url": url,
+            "fecha": fecha[:10] if re.fullmatch(r"\d{4}-\d{2}-\d{2}.*", fecha) else None}
+
 
 EXPORT_DIR = os.path.join(APP_DIR, "export")  # INSTALAR.bat, ABRIR TENCA.bat y LEEME.txt (van a la raiz)
 

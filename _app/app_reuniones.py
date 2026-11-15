@@ -10,6 +10,8 @@ import time
 import webbrowser
 
 import engines
+import fallos
+import informe
 import voices
 from ajustes import agente_de, procesado_de, proveedor_elegido
 from api import WINDOW, captura_estado
@@ -20,7 +22,8 @@ from carpetas import backup_dir, por_reunion, project_folders_resolved, rec_fold
 from common import APP_NAME, ApiError, fold, log, log_exc, parse_srt, read_text, save_text
 from diagnostico import DIAG_FREE, DIAG_MODELS, diag_line, masked, scrub
 from listas import _norm_dir, find_vocab, perfil_de, root_names, theme_vocab
-from paquete import DONAR_URL, REPO_URL, TENCA_URL, license_name, open_dir
+from paquete import (DONAR_URL, RELEASES_URL, REPO_URL, TENCA_URL, comparar_version, license_name, open_dir,
+                     ultima_version)
 from rutas import AUDIO_EXT, DATA_DIR, LINK, LINKS, ROOT, TEXT_EXT, VERSION, alias_of, rel_of, root_name, safe
 
 
@@ -39,6 +42,8 @@ class Reuniones:
             webbrowser.open(DONAR_URL)
         elif que == "tenca":
             webbrowser.open(TENCA_URL)
+        elif que == "release":  # la pagina del Release que encontro «Buscar versión nueva» (o la lista de Releases)
+            webbrowser.open((getattr(self, "_version_nueva", None) or {}).get("url") or RELEASES_URL)
         elif que == "claves":  # el asistente: la página de claves del proveedor (solo las de engines.PROVIDERS)
             url = (engines.PROVIDERS.get(b.get("proveedor") or "groq") or {}).get("keys")
             if not url:
@@ -47,6 +52,19 @@ class Reuniones:
         else:
             raise ApiError("No sé qué abrir")
         return {"ok": True}
+
+    def version_buscar(self, b):
+        """POST /api/version/buscar: Acerca de > «Buscar versión nueva». Una sola peticion a GitHub, solo al pulsar
+        (punto 60 del review del 14/11/2026): si hay una version mas nueva que esta, con el enlace a su Release."""
+        try:
+            u = ultima_version()
+        except ValueError as e:
+            log(f"   versión nueva: no se pudo consultar ({e})")
+            raise ApiError(str(e))
+        estado = comparar_version(VERSION, u["tag"])
+        self._version_nueva = u  # «Ver la versión» abre esta pagina (acerca_abrir, que="release")
+        log(f"   versión nueva: consultada ({estado})")
+        return {"estado": estado, "tuya": VERSION, "ultima": u["version"], "url": u["url"], "fecha": u["fecha"]}
 
     def diagnostico(self, q):
         """Texto para pedir ayuda (Acerca de > Copiar diagnostico), con lista blanca: version, Python y sistema, motor y
@@ -79,6 +97,8 @@ class Reuniones:
         ver = engines.VERSION_RX.match(str(st.get("agente_version") or ""))
         donde = {"local": "solo en este PC", "api": "API externa"}.get(mode) or (
             f"agente ({agente_de(st)[0].label}" + (f" {ver.group(0)}" if ver else "") + ")")
+        corregidos = getattr(self.settings, "corregidos", None)  # las claves que Store puso por defecto al arrancar
+        corregidos = [str(k) for k in corregidos] if isinstance(corregidos, list) else []
         info = [f"{APP_NAME} · versión {VERSION}", f"Python {sys.version.split()[0]} · {platform.platform()}",
                 f"Dónde se procesa: {donde}",
                 f"Transcripción: {motor} · directo: {tech(st.get('live_preset') or 'medium')}",
@@ -86,6 +106,10 @@ class Reuniones:
                 f"{si(en_red)} · con tildes u otros caracteres no ASCII: {si(no_ascii)} · {len(ROOT)} caracteres",
                 f"Datos: {datos}",
                 f"Carpetas vinculadas: {len(LINKS)} · destinos de salida: {len(perfil_de(st)['outputs'])}",
+                # puntos 5, 30, 33 y 32 del review del 14/11/2026: solo nombres de ajustes, estados y numeros
+                "Ajustes corregidos al arrancar: " + (", ".join(corregidos) or "ninguno"),
+                self.despierto.estado() if hasattr(self, "despierto") else "PC despierto: sin datos",
+                *fallos.diagnostico(DATA_DIR), *informe.diagnostico(3),
                 "", f"server.log (últimas 30 líneas; lo que no es técnico va como {DIAG_FREE}):",
                 *map(diag_line, lines)]
         return {"texto": scrub("\n".join(info), keys)}
@@ -403,4 +427,6 @@ class Reuniones:
         return {"results": results[:100], "total": sum(r["count"] for r in results)}
 
     def jobs_list(self, q):
-        return {"jobs": self.jobs.snapshot(), "movimientos": self.movimientos_publicos()}
+        # hilos_caidos: un hilo vigia que se ha parado (fallos.py, punto 33): la interfaz avisa de reiniciar
+        return {"jobs": self.jobs.snapshot(), "movimientos": self.movimientos_publicos(),
+                "hilos_caidos": fallos.caidos()}

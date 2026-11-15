@@ -141,6 +141,23 @@ DIAG_LINES = (
     "no se pudo precargar {m}: {e}",
     "   borrados los trozos de audio temporales que dejó la sesión anterior",
     "   no se pudo descifrar {k} de settings.json ({e}): vuelve a pegarla en Ajustes",
+    # ajustes a prueba de valores raros (ajustes.normalizar_ajustes, punto 5 del review del 14/11/2026)
+    "   ajuste {k} no válido: vuelve al valor por defecto",
+    "   ajuste {k}: {n} elementos no válidos, fuera",
+    # el PC despierto (despierto.py, punto 30), los hilos y los fallos graves (fallos.py, punto 33) y «Buscar versión
+    # nueva» (paquete.py, punto 60)
+    "   PC despierto: pedido a Windows (grabando)",
+    "   PC despierto: pedido a Windows (transcribiendo)",
+    "   PC despierto: pedido a Windows (grabando y transcribiendo)",
+    "   PC despierto: ya no hace falta, se suelta",
+    "   PC despierto: Windows no lo acepta (error {n})",
+    "✖ hilo {t}: se ha parado por un error ({c})",
+    "   ✖ se ha parado {t}: hasta reiniciar no funcionará",
+    "✖ error sin atender ({c})",
+    "   la sesión anterior dejó un volcado de fallo grave ({n} líneas): fallos-graves.anterior.log",
+    "   sin volcado de fallos graves ({c})",
+    "   versión nueva: consultada ({s})",
+    "   versión nueva: no se pudo consultar ({e})",
     "   no se pudo copiar settings.json ({c}): no se escribirá encima en esta sesión",
     "   settings.json no se puede leer ({e})⟦: copia en {t}⟧; recuperado: {t}; lo demás vuelve a los valores por "
     "defecto",

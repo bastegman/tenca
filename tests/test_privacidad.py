@@ -675,7 +675,10 @@ class DiagnosticoTests(TempTree):
         t = self.texto()
         lines = t.split("\n")
         app = server.APP_NAME
-        self.assertEqual(lines[:9], [
+        # lote 2a del motor (15/11/2026): entre la cabecera y el registro, los ajustes corregidos, el PC despierto, los
+        # hilos vigia y los informes tecnicos de las ultimas reuniones (test_motor_lote2a)
+        i = lines.index("server.log (últimas 30 líneas; lo que no es técnico va como <texto>):")
+        self.assertEqual(lines[:7] + lines[i - 1:i + 1], [
             f"{app} · versión {server.VERSION}", f"Python {server.sys.version.split()[0]} · "
             f"{server.platform.platform()}", "Dónde se procesa: API externa",
             "Transcripción: nube (groq) · modelo whisper-large-v3-turbo · directo: medium",
@@ -683,9 +686,12 @@ class DiagnosticoTests(TempTree):
             f"no · {len(server.ROOT)} caracteres",
             "Datos: en otra carpeta", "Carpetas vinculadas: 1 · destinos de salida: 1", "",
             "server.log (últimas 30 líneas; lo que no es técnico va como <texto>):"])
-        salida = [l.split(" ", 2)[2] if l[:4].isdigit() else l for l in lines[9:]]  # sin la fecha y la hora
+        self.assertEqual(lines[7:i - 1], ["Ajustes corregidos al arrancar: ninguno", self.app.despierto.estado(),
+                                          *server.fallos.diagnostico(server.DATA_DIR),
+                                          "Informes técnicos de las últimas reuniones: ninguno todavía"])
+        salida = [l.split(" ", 2)[2] if l[:4].isdigit() else l for l in lines[i + 1:]]  # sin la fecha y la hora
         self.assertEqual(salida, [esperado for _, esperado in self.LOG])
-        self.assertTrue(all(l.startswith("2026-10-31 10:00:") for l, (orig, _) in zip(lines[9:], self.LOG)
+        self.assertTrue(all(l.startswith("2026-10-31 10:00:") for l, (orig, _) in zip(lines[i + 1:], self.LOG)
                             if orig[1:2] == " " and not orig.startswith(" ")))
 
     def test_ningun_hueco_deja_pasar_texto(self):
