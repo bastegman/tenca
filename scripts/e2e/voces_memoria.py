@@ -272,6 +272,11 @@ def main():
     ap.add_argument("--antes", help="carpeta _app de la versión de antes (p. ej. la de fe29522)")
     ap.add_argument("--tope", type=float, default=None, help="MB de memoria comprometida que la de ahora no pasa")
     a = ap.parse_args()
+    for stream in (sys.stdout, sys.stderr):  # las líneas de server.log llevan iconos (🗣): en Windows, cp1252
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     a.salida = os.path.abspath(a.salida)  # el hijo cambia de carpeta: todas las rutas, absolutas (run 42692402938)
     os.makedirs(a.salida, exist_ok=True)
     # el audio (~105 MB con 55 min) y los modelos, fuera de --salida: si algo falla a medias, el artefacto de la CI

@@ -265,8 +265,10 @@ class Reuniones:
                     elif k == "sin_proyecto":  # «No es de ningún proyecto» (Hoy, punto 38): «sí» o se quita
                         v = "sí" if str(v or "").strip().lower() in ("sí", "si", "true", "1") or v is True else ""
                     props[k] = v
-            # elegir un proyecto contesta a «¿De qué proyecto es?»: el «ninguno» de antes se olvida
-            if any((b.get("props") or {}).get(k) for k in ("proyecto", "workstream", "vocabulario")):
+            # elegir un proyecto contesta a «¿De qué proyecto es?»: el «ninguno» de antes se olvida; y una reunión que
+            # ya tiene su proyecto (workstream, lo que mira Hoy) no es «de ninguno» (revisión 1, P2-6)
+            pide = b.get("props") or {}
+            if props.get("workstream") or any(pide.get(k) for k in ("proyecto", "workstream", "vocabulario")):
                 props.pop("sin_proyecto", None)
             # escribir (o confirmar tal cual) los participantes los hace del usuario: ya pueden ir al resumen y a los
             # destinos. Solo siguen «sugeridos» si quien los guarda dice de donde vienen (rec_start)

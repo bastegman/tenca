@@ -16,8 +16,9 @@ Rama `enganches`: lo que las ramas anteriores de esta revisión dejaron preparad
 
 - **Al actualizar, cada persona vuelve a reconocerse por la voz sin hacer nada.** Las huellas del modelo anterior se
   rehacen con el de ahora desde el audio de las reuniones en que se pulsó «Recordar», en segundo plano y unos segundos
-  después de abrir la app. Nunca mientras se graba, hay un directo o una llamada, o se identifican voces: espera. Si
-  faltan los modelos, los baja primero. Lo que no encuentra (una reunión borrada o renombrada) se queda apuntado y la
+  después de abrir la app. Nunca mientras se graba, hay un directo o una llamada, o se transcribe o se identifican
+  voces: espera, y si empieza a grabarse mientras calcula una, la corta y la repite al terminar. Si el usuario corrige
+  ese hablante mientras tanto, se queda con lo corregido. Si faltan los modelos, los baja primero. Lo que no encuentra (una reunión borrada o renombrada) se queda apuntado y la
   persona sigue con su nombre: vuelve a tener huella con el siguiente «Recordar». Los nombres, «Soy yo» y el
   consentimiento no se tocan. En «Copiar diagnóstico» sale cuántas se han rehecho.
 - **Español + inglés + portugués**, ya en el desplegable de idioma y en todo el servidor (la reunión, «Preparar» en Hoy,

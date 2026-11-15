@@ -104,9 +104,12 @@ class RehacerAlArrancarTests(TempTree):
         a.jobs, a.voices_dl, a.rec, a.meeting = jobs, None, None, None
         return a
 
-    def speaker_vector(self, rel, h):
+    def speaker_vector(self, rel, h, cancel=None):
         self.calculadas.append((rel, h))
         return vec(len(self.calculadas)), 33.0
+
+    def persona(self, nombre):
+        return next(p for p in leer_voces(self.voces)["personas"] if p["nombre"] == nombre)
 
     def test_se_rehacen_sin_perder_nombres_soy_yo_ni_consentimiento(self):
         res = self.app.rehacer_huellas()
@@ -177,7 +180,7 @@ class RehacerAlArrancarTests(TempTree):
     def test_con_la_grabadora_en_marcha_espera(self):
         grabando = [True]
         self.app.rec = types.SimpleNamespace(alive=lambda: grabando[0])
-        t = threading.Thread(target=self.app.rehacer_huellas)
+        t = threading.Thread(target=self.app.rehacer_huellas, daemon=True)
         with mock.patch.object(app_voces, "log") as log:
             t.start()
             time.sleep(0.5)
@@ -201,12 +204,12 @@ class RehacerAlArrancarTests(TempTree):
         self.app.meeting = None
         self.assertIsNone(self.app._rehacer_ocupado())
 
-    def test_si_se_vuelve_a_identificar_mientras_espera_no_se_calcula(self):
-        """h es el hablante del sidecar que se leyo antes de esperar: si entretanto se volvio a identificar, h ya puede
-        ser otra voz. Se deja para la proxima vez."""
+    def test_lo_que_se_lee_es_el_sidecar_de_despues_de_esperar(self):
+        """Se espera antes de leer el sidecar y elegir el hablante: si entretanto se volvió a identificar y h1 sigue
+        siendo «Yo» puesto a mano (carry_manual lo conserva), se calcula sobre la identificación de ahora."""
         grabando = [True]
         self.app.rec = types.SimpleNamespace(alive=lambda: grabando[0])
-        t = threading.Thread(target=self.app.rehacer_huellas)
+        t = threading.Thread(target=self.app.rehacer_huellas, daemon=True)
         t.start()
         time.sleep(0.3)
         side = voices.sidecar_path(os.path.join(self.root, "2026-11-01 Semanal.wav"))
@@ -215,12 +218,112 @@ class RehacerAlArrancarTests(TempTree):
         voices.write_sidecar(side, data)
         grabando[0] = False
         t.join(10)
-        self.assertEqual(self.calculadas, [("Proyecto/2026-11-02 Proyecto.wav", "h2")])
-        yo = next(p for p in leer_voces(self.voces)["personas"] if p["nombre"] == "Yo")
+        self.assertIn(("2026-11-01 Semanal.wav", "h1"), self.calculadas)
+        self.assertEqual(len(self.persona("Yo")["huellas"]), 1)
+
+    def test_si_se_vuelve_a_identificar_mientras_se_calcula_no_se_guarda(self):
+        """h es el hablante de la identificación que se leyó: si se vuelve a identificar durante el cálculo, h ya
+        puede ser otra voz. Se deja para la próxima vez."""
+        side = voices.sidecar_path(os.path.join(self.root, "2026-11-01 Semanal.wav"))
+
+        def lento(rel, h, cancel=None):
+            if rel == "2026-11-01 Semanal.wav":
+                data = voices.read_sidecar(side)
+                data["creado"] = "2026-11-15T22:00:00"
+                voices.write_sidecar(side, data)
+            return self.speaker_vector(rel, h)
+        self.app.jobs.speaker_vector = lento
+        self.app.rehacer_huellas()
+        yo = self.persona("Yo")
         self.assertEqual((yo["huellas"], [x["reunion"] for x in yo["rehacer"]]), ([], ["2026-11-01 Semanal.wav"]))
 
+    def corregir_mientras_espera(self, rel, cambio):
+        """Con la grabadora en marcha el hilo espera; mientras, el usuario corrige un hablante de esa reunión (sin
+        volver a identificar: el «creado» no cambia). Al parar de grabar, se sigue."""
+        grabando = [True]
+        self.app.rec = types.SimpleNamespace(alive=lambda: grabando[0])
+        t = threading.Thread(target=self.app.rehacer_huellas, daemon=True)
+        t.start()
+        time.sleep(0.4)
+        self.assertEqual(self.calculadas, [])
+        side = voices.sidecar_path(os.path.join(self.root, rel))
+        d = voices.read_sidecar(side)
+        cambio(d)
+        voices.write_sidecar(side, d)
+        grabando[0] = False
+        t.join(10)
+        self.assertFalse(t.is_alive())
+
+    def test_un_hablante_corregido_mientras_espera_no_da_su_huella(self):
+        """Revisión 1 (P1-1): h1 de la semanal era «Yo»; mientras se graba, el usuario dice que es Gamma. Su voz no
+        puede acabar en «Yo»."""
+        self.corregir_mientras_espera("2026-11-01 Semanal.wav",
+                                      lambda d: voices.assign(d, "h1", self.ids["Persona Gamma"], self.ids["Yo"]))
+        self.assertEqual(self.persona("Yo")["huellas"], [])
+        self.assertNotIn(("2026-11-01 Semanal.wav", "h1"), self.calculadas)
+        self.assertEqual(len(self.persona("Persona Alfa")["huellas"]), 1)  # lo demás, como siempre
+
+    def test_uno_que_ya_no_es_nadie_tampoco(self):
+        self.corregir_mientras_espera("2026-11-01 Semanal.wav", lambda d: voices.assign(d, "h1", None))
+        self.assertEqual(self.persona("Yo")["huellas"], [])
+
+    def test_corregido_mientras_se_calcula_tampoco(self):
+        """El subproceso tarda unos segundos: si entretanto se corrige, lo calculado no se guarda."""
+        side = voices.sidecar_path(os.path.join(self.root, "2026-11-01 Semanal.wav"))
+
+        def lento(rel, h, cancel=None):
+            if rel == "2026-11-01 Semanal.wav":
+                d = voices.read_sidecar(side)
+                voices.assign(d, "h1", self.ids["Persona Gamma"], self.ids["Yo"])
+                voices.write_sidecar(side, d)
+            return self.speaker_vector(rel, h)
+        self.app.jobs.speaker_vector = lento
+        self.app.rehacer_huellas()
+        self.assertEqual(self.persona("Yo")["huellas"], [])
+        self.assertEqual(len(self.persona("Persona Alfa")["huellas"]), 1)
+
+    def test_una_grabacion_que_empieza_mientras_se_calcula_lo_corta(self):
+        """Revisión 1 (P2-1): el cálculo en marcha se corta en cuanto empieza a grabarse (cancel) y se rehace al
+        terminar, en la misma pasada."""
+        grabando, cortes = [False], []
+
+        def lento(rel, h, cancel=None):
+            if not cortes:  # el primero: empieza una grabación mientras calcula
+                grabando[0] = True
+                fin = time.time() + 5
+                while time.time() < fin:
+                    if cancel and cancel():
+                        cortes.append(rel)
+                        threading.Timer(0.3, lambda: grabando.__setitem__(0, False)).start()
+                        raise engines.Cancelled()
+                    time.sleep(0.02)
+                grabando[0] = False  # no se ha cortado: que el resto no espere para siempre
+                cortes.append("sin cortar")
+            return self.speaker_vector(rel, h)
+        self.app.rec = types.SimpleNamespace(alive=lambda: grabando[0])
+        self.app.jobs.speaker_vector = lento
+        out = {}
+        t = threading.Thread(target=lambda: out.update(res=self.app.rehacer_huellas()), daemon=True)
+        with mock.patch.object(app_voces, "log"):
+            t.start()
+            t.join(30)
+        self.assertFalse(t.is_alive())
+        res = out["res"]
+        self.assertEqual(cortes, ["2026-11-01 Semanal.wav"])
+        self.assertEqual(res["rehechas"], 2)
+        self.assertEqual((len(self.persona("Yo")["huellas"]), len(self.persona("Persona Alfa")["huellas"])), (1, 1))
+
+    def test_con_una_transcripcion_en_marcha_tambien_espera(self):
+        """Revisión 1 (P2-2): Whisper en el PC, y lo que encadena al acabar, también ocupan el PC. Un resumen no."""
+        self.app.jobs.list = [types.SimpleNamespace(path="x.wav", kind="transcribe", status="running", live=False)]
+        self.assertEqual(self.app._rehacer_ocupado(), "transcribiendo")
+        self.app.jobs.list = [types.SimpleNamespace(path="x.wav", kind="summary", status="running", live=False)]
+        self.assertIsNone(self.app._rehacer_ocupado())
+        self.app.jobs.list, self.app.jobs.held = [], {"x.wav": 1}
+        self.assertEqual(self.app._rehacer_ocupado(), "transcribiendo")
+
     def test_un_fallo_al_calcular_se_queda_para_la_proxima(self):
-        def falla(rel, h):
+        def falla(rel, h, cancel=None):
             raise server.ApiError("No se pudo calcular la huella de ese hablante.")
         self.app.jobs.speaker_vector = falla
         res = self.app.rehacer_huellas()
@@ -272,7 +375,7 @@ class RehacerAlArrancarTests(TempTree):
     def test_dos_a_la_vez_solo_una(self):
         grabando = [True]
         self.app.rec = types.SimpleNamespace(alive=lambda: grabando[0])
-        t = threading.Thread(target=self.app.rehacer_huellas)
+        t = threading.Thread(target=self.app.rehacer_huellas, daemon=True)
         t.start()
         time.sleep(0.2)
         self.assertIsNone(self.app.rehacer_huellas())  # la otra sigue en marcha: esta no hace nada
@@ -324,6 +427,26 @@ class RehacerAlArrancarTests(TempTree):
             self.app.voices_toggle({"on": True})
         time.sleep(0.2)
         self.assertEqual(pedidos, [()])
+
+
+class SubprocesoCancelableTests(TempTree):
+    def test_cancel_mata_el_subproceso(self):
+        """speaker_vector/_voices_subprocess con cancel(): el proceso de voces se corta (como con un trabajo)."""
+        with open(os.path.join(self.app_dir, "voices.py"), "w", encoding="utf-8") as f:
+            f.write("import time\ntime.sleep(60)\n")
+        jobs = bare_jobs([])
+        t0 = time.time()
+        with self.assertRaises(engines.Cancelled):
+            jobs._voices_subprocess(None, ["--fingerprint", "h1"], cancel=lambda: time.time() > t0 + 0.5)
+        self.assertLess(time.time() - t0, 15)
+        vistos = []
+        jobs.voice_vectors = {}
+        jobs._voices_subprocess = lambda job, args, idle_timeout=1800, cancel=None: vistos.append(cancel) or {
+            "huellas": {"h1": [0.1] * voices.DIM}, "segundos": 30.0}
+        self.wav("r.wav")
+        corta = lambda: False  # noqa: E731
+        self.assertEqual(jobs.speaker_vector("r.wav", "h1", cancel=corta)[1], 30.0)
+        self.assertIs(vistos[0], corta)
 
 
 class SinHuellasTrasElCambioTests(Reunion):
@@ -599,6 +722,16 @@ class SinProyectoTests(TempTree):
         self.assertNotIn("sin_proyecto", out["props"])
         self.assertNotIn("sin_proyecto", self.md())
         self.assertEqual(self.md()["workstream"], "General")
+
+    def test_una_reunion_con_proyecto_no_es_de_ninguno(self):
+        """Revisión 1 (P2-6): con su proyecto (workstream, lo que mira Hoy) ya puesto, un «ninguno» que llegue (la
+        migración de lo apuntado en el PC, otra ventana) no se guarda."""
+        self.write("Alfa/Vocabulario/General.txt", "alfa\n")
+        a = self.app()
+        a.notes_save({"path": "r.wav", "props": {"vocabulario": "Alfa/Vocabulario/General.txt"}})
+        out = a.notes_save({"path": "r.wav", "props": {"sin_proyecto": "sí"}})
+        self.assertNotIn("sin_proyecto", out["props"])
+        self.assertNotIn("sin_proyecto", self.md())
 
     def test_el_arbol_lo_ve(self):
         a = self.app()

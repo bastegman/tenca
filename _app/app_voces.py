@@ -9,6 +9,7 @@ import os
 import threading
 import time
 
+import engines
 import voices
 from biblioteca import Transcripts
 from carpetas import display_rel
@@ -198,22 +199,52 @@ class Voces:
             if a.get("cloud") or a.get("recording") or not a.get("_spk"):
                 continue
             por_nombre.setdefault(a.get("name") or os.path.basename(a["path"]), []).append(a["_abs"])
+        cortadas = []
+
+        def buscar(nombre):
+            # se espera antes de leer el sidecar y elegir el hablante: lo que el usuario corrija mientras (una
+            # grabacion puede durar horas) ya se ve (revision 1, P1-1)
+            self._rehacer_esperar(cancelled)
+            return list(por_nombre.get(nombre) or [])
 
         def calcular(audio, h, side):
             self._rehacer_esperar(cancelled)
             if cancelled() or not self.jobs.voices_on():  # apagando, o «Voces» desactivado entretanto: ni una mas
                 return None, None
             rel = rel_of(audio)
-            ahora = voices.read_sidecar(voices.sidecar_path(audio)) or {}
-            # se volvio a identificar (h ya puede ser otra voz) o se esta identificando: esta vez no
-            if ahora.get("creado") != (side or {}).get("creado") or self.jobs.active_for(rel, kinds=("voces",)):
+            # se volvio a identificar, se esta identificando o el usuario ha corregido ese hablante: esta vez no
+            if not self._rehacer_mismo(audio, h, side) or self.jobs.active_for(rel, kinds=("voces",)):
                 return None, None
-            return self.jobs.speaker_vector(rel, h)
+            try:  # si empieza una grabacion (o algo de _rehacer_ocupado) mientras se calcula, se corta
+                vec, secs = self.jobs.speaker_vector(rel, h, cancel=lambda: cancelled() or bool(
+                    self._rehacer_ocupado()))
+            except engines.Cancelled:
+                cortadas.append(rel)
+                raise
+            if not self._rehacer_mismo(audio, h, side):  # corregido mientras se calculaba
+                return None, None
+            return vec, secs
 
-        res = voices.rehacer_huellas(v, lambda nombre: list(por_nombre.get(nombre) or []), calcular, cancelled)
+        res = {"rehechas": 0, "sin_audio": 0, "fallidas": 0}
+        for _ in range(3):  # lo que se corto por una grabacion, otra vez al terminarla (una vuelta mas, como mucho dos)
+            del cortadas[:]
+            r = voices.rehacer_huellas(v, buscar, calcular, cancelled)
+            res = dict(r, rehechas=res["rehechas"] + r["rehechas"])
+            if not cortadas or cancelled():
+                break
         log(f"🗣 huellas de voz con el modelo nuevo: {res['rehechas']} rehecha{'s' if res['rehechas'] != 1 else ''}, "
             f"{res['sin_audio']} sin su reunión, {res['fallidas']} por reintentar")
         return res
+
+    @staticmethod
+    def _rehacer_mismo(audio, h, side):
+        """El sidecar dice de h lo mismo que cuando se eligio: la misma identificacion («creado») y la misma persona,
+        puesta igual («origen», provisional). Si no, se ha vuelto a identificar o el usuario lo ha corregido (otra
+        persona, nadie, «Son la misma persona»): la huella de h ya no es de esa persona."""
+        ahora, side = voices.read_sidecar(voices.sidecar_path(audio)) or {}, side or {}
+        a, b = (ahora.get("hablantes") or {}).get(h), (side.get("hablantes") or {}).get(h)
+        return (ahora.get("creado") == side.get("creado") and isinstance(a, dict) and isinstance(b, dict)
+                and all(a.get(k) == b.get(k) for k in ("persona", "origen", "provisional")))
 
     def _rehacer_ocupado(self):
         """Por que no se rehacen huellas ahora (un codigo) o None: grabando (la grabadora de la app o OBS), con un
@@ -227,6 +258,10 @@ class Voces:
             return "directo"
         if any(j.kind == "voces" for j in vivos):
             return "identificando_voces"
+        # una transcripcion (Whisper en el PC) y lo que encadena al acabar (las voces aun no estan en cola): tambien
+        # ocupan el PC (revision 1, P2-2). Un resumen no
+        if any(j.kind != "summary" for j in vivos) or getattr(self.jobs, "held", None):
+            return "transcribiendo"
         if any(a.get("recording") for a in list(getattr(self.library, "flat", None) or [])):
             return "grabando"
         if getattr(self, "meeting", None):

@@ -1101,10 +1101,11 @@ class Jobs:
         log(f"🗣 {job.name}  voces{' (automático)' if auto else ''} en cola")
         return job.id
 
-    def _voices_subprocess(self, job, args, idle_timeout=1800):
+    def _voices_subprocess(self, job, args, idle_timeout=1800, cancel=None):
         """python voices.py … con prioridad baja; lee su progreso; cancelar = matar el proceso. Sin job (la huella de
         «Recordar», con el usuario esperando a «Guardar»), por debajo de lo normal y no en reposo: en reposo, con el PC
-        ocupado (una llamada, otra identificacion de voces), Windows lo deja sin turno (fix-lento, 10/11/2026)."""
+        ocupado (una llamada, otra identificacion de voces), Windows lo deja sin turno (fix-lento, 10/11/2026).
+        cancel(): otra forma de cancelar, sin job (rehacer las huellas al arrancar: si empieza una grabacion)."""
         log_path = os.path.join(DATA_DIR, "voces.log")
         try:  # rotacion sencilla: el stderr de onnxruntime no debe crecer sin tope
             if os.path.getsize(log_path) > 1_000_000:
@@ -1130,7 +1131,7 @@ class Jobs:
         last = time.time()
         try:
             while True:
-                if job and job.cancel:
+                if (job and job.cancel) or (cancel and cancel()):
                     raise engines.Cancelled()
                 try:
                     m = q.get(timeout=0.25)
@@ -1162,14 +1163,15 @@ class Jobs:
                 pass
             borrar_pcm_voces(p.pid)
 
-    def speaker_vector(self, rel, h):
-        """Huella de un hablante de una reunion: de la memoria del servidor o recalculada en un subproceso."""
+    def speaker_vector(self, rel, h, cancel=None):
+        """Huella de un hablante de una reunion: de la memoria del servidor o recalculada en un subproceso (cancel():
+        cortarlo, engines.Cancelled)."""
         vec = (self.voice_vectors.get(rel) or {}).get(h)
         if vec:
             return vec, None
         abs_path = safe(rel, "file")
         args = ["--fingerprint", h, "--diarize", abs_path, "--out", voices.sidecar_path(abs_path)]
-        m = self._voices_subprocess(None, args, idle_timeout=600)
+        m = self._voices_subprocess(None, args, idle_timeout=600, cancel=cancel)
         vec = (m.get("huellas") or {}).get(h)
         if not vec:
             raise ApiError("No se pudo calcular la huella de ese hablante.")
