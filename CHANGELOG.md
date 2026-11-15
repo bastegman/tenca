@@ -16,11 +16,13 @@ Puntos 11 y 38 del review del 14/11/2026. Rama `interfaz-lote2`.
 
 - **Los avisos de error ya no se van solos.** Duraban 9 s, y una frase de cuarenta palabras no da tiempo a leerla.
   Ahora se cierran con ✕ y, cuando lo hay, llevan el botón que lo arregla («Abrir PowerShell», «Revisar en Ajustes»…).
-  El mismo aviso no se apila, y a la vista quedan como mucho tres (dos en una ventana baja).
+  Para que no tapen la página, a la vista queda solo el último; los de antes esperan detrás de «N avisos más · Ver en
+  la Cola» y, al cerrar el de la vista, sale el anterior. El mismo aviso no se apila.
 - **«Avisos» en la Cola**: los últimos 20 avisos de error de la ventana, con su hora, para releerlos después de
   cerrarlos. Siguen ahí al recargar. Con la Cola abierta, los avisos flotantes quedan por debajo.
 - **Un fallo inesperado dentro de Tenca** ya no enseña el texto de Python o de Windows: dice «Algo ha fallado dentro de
-  Tenca», con el texto técnico plegado en «Detalle».
+  Tenca», con el texto técnico plegado en «Detalle» (en Ajustes, al pasar el ratón por encima). También al subir o
+  importar un audio.
 - El botón de un error en la Cola («Abrir PowerShell»…) no hacía nada: el clic no llegaba a su destino.
 - **Hoy › Para revisar**: «No es de ningún proyecto» es una respuesta, y la reunión deja de pedirlo (antes «Sin
   proyecto» cerraba sin guardar y la fila volvía). «No se pudo transcribir» dice por qué, con su botón. «Actualizar» la
