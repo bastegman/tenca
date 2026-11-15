@@ -53,8 +53,13 @@ class Lote2aUI(unittest.TestCase):
         cls.gh = ThreadingHTTPServer(("127.0.0.1", 0), GitHubFalso)
         threading.Thread(target=cls.gh.serve_forever, daemon=True).start()
         url = f"http://127.0.0.1:{cls.gh.server_address[1]}/repos/bastegman/tenca/releases/latest"
-        cls.srv = Servidor(lambda root: os.makedirs(os.path.join(root, "Alfa")), cls.AJUSTES,
-                           {"CHULETA_PRUEBAS_URL_RELEASES": url})
+
+        def preparar(root):
+            os.makedirs(os.path.join(root, "Alfa"))
+            # la versión de un zip (en la CI la copia de _app no la lleva: sería «sin versión»)
+            with open(os.path.join(root, "_app", "version.txt"), "w", encoding="utf-8") as f:
+                f.write("2026-11-15 · 1234567\n")
+        cls.srv = Servidor(preparar, cls.AJUSTES, {"CHULETA_PRUEBAS_URL_RELEASES": url})
         cls.art = os.environ.get("NOTAS_ARTEFACTOS")
         cls.pw = sync_playwright().start()
         cls.browser = cls.pw.chromium.launch()

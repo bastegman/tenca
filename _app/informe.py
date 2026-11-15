@@ -273,14 +273,26 @@ def ruta_de(abs_path):
     return os.path.splitext(abs_path)[0] + SUFIJO
 
 
-def leer(abs_path):
-    """El informe de esa reunion ({} si no hay o no se puede leer)."""
-    try:
-        with open(ruta_de(abs_path), encoding="utf-8") as f:
-            d = json.load(f)
-        return d if isinstance(d, dict) else {}
-    except (OSError, ValueError):
-        return {}
+def leer(abs_path, estricto=False):
+    """El informe de esa reunion ({} si no hay o no se puede leer). Con estricto (para escribir encima), un fichero que
+    existe pero no se deja leer (OneDrive o el antivirus lo tienen un instante) se reintenta como write_bytes y, si
+    sigue sin poder, OSError: mejor no anotar esta seccion que pisar las que ya tenia."""
+    for intento in range(20 if estricto else 1):
+        try:
+            with open(ruta_de(abs_path), encoding="utf-8") as f:
+                d = json.load(f)
+            return d if isinstance(d, dict) else {}
+        except FileNotFoundError:
+            return {}
+        except ValueError:  # roto: se rehace
+            return {}
+        except OSError:
+            if not estricto:
+                return {}
+            if intento == 19:
+                raise
+            time.sleep(0.1)
+    return {}
 
 
 def anotar(abs_path, seccion, datos):
@@ -290,7 +302,7 @@ def anotar(abs_path, seccion, datos):
         if not os.path.isfile(abs_path):  # la reunion ya no esta ahi: sin informe suelto
             return None
         with _LOCK:
-            d = leer(abs_path)
+            d = leer(abs_path, estricto=True)
             if d.get("formato") != FORMATO or not isinstance(d.get("secciones"), dict):
                 d = {"formato": FORMATO, "id": uuid.uuid4().hex[:8], "secciones": {}}
             d.update(app=VERSION, actualizado=time.strftime("%Y-%m-%d %H:%M"))

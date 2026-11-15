@@ -21,7 +21,7 @@ import threading
 import time
 import traceback
 
-from common import LOGGER, log
+from common import LOGGER, TOKEN_FILE, log
 
 FALLOS_GRAVES = "fallos-graves.log"
 FALLOS_GRAVES_ANTERIOR = "fallos-graves.anterior.log"
@@ -42,8 +42,9 @@ VIGIAS = {
 
 CAIDOS = []  # [{"id", "hilo", "que", "a_las", "error"}]: los vigias que han muerto en esta sesion
 _LOCK = threading.Lock()
-# el fichero de faulthandler (tiene que seguir abierto mientras corre la app) y cuantas lineas dejo la sesion anterior
-_ESTADO = {"fichero": None, "anterior": 0}
+# el fichero de faulthandler (tiene que seguir abierto mientras corre la app), cuantas lineas dejo la sesion anterior
+# (apartadas en ESTA sesion: un .anterior de hace semanas no cuenta) y si aquella termino bien (None: no se sabe)
+_ESTADO = {"fichero": None, "anterior": 0, "limpia": None}
 
 
 def vigia_de(nombre):
@@ -106,17 +107,29 @@ def instalar(data_dir):
     la instancia unica): una segunda que se abre y se cierra no puede apartar ni vaciar el fichero de la que corre.
     Devuelve si faulthandler quedo puesto."""
     ganchos()
-    ruta = os.path.join(data_dir, FALLOS_GRAVES)
+    ruta, modo = os.path.join(data_dir, FALLOS_GRAVES), "w"
+    _ESTADO["anterior"] = 0
+    # la sesion anterior termino bien si borro su sesion.token (shutdown() lo borra antes de os._exit; atexit, con
+    # Ctrl+C): si sigue ahi (instalar va justo antes de start_session, que lo reescribe), se cerro de golpe
+    # (sin settings.json es la primera vez: no hay sesion anterior de la que decir nada)
+    primera = not os.path.exists(os.path.join(data_dir, "settings.json"))
+    _ESTADO["limpia"] = None if primera else not os.path.exists(os.path.join(data_dir, TOKEN_FILE))
+    if _ESTADO["limpia"] is False:
+        log("   la sesión anterior terminó de golpe (sin apagar)")
     try:
         if os.path.getsize(ruta) > 0:
-            os.replace(ruta, os.path.join(data_dir, FALLOS_GRAVES_ANTERIOR))
-            _ESTADO["anterior"] = len(volcado(os.path.join(data_dir, FALLOS_GRAVES_ANTERIOR)))
-            log(f"   la sesión anterior dejó un volcado de fallo grave ({_ESTADO['anterior']} líneas): "
-                f"{FALLOS_GRAVES_ANTERIOR}")
+            try:
+                os.replace(ruta, os.path.join(data_dir, FALLOS_GRAVES_ANTERIOR))
+            except OSError:  # no se puede apartar: se escribe detras, sin vaciarlo
+                modo = "a"
+            else:
+                _ESTADO["anterior"] = len(volcado(os.path.join(data_dir, FALLOS_GRAVES_ANTERIOR)))
+                log(f"   la sesión anterior dejó un volcado de faulthandler ({_ESTADO['anterior']} líneas): "
+                    f"{FALLOS_GRAVES_ANTERIOR}")
     except OSError:
         pass
     try:
-        antes, _ESTADO["fichero"] = _ESTADO["fichero"], open(ruta, "w", encoding="utf-8")
+        antes, _ESTADO["fichero"] = _ESTADO["fichero"], open(ruta, modo, encoding="utf-8")
         faulthandler.enable(file=_ESTADO["fichero"], all_threads=True)
         if antes is not None:  # una segunda llamada (no en la app): el de antes no se queda abierto
             antes.close()
@@ -159,12 +172,26 @@ def caidos():
 
 
 def diagnostico(data_dir):
-    """Las lineas de «Copiar diagnostico»: los vigias caidos y los volcados de fallo grave (solo lo tecnico)."""
+    """Las lineas de «Copiar diagnostico»: los vigias caidos, como termino la sesion anterior y los volcados de
+    faulthandler (solo lo tecnico). El de la sesion anterior, solo si se aparto al arrancar esta (no uno de hace
+    semanas). Un volcado de una sesion que termino bien no fue una caida: en Windows, faulthandler tambien vuelca
+    accesos a memoria que se recuperan (.NET de la ventana, COM)."""
     c = caidos()
     out = ["Hilos vigía: " + ("todos en marcha" if not c else " · ".join(
         f"✖ {x['hilo']} parado a las {x['a_las']} ({x['error']})" for x in c))]
-    for nombre, etiqueta in ((FALLOS_GRAVES_ANTERIOR, "sesión anterior"), (FALLOS_GRAVES, "esta sesión")):
+    limpia = _ESTADO["limpia"]
+    if limpia is not None:
+        de_golpe = "terminó de golpe (sin apagar: cierre forzado, corte de luz o fallo grave)"
+        out.append("Sesión anterior: " + ("terminó bien" if limpia else de_golpe))
+    volcados = ([(FALLOS_GRAVES_ANTERIOR, "sesión anterior")] if _ESTADO["anterior"] else []) + [
+        (FALLOS_GRAVES, "esta sesión")]
+    for nombre, etiqueta in volcados:
         v = volcado(os.path.join(data_dir, nombre))
         if v:
-            out += [f"Volcado de fallo grave ({etiqueta}, faulthandler):", *v]
+            if etiqueta == "esta sesión":
+                nota = "sigue abierta: un error recuperado"
+            else:
+                nota = {True: "terminó bien: un error recuperado, no una caída", False: "terminó de golpe",
+                        None: "sin saber cómo terminó"}[limpia]
+            out += [f"Volcado de faulthandler ({etiqueta}; {nota}):", *v]
     return out

@@ -441,17 +441,81 @@ class FallosTests(unittest.TestCase):
             if fallos._ESTADO["fichero"]:
                 fallos._ESTADO["fichero"].close()
         self.addCleanup(restaurar)
+        open(os.path.join(tmp, "settings.json"), "w").close()
+        open(os.path.join(tmp, "sesion.token"), "w").close()  # no lo borró: terminó de golpe
         with mock.patch.object(fallos, "log") as log:
             self.assertTrue(fallos.instalar(tmp))
         self.assertIs(threading.excepthook, fallos.hilo)
         self.assertIs(sys.excepthook, fallos.programa)
         self.assertTrue(faulthandler.is_enabled())
         self.assertEqual(os.path.getsize(os.path.join(tmp, fallos.FALLOS_GRAVES)), 0)
-        self.assertIn("la sesión anterior dejó un volcado de fallo grave (3 líneas)", log.call_args.args[0])
+        self.assertEqual([c.args[0] for c in log.call_args_list],
+                         ["   la sesión anterior terminó de golpe (sin apagar)",
+                          "   la sesión anterior dejó un volcado de faulthandler (3 líneas): "
+                          "fallos-graves.anterior.log"])
         lineas = fallos.diagnostico(tmp)
-        self.assertIn("Volcado de fallo grave (sesión anterior, faulthandler):", lineas)
+        self.assertIn("Sesión anterior: terminó de golpe (sin apagar: cierre forzado, corte de luz o fallo grave)",
+                      lineas)
+        self.assertIn("Volcado de faulthandler (sesión anterior; terminó de golpe):", lineas)
         self.assertIn("  live.py:12 run", lineas)
         self.assertNotIn("omega", "\n".join(lineas))
+
+    def restaurar_faulthandler(self):
+        antes = (threading.excepthook, sys.excepthook, faulthandler.is_enabled(), dict(fallos._ESTADO))
+
+        def restaurar():
+            threading.excepthook, sys.excepthook = antes[0], antes[1]
+            faulthandler.disable()
+            if antes[2]:
+                faulthandler.enable()
+            if fallos._ESTADO["fichero"]:
+                fallos._ESTADO["fichero"].close()
+            fallos._ESTADO.update(antes[3])
+        self.addCleanup(restaurar)
+
+    def test_un_volcado_viejo_no_se_dice_como_de_la_sesion_anterior(self):
+        """Revisión 1 (P2): tras arranques limpios, el .anterior de hace semanas no sale en el diagnóstico; y el de
+        una sesión que terminó bien se dice como lo que es (un error recuperado), no como una caída."""
+        self.restaurar_faulthandler()
+        tmp = tempfile.mkdtemp(prefix="fallos-viejo-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        open(os.path.join(tmp, "settings.json"), "w").close()
+        with open(os.path.join(tmp, fallos.FALLOS_GRAVES_ANTERIOR), "w", encoding="utf-8") as f:
+            f.write("Windows fatal exception: access violation\n")
+        with mock.patch.object(fallos, "log"):
+            fallos.instalar(tmp)  # sin volcado nuevo y sin sesion.token: terminó bien
+        lineas = fallos.diagnostico(tmp)
+        self.assertIn("Sesión anterior: terminó bien", lineas)
+        self.assertFalse(any("Volcado" in l for l in lineas), lineas)
+        with open(os.path.join(tmp, fallos.FALLOS_GRAVES), "w", encoding="utf-8") as f:
+            f.write("Windows fatal exception: access violation\n")  # la sesión que termina bien con un volcado
+        with mock.patch.object(fallos, "log"):
+            fallos.instalar(tmp)
+        lineas = fallos.diagnostico(tmp)
+        self.assertIn("Volcado de faulthandler (sesión anterior; terminó bien: un error recuperado, no una caída):",
+                      lineas)
+
+    def test_la_primera_vez_no_hay_sesion_anterior(self):
+        self.restaurar_faulthandler()
+        tmp = tempfile.mkdtemp(prefix="fallos-primera-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        with mock.patch.object(fallos, "log") as log:
+            fallos.instalar(tmp)
+        log.assert_not_called()
+        self.assertFalse(any(l.startswith("Sesión anterior") for l in fallos.diagnostico(tmp)))
+
+    def test_si_no_se_puede_apartar_no_se_vacia(self):
+        """Revisión 1 (P3): sin poder apartar el volcado (bloqueado), se sigue escribiendo detrás, sin vaciarlo."""
+        self.restaurar_faulthandler()
+        tmp = tempfile.mkdtemp(prefix="fallos-bloqueado-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        with open(os.path.join(tmp, fallos.FALLOS_GRAVES), "w", encoding="utf-8") as f:
+            f.write("Fatal Python error: Aborted\n")
+        with mock.patch.object(fallos.os, "replace", side_effect=PermissionError("en uso")), \
+                mock.patch.object(fallos, "log"):
+            self.assertTrue(fallos.instalar(tmp))
+        with open(os.path.join(tmp, fallos.FALLOS_GRAVES), encoding="utf-8") as f:
+            self.assertIn("Fatal Python error: Aborted", f.read())
 
     def test_un_fallo_grave_de_verdad_deja_su_volcado(self):
         """Un proceso que cae de verdad (faulthandler._sigsegv) con fallos.instalar: el volcado queda en el fichero,
@@ -648,6 +712,31 @@ class InformeTests(support.TempTree):
         self.sin_nada_personal(texto)
         self.assertIn('"motor":"nube"', texto)
         self.assertIn('"app":"<texto>"', texto)
+
+    def test_un_informe_que_no_se_deja_leer_no_se_pisa(self):
+        """Revisión 1 (P2): OneDrive o el antivirus con el .informe.json abierto: se reintenta y, si sigue sin poder,
+        no se anota esa sección (antes se escribía un informe nuevo encima y se perdían las demás)."""
+        informe.grabacion(self.audio, {"t": 1}, 1)
+        with open(informe.ruta_de(self.audio), encoding="utf-8") as f:
+            antes = f.read()
+        reloj = types.SimpleNamespace(sleep=mock.Mock(), strftime=time.strftime)
+        with mock.patch.object(informe, "time", reloj), \
+                mock.patch.object(informe.json, "load", side_effect=PermissionError("en uso")):
+            self.assertIsNone(informe.trabajo(FakeJob(status="done"), self.audio))
+        self.assertEqual(reloj.sleep.call_count, 19)
+        with open(informe.ruta_de(self.audio), encoding="utf-8") as f:
+            self.assertEqual(f.read(), antes)
+        n = []  # y si a la tercera se deja, se anota con lo que había
+        cargar = json.load
+
+        def a_la_tercera(f):
+            n.append(1)
+            if len(n) < 3:
+                raise PermissionError("en uso")
+            return cargar(f)
+        with mock.patch.object(informe, "time", reloj), mock.patch.object(informe.json, "load", a_la_tercera):
+            d = informe.trabajo(FakeJob(status="done"), self.audio)
+        self.assertEqual(set(d["secciones"]), {"grabacion", "transcripcion"})
 
     def test_sin_el_audio_no_deja_un_informe_suelto(self):
         os.remove(self.audio)
