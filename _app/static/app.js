@@ -1068,7 +1068,7 @@ main.addEventListener('click', e => {
   } else if (b.dataset.act === 'det-proy') {
     const d = $('#aHead .pdet');
     // abierto para esta reunión, sin recordarlo para las demás (revisión 1, P1-6)
-    if (d) { S.detPara = curAudio()?.path || null; S.detProg = true; d.open = true; $('.pws', d)?.focus(); }
+    if (d) { S.detPara = curAudio()?.path || null; d.open = true; $('.pws', d)?.focus(); }
   } else if (b.closest('.pmenu')) pmenuCerrar(false);  // la acción la hace el manejador de siempre (data-act)
 });
 main.addEventListener('keydown', e => {
@@ -1079,13 +1079,16 @@ main.addEventListener('keydown', e => {
   else if (e.key === 'Tab') pmenuCerrar(false);
 });
 document.addEventListener('mousedown', e => { if (!e.target.closest('#aHead .pmas')) pmenuCerrar(false); }, true);
-// «Detalles» abierto o cerrado se recuerda (toggle no burbujea: en captura)
-main.addEventListener('toggle', e => {
-  if (!e.target.classList || !e.target.classList.contains('pdet')) return;
-  if (S.detProg) { S.detProg = false; return; }  // lo abrió el proyecto de la cabecera, no tú
-  if (!e.target.open) S.detPara = null;
-  localStorage.setItem('detalles', e.target.open ? '1' : '0');
-}, true);
+// «Detalles» abierto o cerrado se recuerda solo cuando lo pliegas o despliegas tú (clic o teclado en su título; el
+// teclado también da `click`). No con `toggle`: salta también al pintar un <details open>, y el que abre el proyecto de
+// la cabecera para esta reunión acababa guardado para todas con el primer repintado (revisión 2, N2)
+main.addEventListener('click', e => {
+  const sm = e.target.closest && e.target.closest('#aHead .pdet > summary');
+  if (!sm) return;
+  const abrir = !sm.parentElement.open;  // el clic lo cambia después de este manejador
+  if (!abrir) S.detPara = null;
+  localStorage.setItem('detalles', abrir ? '1' : '0');
+});
 
 /* el lateral plegable (B5, puntos 13 y 22 del review): por debajo de 1.000 px se pliega solo y se abre encima del
    contenido; Ctrl+\ o el botón de arriba lo abren o lo cierran a cualquier ancho (en ancha, se recuerda) */
@@ -1098,15 +1101,28 @@ function latEstado() {
   $('#btnSide')?.setAttribute('aria-expanded', String(abierto));
 }
 function latAlternar(teclado) {
+  const abrir = document.body.classList.contains('lat-off'), dentro = !!$('#sidebar')?.contains(document.activeElement);
+  const antes = document.activeElement;
   if (LAT_MQ.matches) S.latAbierto = !S.latAbierto;
-  else localStorage.setItem('lateral', document.body.classList.contains('lat-off') ? '1' : '0');
+  else localStorage.setItem('lateral', abrir ? '1' : '0');
   latEstado();
-  if (teclado === true && !document.body.classList.contains('lat-off')) $('#sideNav a')?.focus();  // con el teclado, al lateral
+  // con el teclado, el foco entra en el lateral solo si se abre encima del contenido; en ancha sigues escribiendo
+  // donde estabas (revisión 2, N3). Al cerrarlo con el foco dentro, vuelve a donde estaba (o al botón del lateral)
+  if (abrir) {
+    S.latVolver = null;
+    if (teclado === true && document.body.classList.contains('lat-sobre')) { S.latVolver = antes; $('#sideNav a')?.focus(); }
+  } else if (dentro) latFocoFuera();
+}
+function latFocoFuera() {
+  const v = S.latVolver;
+  S.latVolver = null;
+  if (v && v.isConnected && v !== document.body && !$('#sidebar').contains(v) && v.getClientRects().length) v.focus({ preventScroll: true });
+  else $('#btnSide')?.focus();
 }
 // encima del contenido, cualquier enlace o botón del lateral lo cierra (Buscar o la reunión en la que ya estás no
 // cambian la ruta: se quedaba tapando el diálogo; revisión 1, P1-7)
 document.addEventListener('click', e => {
-  if (S.latAbierto && LAT_MQ.matches && e.target.closest('.sidebar a, .sidebar [data-go], .sidebar #btnNewFolder')) { S.latAbierto = false; latEstado(); }
+  if (S.latAbierto && LAT_MQ.matches && e.target.closest('.sidebar a, .sidebar [data-go], .sidebar #btnNewFolder, .sidebar .trow[data-audio], .sidebar .trow[data-doc]')) { S.latAbierto = false; latEstado(); }
 });
 LAT_MQ.addEventListener('change', () => { S.latAbierto = false; latEstado(); });
 $('#btnSide')?.addEventListener('click', () => latAlternar(false));
@@ -1910,7 +1926,7 @@ document.addEventListener('keydown', e => {
     if (!$('#modal').classList.contains('hidden')) return closeModal(false);  // el diálogo, antes que el lateral
     if (pmenuCerrar(true)) return;  // «⋯» de la reunión
     if (typeof spkPopCerrar === 'function' && spkPopCerrar()) return;  // el globo de un hablante (voces.js)
-    if (S.latAbierto && LAT_MQ.matches) { S.latAbierto = false; latEstado(); $('#btnSide')?.focus(); return; }
+    if (S.latAbierto && LAT_MQ.matches) { S.latAbierto = false; latEstado(); latFocoFuera(); return; }
     if (!$('#jobsPanel').classList.contains('hidden')) return $('#jobsPanel').classList.add('hidden');
     if (typing) el.blur();
     return;

@@ -55,6 +55,9 @@ function renderVoicesBar(a) {
   // si es la misma identificación (mismo `creado`) y sin trabajo de voces, no se repinta con algo escrito; si las voces
   // se han vuelto a identificar, sí: sus filas podrían ser ya otras voces (revisión 1, P0-1)
   const qh = $('#qhBloque', el), misma = qh && s && qh.dataset.creado === String(s.creado ?? '');
+  // mientras se vuelven a leer las voces (S.spk a null tras guardar o juntar), un refresco de trabajos no quita el
+  // bloque abierto: se perdería lo escrito en las demás filas (revisión 2, N6)
+  if (qh && !s && !j && S.qhAbierto === a.path) return;
   if (qh && misma && !j && S.qhAbierto === a.path && (qh.contains(document.activeElement) || qh.dataset.sucio || qh.dataset.busy)) return;
   const borrador = misma ? qhBorrador(qh) : null;  // lo escrito en las demás filas no se pierde al guardar una (P1-2)
   el.innerHTML = html ? `<div class="card voz-bar${S.qhAbierto === a.path ? ' abierto' : ''}">${html}</div>` : '';
@@ -157,6 +160,8 @@ audio.addEventListener('timeupdate', () => {
   if (S.playing !== o.path || audio.currentTime < o.t - 1 || audio.currentTime > o.fin + 1.5) { qhOyendo = null; return; }
   if (audio.currentTime >= o.fin) { qhOyendo = null; audio.pause(); }
 });
+// un salto a otro sitio (otra frase, el reproductor) mientras suena la muestra: ya no es la muestra (revisión 2, N5)
+audio.addEventListener('seeking', () => { if (qhOyendo && Math.abs(audio.currentTime - qhOyendo.t) > 0.25) qhOyendo = null; });
 async function qhGuardarFila(a, fila, bloque) {
   const h = fila.dataset.h, s = S.spk, i = spkInfo(h) || {};
   const nombre = $('[data-qh-nombre]', fila).value.trim();
@@ -166,6 +171,8 @@ async function qhGuardarFila(a, fila, bloque) {
   // el `creado` con el que se pintó el bloque: si las voces se han vuelto a identificar, el servidor lo rechaza
   const r = await api('/api/voces/persona', spkNameBody(a, h, cur, nombre, { recordar: rec, consentimiento: con, creado: bloque.dataset.creado || s.creado }));
   S.qhGuardada = h;
+  // el consentimiento vale para ese guardado: la siguiente persona con «Recordar» lo pide otra vez (revisión 2, N4)
+  if (rec) $('#qhConsent', bloque).checked = false;
   return rec ? `🗣 ${esc(nombre)}: huella guardada (${r.huellas})` : `🗣 ${esc(nombre)} en esta reunión`;
 }
 async function qhAccion(e) {
@@ -183,6 +190,7 @@ async function qhAccion(e) {
     return;
   }
   if (e.target.closest('[data-qh-oir]') && fila) {
+    if (!S.tx || S.tx.path !== a.path) return toast('Un momento: aún se está cargando la transcripción');
     const m = qhMuestra(fila.dataset.h);
     if (!m) return toast('No sé en qué minuto habla esta voz: hace falta la transcripción con tiempos (.srt)');
     loadAudio(a, m.t, true);
@@ -207,6 +215,8 @@ async function qhAccion(e) {
     if (hs.length < 2) return;
     const con = hs[0];  // la que más habla (la lista va por tiempo): las demás se juntan en ella
     ocupado('Juntando…');
+    // tras juntar, ninguna queda marcada: la voz que queda no se iría con la siguiente unión (revisión 2, N1)
+    $$('[data-qh-sel]', bloque).forEach(x => { x.checked = false; });
     let hechas = 0;
     try {
       for (const h of hs.slice(1)) { await api('/api/hablantes/unir', spkJoinBody(a, h, con, bloque.dataset.creado || s.creado)); hechas++; }

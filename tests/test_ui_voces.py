@@ -261,7 +261,8 @@ class VocesEnNavegadorTests(unittest.TestCase):
         self.assertEqual(pg.evaluate("document.activeElement.closest('.qh-fila')?.dataset.h"), "h2")
         sug = pg.eval_on_selector_all("#qhBloque [data-qh-sug]", "bs => bs.map(b => b.textContent)")
         self.assertEqual(sug, ["Ana Prueba", "Luis Prueba"])
-        # oír: la frase más larga de esa voz
+        # oír: la frase más larga de esa voz (la transcripción llega por su lado: en la CI, a veces después del bloque)
+        pg.wait_for_selector("#txBody .spk[data-spk='h3']", timeout=15000)
         self.assertEqual(pg.evaluate("qhMuestra('h3').t"), 20.5)
         # «Recordar» sin consentimiento no guarda nada y enseña la casilla
         fila = "#qhBloque .qh-fila[data-h='h2']"
@@ -309,6 +310,222 @@ class VocesEnNavegadorTests(unittest.TestCase):
         pg.keyboard.press("Escape")
         pg.wait_for_selector(".spk-pop", state="detached", timeout=3000)
         self.assertEqual(self.limpio(errores, red), ([], []))
+
+    def bloque(self, rel, w=1280, h=800, antes=None):
+        """El bloque «Quién habla» de `rel`, abierto como desde «Ponles nombre» en Hoy."""
+        ctx = self.browser.new_context(bypass_csp=True, viewport={"width": w, "height": h})
+        self.addCleanup(ctx.close)
+        pg = ctx.new_page()
+        errores, red = [], []
+        pg.on("pageerror", lambda e: errores.append(f"pageerror: {e}"))
+        pg.on("response", lambda r: red.append(f"{r.status} {r.url}") if r.status >= 400 else None)
+        if antes:
+            antes(pg)
+        pg.goto(f"{self.base}/?t={self.token}", wait_until="networkidle")
+        pg.wait_for_selector("#main h1", timeout=15000)
+        pg.wait_for_function("p => S.audios && S.audios.get(p)", arg=rel, timeout=10000)
+        pg.evaluate("p => hoyAccion('voces', S.audios.get(p))", rel)
+        pg.wait_for_selector("#qhBloque .qh-fila", timeout=15000)
+        return pg, errores, red
+
+    def test_juntar_no_deja_ninguna_marcada(self):
+        """Revisión 2, N1: tras «Son la misma persona», la voz que queda seguía marcada y la siguiente unión se la
+        llevaba también (sin deshacer)."""
+        rel = self.nueva("R juntar", {"h1": 50.0, "h2": 40.0, "h3": 30.0, "h4": 20.0, "h5": 10.0})
+        pg, errores, red = self.bloque(rel)
+        fila = "#qhBloque .qh-fila[data-h='{}'] [data-qh-sel]"
+        pg.check(fila.format("h1"))
+        pg.check(fila.format("h4"))
+        pg.click("#qhBloque [data-qh-unir]")
+        pg.wait_for_function("!document.querySelector(\"#qhBloque .qh-fila[data-h='h4']\")", timeout=10000)
+        self.assertEqual(pg.eval_on_selector_all("#qhBloque [data-qh-sel]:checked", "xs => xs.length"), 0)
+        self.assertTrue(pg.is_disabled("#qhBloque [data-qh-unir]"))
+        pg.check(fila.format("h2"))
+        pg.check(fila.format("h3"))
+        pg.click("#qhBloque [data-qh-unir]")
+        pg.wait_for_function("document.querySelectorAll('#qhBloque .qh-fila').length === 3", timeout=10000)
+        hs = self.api("/api/hablantes?path=" + urllib.request.quote(rel))["hablantes"]
+        self.assertEqual(len(hs), 3, sorted(hs))
+        self.assertIn("h5", hs)
+        self.assertEqual(hs["h1"]["segundos"], 20.0)  # h1 y h4, nada más
+        self.assertEqual(self.limpio(errores, red), ([], []))
+
+    def test_consentimiento_y_borrador(self):
+        """Revisión 2: el consentimiento no se queda marcado para la siguiente persona tras guardar con «Recordar»
+        (N4), y un refresco de trabajos mientras se vuelven a leer las voces no quita el bloque ni lo escrito (N6)."""
+        rel = self.nueva("R consiento", {"h1": 20.0, "h2": 10.0, "h3": 5.0})
+        enviados = []
+
+        def guarda(route):  # sin sherpa_onnx no se puede guardar una huella de verdad: la respuesta es simulada
+            enviados.append(json.loads(route.request.post_data))
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "huellas": 1}))
+        pg, errores, red = self.bloque(rel, antes=lambda p: p.route("**/api/voces/persona", guarda))
+        fila = "#qhBloque .qh-fila[data-h='{}'] "
+        pg.fill(fila.format("h1") + "[data-qh-nombre]", "Ana Prueba")
+        pg.check(fila.format("h1") + "[data-qh-rec]")
+        pg.check("#qhConsent")
+        pg.click(fila.format("h1") + "[data-qh-guardar]")
+        pg.wait_for_function("document.querySelector('#toasts').textContent.includes('huella guardada')", timeout=10000)
+        pg.wait_for_function("!document.querySelector('#qhBloque').dataset.busy", timeout=5000)
+        self.assertEqual([b["consentimiento"] for b in enviados], [True])
+        self.assertFalse(pg.is_checked("#qhConsent"))
+        pg.check(fila.format("h2") + "[data-qh-rec]")
+        self.assertTrue(pg.is_visible("#qhConsent"))
+        self.assertFalse(pg.is_checked("#qhConsent"))  # la siguiente persona lo pide otra vez
+        pg.fill(fila.format("h2") + "[data-qh-nombre]", "Luis Prueba")
+        pg.click(fila.format("h2") + "[data-qh-guardar]")
+        pg.wait_for_function("document.querySelector('#toasts').textContent.includes('consentimiento')", timeout=5000)
+        self.assertEqual(len(enviados), 1)
+        # N6: S.spk a null (se están releyendo las voces) y llega un refresco de la barra
+        pg.uncheck(fila.format("h2") + "[data-qh-rec]")
+        pg.fill(fila.format("h3") + "[data-qh-nombre]", "Borrador")
+        pg.evaluate("() => { document.activeElement.blur(); S.spk = null; renderVoicesBar(curAudio()); }")
+        self.assertTrue(pg.is_visible("#qhBloque"))
+        self.assertEqual(pg.input_value(fila.format("h3") + "[data-qh-nombre]"), "Borrador")
+        pg.evaluate("() => loadSpeakers(curAudio())")
+        pg.wait_for_function("S.spk && S.spk.exists", timeout=5000)
+        self.assertEqual(pg.input_value(fila.format("h2") + "[data-qh-nombre]"), "Luis Prueba")
+        self.assertEqual(pg.input_value(fila.format("h3") + "[data-qh-nombre]"), "Borrador")
+        self.assertEqual(self.limpio(errores, red), ([], []))
+
+    def test_oir_con_la_transcripcion_por_llegar_y_otra_frase(self):
+        """«Oír»: si la transcripción aún no ha llegado lo dice (no que falte el .srt; era el fallo de ui-smoke en la
+        CI), y pulsar otra frase mientras suena la muestra no la pausa (revisión 2, N5)."""
+        nombre = "R oir"
+        base = os.path.join(self.root, nombre)
+        with open(base + ".wav", "wb") as f:
+            f.write(wav_bytes(25.0, rate=8000, channels=1))
+        with open(base + ".srt", "w", encoding="utf-8") as f:
+            f.write(srt_text([(0.5, 9.5, "Hola a todos."), (10.5, 14.5, "Una frase corta."),
+                              (15.0, 24.0, "Sigo yo.")]))
+        voices.write_sidecar(base + voices.SIDECAR_EXT, {
+            "version": 1, "tu": None, "micro": None, "creado": "2026-11-15T10:00:00",
+            "tramos": [{"inicio": 0, "fin": 10, "h": "h1"}, {"inicio": 10, "fin": 14.8, "h": "h2"},
+                       {"inicio": 14.8, "fin": 25, "h": "h1"}],
+            "hablantes": {"h1": {"segundos": 20.2, "persona": None}, "h2": {"segundos": 4.8, "persona": None}}})
+        rel = nombre + ".wav"
+        retenidas = []  # la transcripción, retenida hasta después del primer «Oír»
+
+        def retiene(route):
+            if retenidas is None:
+                route.continue_()
+            else:
+                retenidas.append(route)
+        pg, errores, red = self.bloque(rel, antes=lambda p: p.route(lambda url: "/api/transcript?" in url, retiene))
+        self.assertTrue(retenidas)
+        pg.click("#qhBloque .qh-fila[data-h='h2'] [data-qh-oir]")
+        pg.wait_for_function("document.querySelector('#toasts').textContent.includes('cargando la transcripción')",
+                             timeout=5000)
+        self.assertNotIn(".srt", pg.inner_text("#toasts"))
+        sueltas, retenidas = retenidas, None
+        for r in sueltas:
+            r.continue_()
+        pg.wait_for_selector("#txBody .spk[data-spk='h2']", timeout=15000)
+        self.assertEqual(pg.evaluate("qhMuestra('h2')"), {"t": 10.5, "d": 4.0})
+        pg.click("#qhBloque .qh-fila[data-h='h2'] [data-qh-oir]")
+        pg.wait_for_function("audio.readyState >= 1 && Math.abs(audio.currentTime - 10.5) < 0.3", timeout=10000)
+        self.assertIsNotNone(pg.evaluate("qhOyendo"))
+        # quieto (lo que tarde el clic no cuenta) y con la cuenta de pausas; la frase siguiente (15,0) cae dentro del
+        # margen de la muestra (acaba en 14,5): antes, el salto contaba como «llegó al final» y la pausaba
+        pg.evaluate("() => { audio.pause(); window.pausas = 0; const p = audio.pause.bind(audio); "
+                    "audio.pause = () => { window.pausas++; p(); }; }")
+        pg.click("#txBody .ts[data-i='2']")
+        pg.wait_for_function("!audio.seeking && Math.abs(audio.currentTime - 15) < 0.3", timeout=10000)
+        pg.wait_for_timeout(400)  # el timeupdate del salto
+        self.assertEqual(pg.evaluate("window.pausas"), 0)
+        self.assertIsNone(pg.evaluate("qhOyendo"))
+        self.assertEqual(self.limpio(errores, red), ([], []))
+
+    def pagina(self, rel, w, h, ctx=None):
+        if ctx is None:
+            ctx = self.browser.new_context(bypass_csp=True, viewport={"width": w, "height": h})
+            self.addCleanup(ctx.close)
+        pg = ctx.new_page()
+        errores = []
+        pg.on("pageerror", lambda e: errores.append(f"pageerror: {e}"))
+        pg.goto(f"{self.base}/?t={self.token}", wait_until="networkidle")
+        pg.wait_for_selector("#main h1", timeout=15000)
+        self.ir(pg, rel)
+        return pg, errores
+
+    def ir(self, pg, rel):
+        pg.evaluate("p => { location.hash = '#/a/' + encodeURIComponent(p); }", rel)
+        pg.wait_for_function("p => curAudio() && curAudio().path === p && document.querySelector('#aHead .pdet')",
+                             arg=rel, timeout=15000)
+
+    def test_detalles_del_proyecto_no_se_quedan_para_todas(self):
+        """Revisión 2, N2: abrir «Detalles» desde el proyecto de la cabecera lo abre en esa reunión; el primer repintado
+        (Chromium lanza `toggle` al pintar un <details open>) lo guardaba para todas. Y plegarlo a mano después de
+        ese clic se ignoraba."""
+        una = self.nueva("R det una", {"h1": 10.0})
+        otra = self.nueva("R det otra", {"h1": 10.0})
+        pg, errores = self.pagina(una, 1280, 800)
+        abierto = "document.querySelector('#aHead .pdet').open"
+        guardado = "localStorage.getItem('detalles')"
+        self.assertFalse(pg.evaluate(abierto))
+        pg.click("#aHead [data-act='det-proy']")
+        self.assertTrue(pg.evaluate(abierto))
+        # un repintado normal de la cabecera (cualquier cambio de archivos o trabajos), con el foco fuera
+        pg.evaluate("() => { document.activeElement.blur(); renderAudioHead(curAudio()); }")
+        pg.wait_for_timeout(300)  # el `toggle` del <details open> recién pintado
+        self.assertTrue(pg.evaluate(abierto))  # en esta reunión sigue abierto
+        self.assertIsNone(pg.evaluate(guardado))
+        self.ir(pg, otra)
+        self.assertFalse(pg.evaluate(abierto))  # en las demás, no
+        # abierto a mano (se recuerda), clic en el proyecto y plegado a mano: se recuerda plegado
+        pg.click("#aHead .pdet summary")
+        self.assertEqual(pg.evaluate(guardado), "1")
+        pg.click("#aHead [data-act='det-proy']")
+        pg.click("#aHead .pdet summary")
+        self.assertEqual(pg.evaluate(guardado), "0")
+        pg.evaluate("() => { document.activeElement.blur(); renderAudioHead(curAudio()); }")
+        pg.wait_for_timeout(300)
+        self.assertFalse(pg.evaluate(abierto))
+        self.ir(pg, una)
+        self.assertFalse(pg.evaluate(abierto))
+        # con el teclado en su título también se recuerda
+        pg.focus("#aHead .pdet summary")
+        pg.keyboard.press("Enter")
+        self.assertEqual(pg.evaluate(guardado), "1")
+        self.assertEqual(errores, [])
+
+    def test_lateral_con_teclado_no_quita_el_foco(self):
+        """Revisión 2, N3: en ancha, abrir el lateral con Ctrl+\\ llevaba el foco a «Hoy» y lo que escribías en Notas
+        acababa navegando. En estrecha (se abre encima) el foco entra en el lateral y vuelve a donde estaba al
+        cerrarlo, con Escape o con Ctrl+\\ (N8: se quedaba en <body>)."""
+        for w, h in ((1280, 800), (900, 600)):
+            rel = self.nueva(f"R lateral {w}", {"h1": 10.0})  # cada una con sus notas
+            pg, errores = self.pagina(rel, w, h)
+            pg.click("#aTabs [data-tab='notes']")
+            pg.wait_for_selector("#aNotes .nt", timeout=10000)
+            pg.click("#aNotes .nt")
+            pg.keyboard.type("ab")
+            en_notas = "!!document.activeElement.closest('#aNotes')"
+            if w == 1280:
+                pg.keyboard.press("Control+Backslash")  # lo pliega
+                self.assertIn("lat-off", pg.evaluate("document.body.className"))
+                pg.keyboard.type("cd")
+                pg.keyboard.press("Control+Backslash")  # lo abre: el foco no se mueve
+                self.assertNotIn("lat-off", pg.evaluate("document.body.className"))
+                self.assertTrue(pg.evaluate(en_notas))
+                pg.keyboard.type("ef")
+                self.assertEqual(pg.evaluate("document.querySelector('#aNotes .nt').textContent"), "abcdef")
+            else:
+                for cerrar in ("Escape", "Control+Backslash"):
+                    pg.keyboard.press("Control+Backslash")  # se abre encima: el foco, al lateral
+                    self.assertIn("lat-sobre", pg.evaluate("document.body.className"))
+                    self.assertTrue(pg.evaluate("!!document.activeElement.closest('#sidebar')"))
+                    pg.keyboard.press(cerrar)
+                    self.assertIn("lat-off", pg.evaluate("document.body.className"), cerrar)
+                    self.assertTrue(pg.evaluate(en_notas), cerrar)  # y vuelve a las notas
+                pg.keyboard.type("cd")
+                self.assertEqual(pg.evaluate("document.querySelector('#aNotes .nt').textContent"), "abcd")
+                # encima, un clic en la reunión en la que ya estás (no cambia la ruta) también lo cierra (N8)
+                pg.click("#btnSide")
+                self.assertIn("lat-sobre", pg.evaluate("document.body.className"))
+                pg.click(f"#tree .trow[data-audio='{rel}']")
+                self.assertIn("lat-off", pg.evaluate("document.body.className"))
+            self.assertEqual(errores, [])
 
     def test_pagina_de_la_reunion_compacta(self):
         """B5 (puntos 13 y 22 del review): el resumen se ve sin bajar a 1500×920 y a 900×600 (antes, y = 805 y 932);
