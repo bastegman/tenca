@@ -828,6 +828,14 @@ class DiarizarPistasTests(unittest.TestCase):
         self.assertTrue(m[(t >= 50) & (t < 80)].all())   # el de la sala, aunque la línea no lo marque
         self.assertFalse(m[(t >= 100) & (t < 160.75)].any())  # el eco (y su cola), no
         self.assertFalse(m[t < 10].any())
+        # con altavoces fuertes el nivelador deja el eco al nivel de los demás: tampoco (por nivel no se distingue; la
+        # simulación con eco a -12 dB pasaba de DER 0,19 a 0,53 y de 6 a 8 personas)
+        dl3 = dl.copy()
+        dl3[(t >= 100) & (t < 160)] = -22
+        self.assertFalse(voices.pasos_micro(dl3, dr, bits)[(t >= 100) & (t < 160.75)].any())
+        # salvo los pasos que la grabadora marcó como tu voz (la puerta de eco sí lo distingue): hablando a la vez
+        bits3 = bits | ((t >= 120) & (t < 125))
+        self.assertTrue(voices.pasos_micro(dl3, dr, bits3)[(t >= 120) & (t < 125)].all())
         # con ruido de fondo alto en el micro (-35 dB), solo lo que pasa de él
         dl2 = np.full(k, -35.0)
         dl2[(t >= 10) & (t < 40)] = -22

@@ -683,11 +683,12 @@ def actividad(x16, paso=pistas.PASO, umbral_db=PISTA_VOZ_DB, trozo_s=60.0):
 
 def pasos_micro(dl, dr, bits=None, bloque_s=30.0, paso=pistas.PASO):
     """bool por paso: lo que el micro recoge que no es eco, para diarizarlo (no para decidir quién es «Tú»: eso lo hace
-    la línea de la grabadora). Pasa de su ruido de fondo (el percentil 10 de cada bloque_s) PISTA_MICRO_SOBRE_DB y de
-    PISTA_MICRO_MIN_DB, salvo que lo que ha sonado en el PC en los últimos 0,75 s pase de -45 dB y el micro vaya 6 dB
-    por debajo (el criterio de pistas.ganancias_eco: es eco). Más los pasos «1» de la línea (bits): su voz hablando a la
-    vez que ellos, que por nivel no se distingue. Así entra también quien está en la sala lejos del micro, que la
-    línea no marca (revisión 1, P1-1: 18 dB por debajo de tu voz, 2 % de sus pasos «1» y 65 de 72 s sin hablante)."""
+    la línea de la grabadora). Con el PC callado (lo que ha sonado en los últimos 0,75 s no pasa de -45 dB: ni eco ni su
+    cola), lo que pasa de su ruido de fondo (el percentil 10 de cada bloque_s) PISTA_MICRO_SOBRE_DB y de
+    PISTA_MICRO_MIN_DB; con el PC sonando, solo los pasos «1» de la línea (bits), que vienen de la puerta de eco de la
+    grabadora: por nivel no se distingue el eco (con altavoces fuertes, el nivelador del micro lo deja al nivel de los
+    demás: medido, DER 0,19 -> 0,53 y 8 personas para 6). Así entra también quien está en la sala lejos del micro, que
+    la línea no marca (revisión 1, P1-1: 18 dB por debajo de tu voz, 2 % de sus pasos «1» y 65 de 72 s sin hablante)."""
     k = len(dl)
     out = np.zeros(k, bool)
     b = max(1, int(bloque_s / paso))
@@ -697,8 +698,7 @@ def pasos_micro(dl, dr, bits=None, bloque_s=30.0, paso=pistas.PASO):
     ref = dr.copy()
     for d in (1, 2):  # lo que ha sonado en los ultimos 0,75 s (la cola del eco)
         ref[d:] = np.maximum(ref[d:], dr[:-d])
-    eco = (ref > pistas.ECO_SOBRE_DB) & (dl < ref + pistas.ECO_MARGEN_DB)
-    out &= ~eco
+    out &= ref <= pistas.ECO_SOBRE_DB
     if bits is not None and len(bits):
         m = min(k, len(bits))
         out[:m] |= bits[:m]
