@@ -9,8 +9,7 @@ import subprocess
 import sys
 import time
 
-from aviso import WINDOWS
-from common import APP_NAME, read_text
+from common import APP_NAME, WINDOWS, read_text
 from rutas import APP_DIR, ROOT, STATIC_DIR, version_file
 
 

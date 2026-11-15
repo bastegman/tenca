@@ -14,8 +14,7 @@ import engines
 import explicar
 import probar
 from ajustes import PROCESADOS, PRUEBA_VOZ_DB, agente_de, procesado_de, proveedor_elegido
-from aviso import WINDOWS
-from common import APP_NAME, ApiError, default_threads, log
+from common import APP_NAME, WINDOWS, ApiError, default_threads, log
 from diagnostico import masked
 from listas import (AJUSTES_CAMBIADOS, LIVE_PRESETS, SIN_AUDIO, _decode_list, check_perfil, list_vocab, perfil_de,
                     update_perfil)

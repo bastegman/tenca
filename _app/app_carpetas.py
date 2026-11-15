@@ -16,12 +16,11 @@ import time
 import calendario
 import engines
 from ajustes import moved_rel, settings_moved
-from aviso import WINDOWS
 from biblioteca import (COMPLETE, DATE_RE, IDIOMA_RE, SIDE_EXTS, Movimientos, carpetas_reunion, dump_notes, parse_notes,
                         temas)
 from carpetas import (FORMATOS_SUBIR, SUBIENDO, backup_dir, display_rel, fecha_subida, fit_meeting_dir, free_dir,
                       limpiar_subidas, move_files, own_meeting_dir, por_reunion, theme_moved, to_recycle_bin)
-from common import APP_NAME, ApiError, clean_name, fold, log, log_exc, read_text, save_text
+from common import APP_NAME, WINDOWS, ApiError, clean_name, fold, log, log_exc, read_text, save_text
 from listas import _norm_dir, find_vocab, has_vocab_dir, list_vocab, perfil_de
 from recording import notify
 from rutas import (ALIASES, ALIASES_LOCK, AUDIO_EXT, DATA_DIR, LINK, LINKS, ROOT, TEXT_EXT, VLINK, _inside, alias_of,

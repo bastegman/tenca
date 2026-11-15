@@ -111,6 +111,36 @@ from app_ajustes import (  # noqa: F401 (fachada: server.X sigue valiendo)
 from app_voces import (  # noqa: F401 (fachada: server.X sigue valiendo)
     Voces)
 from window import Window, set_app_id
+# fachada: lo que server.py importaba antes de partirse (15/11/2026) y ya no usa aqui sigue siendo server.X (tests y
+# ramas que lo parchean o lo leen)
+import contextlib  # noqa: F401,E402
+import copy  # noqa: F401,E402
+import hashlib  # noqa: F401,E402
+import hmac  # noqa: F401,E402
+import itertools  # noqa: F401,E402
+import json  # noqa: F401,E402
+import queue  # noqa: F401,E402
+import re  # noqa: F401,E402
+import secrets  # noqa: F401,E402
+import struct  # noqa: F401,E402
+import unicodedata  # noqa: F401,E402
+import urllib.error  # noqa: F401,E402
+import urllib.request  # noqa: F401,E402
+import uuid  # noqa: F401,E402
+from collections import Counter  # noqa: F401,E402
+from datetime import datetime, timedelta  # noqa: F401,E402
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer  # noqa: F401,E402
+from urllib.parse import parse_qs, urlparse  # noqa: F401,E402
+
+import aprender  # noqa: F401,E402
+import explicar  # noqa: F401,E402
+import plan as grabar_plan  # noqa: F401,E402
+import probar  # noqa: F401,E402
+import salidas  # noqa: F401,E402
+import window as window_mod  # noqa: F401,E402
+from bandeja import Bandeja  # noqa: F401,E402
+from common import local_opener, read_token  # noqa: F401,E402
+from recording import disco_al_empezar, teams_mic_estado  # noqa: F401,E402
 
 
 SERVER, WINDOW = None, None  # los pone main(): el servidor HTTP y la ventana propia (None si se abre en Edge)
@@ -130,20 +160,13 @@ PARTES = ("ajustes", "apagado", "api", "app_ajustes", "app_carpetas", "app_direc
           "aprendido", "biblioteca", "carpetas", "diagnostico", "inicio_windows", "instancia",
           "listas", "paquete", "rutas", "trabajos")
 COMPARTIDAS = ("PORT", "URL", "DATA_DIR", "SERVER", "WINDOW", "COMPLETE")  # COMPLETE: lo crea App()
-# no APP_DIR (los tests lo cambian); con realpath: ejecutado como script, __file__ es la ruta tal cual y el de
-# los modulos importados, la de sys.path[0], que en macOS y Linux viene sin enlaces (/var -> /private/var)
-_AQUI = os.path.normcase(os.path.dirname(os.path.realpath(__file__)))
 
 
 def _partes():
-    """Los modulos de PARTES ya importados (los de esta carpeta: nunca otro del mismo nombre)."""
-    out = []
-    for n in PARTES:
-        m = sys.modules.get(n)
-        f = getattr(m, "__file__", None)
-        if m is not None and f and os.path.normcase(os.path.dirname(os.path.realpath(f))) == _AQUI:
-            out.append(m)
-    return out
+    """Los modulos de PARTES, tal como los importa server.py (por su nombre: sys.modules[n] es el mismo que lee
+    `from n import …` arriba). Sin comparar carpetas: con un enlace en la ruta, __file__ de server.py y el de sus
+    partes no coinciden (/var y /private/var) y un modulo se quedaria fuera sin decir nada."""
+    return [sys.modules[n] for n in PARTES if n in sys.modules]
 
 
 def _compartir(*nombres):
@@ -528,8 +551,8 @@ def main():
     WINDOW = None if no_browser else Window(ui_url(), DATA_DIR, ico,
                                             hide_from_capture=lambda: ocultar_al_compartir(Handler.app.settings.get()),
                                             tray=make_tray(ico))
-    inicio_windows_al_dia()
     _compartir("WINDOW")
+    inicio_windows_al_dia()
     if WINDOW is not None and WINDOW.available:
         # la ventana propia exige el hilo principal: el servidor pasa a un hilo y aqui se bloquea hasta apagar
         threading.Thread(target=srv.serve_forever, daemon=True, name="http").start()

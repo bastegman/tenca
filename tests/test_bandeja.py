@@ -557,7 +557,7 @@ class ArrancarConWindowsTests(unittest.TestCase):
     def test_main_lo_pone_al_dia_al_arrancar(self):
         src = codigo_del_servidor()
         main = src[src.index("def main():"):]
-        self.assertRegex(main, r"tray=make_tray\(ico\)\)\n\s+inicio_windows_al_dia\(\)")
+        self.assertRegex(main, r"tray=make_tray\(ico\)\)\n\s+_compartir\(\"WINDOW\"\)\n\s+inicio_windows_al_dia\(\)")
 
     def test_el_desinstalador_quita_la_copia_de_la_carpeta_inicio(self):
         with open(os.path.join(APP, "desinstalar.ps1"), encoding="utf-8-sig") as f:

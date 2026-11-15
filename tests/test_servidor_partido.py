@@ -87,28 +87,46 @@ class CompartidasTests(unittest.TestCase):
         self.assertEqual(ast.unparse(guarda.test), "__name__ != '__main__'")
 
     def test_cada_asignacion_global_se_comparte(self):
-        """En server.py, cada asignacion a una de COMPARTIDAS dentro de una funcion (main(), App.__init__) va seguida,
-        en su bloque, de un _compartir con ese nombre."""
+        """En server.py, cada asignacion a una de COMPARTIDAS dentro de una funcion (main(), App.__init__), tambien en
+        tupla o con +=, va seguida en su bloque de un _compartir con ese nombre, y entre las dos solo puede haber otras
+        asignaciones de COMPARTIDAS (revision 1: mientras dure lo de en medio, las partes verian el valor viejo)."""
         with open(os.path.join(APP, "server.py"), encoding="utf-8") as f:
             arbol = ast.parse(f.read())
+        compartidas = set(server.COMPARTIDAS)
+
+        def asignados(st):
+            dianas = st.targets if isinstance(st, ast.Assign) else [st.target] if isinstance(st, ast.AugAssign) else []
+            return {x.id for t in dianas for x in ast.walk(t) if isinstance(x, ast.Name)} & compartidas
+
+        def compartir(st):
+            if isinstance(st, ast.Expr) and isinstance(st.value, ast.Call) and getattr(st.value.func, "id", "") \
+                    == "_compartir":
+                return {a.value for a in st.value.args if isinstance(a, ast.Constant)}
+            return None
+
         vistas = []
         for fn in [n for n in ast.walk(arbol) if isinstance(n, ast.FunctionDef)]:
-            globales = {x for n in ast.walk(fn) if isinstance(n, ast.Global) for x in n.names}
-            if not globales & set(server.COMPARTIDAS):
+            globales = {x for n in ast.walk(fn) if isinstance(n, ast.Global) for x in n.names} & compartidas
+            if not globales:
                 continue
             for bloque in [n for n in ast.walk(fn) if isinstance(getattr(n, "body", None), list)]:
                 for cuerpo in (bloque.body, getattr(bloque, "orelse", []) or []):
                     for i, st in enumerate(cuerpo):
-                        nombres = {t.id for t in getattr(st, "targets", []) if isinstance(t, ast.Name)}
-                        nombres &= set(server.COMPARTIDAS) & globales
+                        nombres = asignados(st) & globales
                         if not nombres:
                             continue
                         vistas.append((fn.name, st.lineno))
-                        despues = [a.value for c in cuerpo[i + 1:] if isinstance(c, ast.Expr)
-                                   and isinstance(c.value, ast.Call) and getattr(c.value.func, "id", "") == "_compartir"
-                                   for a in c.value.args if isinstance(a, ast.Constant)]
-                        self.assertTrue(nombres <= set(despues), f"{fn.name}(), línea {st.lineno}: falta "
-                                        f"_compartir{tuple(nombres)}")
+                        hechos = set()
+                        for sig in cuerpo[i + 1:]:
+                            c = compartir(sig)
+                            if c is not None:
+                                hechos |= c
+                                if nombres <= hechos:
+                                    break
+                            elif not asignados(sig):
+                                break
+                        self.assertTrue(nombres <= hechos, f"{fn.name}(), línea {st.lineno}: falta _compartir"
+                                        f"{tuple(sorted(nombres - hechos))} antes de seguir")
         # main(): PORT, URL, DATA_DIR, SERVER y las tres de WINDOW; App.__init__: COMPLETE
         self.assertGreaterEqual(len([v for v in vistas if v[0] == "main"]), 7)
         self.assertIn("__init__", [v[0] for v in vistas])
@@ -167,8 +185,13 @@ class NadaNuevoEnServerTests(unittest.TestCase):
     (y el modulo, en server.PARTES). server.py solo lleva la fachada, main() y la cabeza de App (__init__ y lo que usa
     App._movil_*); lo que sale de aqui se quita tambien de estas listas, que solo pueden encoger."""
 
-    NIVEL_SUPERIOR = {"SERVER", "WINDOW", "PARTES", "COMPARTIDAS", "_AQUI", "_partes", "_compartir", "_Fachada", "App",
-                      "arg", "main"}
+    NIVEL_SUPERIOR = {"SERVER", "WINDOW", "PARTES", "COMPARTIDAS", "_partes", "_compartir", "_Fachada", "App", "arg",
+                      "main"}
+    # lo que server.py importaba antes de partirse y ya no usa: sigue siendo server.X (revision 1, H4)
+    IMPORTADOS_ANTES = ("contextlib copy hashlib hmac itertools json queue re secrets struct unicodedata urllib uuid "
+                        "Counter datetime timedelta BaseHTTPRequestHandler ThreadingHTTPServer parse_qs urlparse "
+                        "aprender explicar grabar_plan probar salidas window_mod Bandeja local_opener read_token "
+                        "disco_al_empezar teams_mic_estado").split()
     APP = {"rec_body", "rec_cadena", "cortes", "__init__", "rec_toggle", "_reparar_proveedor", "_migrar_nombre_raiz",
            "_movil_lock", "_movil_rec", "_movil_ultima", "_movil_red", "_movil_datos", "_movil_parar", "movil_red",
            "movil_abrir", "movil_datos", "movil_estado", "movil_cerrar"}
@@ -214,6 +237,31 @@ class NadaNuevoEnServerTests(unittest.TestCase):
                     if x.args[0].value not in vars(sys.modules[n]):
                         faltan.append(f"{n}: {x.args[0].value}")
         self.assertEqual(faltan, [])
+
+    def test_server_conserva_lo_que_importaba(self):
+        self.assertEqual([k for k in self.IMPORTADOS_ANTES if not hasattr(server, k)], [])
+
+    def test_ningun_global_en_las_partes(self):
+        """Solo server.py reasigna variables de modulo con `global` (y las comparte): una parte que lo hiciera tendria
+        un valor que server y las demas no ven."""
+        con = []
+        for n in server.PARTES:
+            with open(os.path.join(APP, n + ".py"), encoding="utf-8") as f:
+                con += [f"{n}:{x.lineno}" for x in ast.walk(ast.parse(f.read())) if isinstance(x, ast.Global)]
+        self.assertEqual(con, [])
+
+    def test_las_partes_importan_de_donde_server(self):
+        """Un nombre que server.py importa de fuera de PARTES (common, recording…) las partes lo importan del mismo
+        sitio (revision 1, H1: WINDOWS de aviso en vez de common; el mismo bool, pero cargaba aviso.py)."""
+        def origenes(nombre):
+            with open(os.path.join(APP, nombre + ".py"), encoding="utf-8") as f:
+                arbol = ast.parse(f.read())
+            return {(a.asname or a.name): n.module for n in arbol.body if isinstance(n, ast.ImportFrom)
+                    and n.module not in server.PARTES for a in n.names}
+        de_server = origenes("server")
+        distintos = [f"{p}: {k} de {m} (server: {de_server[k]})" for p in server.PARTES
+                     for k, m in origenes(p).items() if k in de_server and de_server[k] != m]
+        self.assertEqual(distintos, [])
 
     def test_ningun_modulo_importa_server(self):
         """Ejecutado como la app, server es __main__: `import server` cargaria una segunda copia de todo."""
