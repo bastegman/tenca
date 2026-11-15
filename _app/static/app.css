@@ -455,7 +455,11 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px;
 .toast-tec { margin-top: 4px; font: 11.5px/1.45 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 140px; overflow-y: auto; user-select: text; }
 /* «Avisos» en la Cola: los últimos de error, para releerlos */
 .popover .ph.ph-avisos { position: static; border-top: 1px solid var(--line); }
-body:has(#jobsPanel:not(.hidden)) .toasts { z-index: 35; }  /* con la Cola abierta, por debajo de ella (z-index 40) */
+/* con la Cola abierta, los avisos por debajo de ella (z-index 40), salvo con un diálogo encima (50): ahí, debajo de su
+   fondo, no se verían. Y con un diálogo, «N avisos más · Ver en la Cola» no sale: la Cola se abriría debajo de él
+   (revisión 2, P1-A); vuelve al cerrarlo */
+body:has(#jobsPanel:not(.hidden)):not(:has(#modal:not(.hidden))) .toasts { z-index: 35; }
+body:has(#modal:not(.hidden)) #toastMas { display: none; }
 .aviso-item { padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 12.5px; line-height: 1.5; }
 .aviso-item:last-child { border-bottom: 0; }
 .aviso-item .t { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }

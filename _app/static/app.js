@@ -467,6 +467,13 @@ function franja(id, html) {
 }
 function renderLatido() {
   const caido = S.latido.fallos >= LATIDO_FALLOS;
+  if (S.latido.fallos) S.latido.huboFallo = true;
+  else if (S.latido.huboFallo) {  // vuelve a responder: fuera los avisos de error que decían que no (revisión 2, P2-4)
+    S.latido.huboFallo = false;
+    const no = esc(`${APP_NAME} no responde`);
+    const viejos = $$('#toasts .toast.pila').filter(t => (t.dataset.k || '').startsWith(no));
+    if (viejos.length) { viejos.forEach(t => t.remove()); pilaOrden(); }
+  }
   franja('latido', caido ? `<span><b>${esc(APP_NAME)} no responde</b>${S.latido.grabando ? ': puede que no se esté grabando' : ''}</span>`
     + '<span class="sp"></span><button class="btn sm" type="button" data-franja-act="reabrir">Reabrir</button>' : '');
 }
@@ -2063,7 +2070,8 @@ function avisosHtml() {
 $('#btnJobs').onclick = e => { e.stopPropagation(); const p = $('#jobsPanel'); p.classList.toggle('hidden'); if (!p.classList.contains('hidden')) renderJobsPanel(); };
 $('#jobsPanel').addEventListener('click', async e => {
   // el botón de explicar.py de un error (cfgAccionHtml) lo atiende document (configurar.js): sin parar el clic aquí
-  if (!e.target.closest('[data-cfg-accion]')) e.stopPropagation();
+  if (e.target.closest('[data-cfg-accion]')) return setTimeout(() => $('#jobsPanel').classList.add('hidden'));
+  e.stopPropagation();
   const b = e.target.closest('[data-jact]'), g = e.target.closest('[data-jgo]');
   if (b && b.dataset.jact === 'cancel') { await api('/api/cancel', { id: b.dataset.id }); pollJobs(true); }
   else if (b && b.dataset.jact === 'clear') { await api('/api/jobs/clear', {}); pollJobs(true); }
@@ -2908,17 +2916,17 @@ function shutdownScreen() {
    va solo, a los 9 s. Los demás avisos, a los 4 s. */
 const TOAST_X = '<button type="button" class="toast-x" aria-label="Cerrar este aviso" title="Cerrar">✕</button>';
 const PILA_MAX = 10, AVISOS_MAX = 20, AVISOS_CLAVE = 'tenca.avisos';
-const CARGA = Date.now();  // esta carga de la página: lo que se vuelve a anunciar al recargar no cuenta como otra vez
 function avisosLista() {
   if (!S.avisos) { try { S.avisos = JSON.parse(sessionStorage.getItem(AVISOS_CLAVE) || '[]'); } catch { S.avisos = []; } }
   return S.avisos;
 }
-function apuntarAviso(html) {
+/* estado: un aviso de los que no caducan (keep: la grabación cortada, el disco…), que se vuelve a anunciar al recargar
+   la página; si ya está en la lista, no se apunta otra vez (revisiones 1 y 2, P2-6 y P2-2). Lo demás que se repite
+   seguido suma «N veces» */
+function apuntarAviso(html, estado) {
   const l = avisosLista(), u = l[l.length - 1], t = Date.now();
-  if (u && u.html === html) {
-    if (u.c !== CARGA) return;  // (la grabación cortada se anuncia en cada carga: no es «2 veces», revisión 1, P2-6)
-    u.t = t; u.n = (u.n || 1) + 1;
-  } else l.push({ html, t, c: CARGA });
+  if (estado && l.some(x => x.html === html)) return;
+  if (u && u.html === html) { u.t = t; u.n = (u.n || 1) + 1; } else l.push({ html, t });
   S.avisos = l.slice(-AVISOS_MAX);
   try { sessionStorage.setItem(AVISOS_CLAVE, JSON.stringify(S.avisos)); } catch { /* sin almacenamiento */ }
   if (!$('#jobsPanel').classList.contains('hidden')) renderJobsPanel();
@@ -2956,7 +2964,7 @@ function pilaOrden() {
 }
 function toast(html, kind = '', onclick, keep) {
   const err = kind === 'err', fijo = keep === true || (err && keep !== false), box = $('#toasts');
-  if (err) { html += detalleInternoHtml(html); apuntarAviso(html); }
+  if (err) { html += detalleInternoHtml(html); apuntarAviso(html, keep === true); }
   if (fijo) $$('.toast.fijo', box).forEach(t => { if (t.dataset.k === html) t.remove(); });
   const el = document.createElement('div');
   el.className = 'toast ' + kind + (fijo ? ' fijo' : '') + (keep === true ? ' keep' : fijo ? ' pila' : '');
@@ -2967,9 +2975,10 @@ function toast(html, kind = '', onclick, keep) {
     const x = e.target.closest('.toast-x');
     if (keep !== true && x) return quitar();
     if (keep !== true && e.target.closest('button, a, summary, details, input, select, textarea')) return;
-    const dialogo = keep !== true && !$('#modal').classList.contains('hidden');
-    if (dialogo && fijo) return;  // con un diálogo encima no se abre nada detrás (el clic iba a lo tapado)
-    if (!dialogo) onclick && onclick();
+    // con un diálogo encima no se abre nada detrás (el clic iba a lo tapado): el aviso con destino se queda para
+    // después; el que no tiene, se cierra como siempre (revisión 2, P2-1)
+    if (keep !== true && !$('#modal').classList.contains('hidden')) return onclick && fijo ? undefined : quitar();
+    onclick && onclick();
     quitar();
   };
   box.append(el);
@@ -3049,7 +3058,7 @@ async function init() {
     await loadVocab();  // temas (<proyecto>/Vocabulario/*.txt…) para los selectores
   } catch (err) {
     clearInterval(lento);
-    main.innerHTML = `<div class="page"><div class="card empty">No se puede conectar con el servidor de la app.<br>Ábrela con el acceso directo <b>${esc(APP_NAME)}</b> del escritorio.<br><br><span class="muted">${esc(err.message)}</span></div></div>`;
+    main.innerHTML = `<div class="page"><div class="card empty">No se puede conectar con el servidor de la app.<br>Ábrela con el acceso directo <b>${esc(APP_NAME)}</b> del escritorio.<br><br><span class="muted">${esc(err.message)}${err.detalle ? `: ${esc(err.detalle)}` : ''}</span></div></div>`;
     return;
   }
   route();
