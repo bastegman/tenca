@@ -272,12 +272,12 @@ def make_variant(kind, base):
                     "background_color": "#ffffff", "theme_color": "#ffffff", "icons": icons}
         with open(os.path.join(static, "manifest.webmanifest"), "w", encoding="utf-8") as f:
             json.dump(manifest, f)
-        server = os.path.join(app, "server.py")
-        with open(server, encoding="utf-8") as f:
+        rutas = os.path.join(app, "rutas.py")  # MIME (salio de server.py al partirlo, 15/11/2026)
+        with open(rutas, encoding="utf-8") as f:
             src = f.read()
         src = src.replace('".ico": "image/x-icon"}',
                           '".ico": "image/x-icon", ".webmanifest": "application/manifest+json"}')
-        with open(server, "w", encoding="utf-8") as f:
+        with open(rutas, "w", encoding="utf-8") as f:
             f.write(src)
     with open(index, "w", encoding="utf-8") as f:
         f.write(html)

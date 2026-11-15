@@ -17,7 +17,7 @@ import urllib.request
 import zipfile
 from unittest import mock
 
-from support import APP, REPO, server
+from support import APP, REPO, codigo_del_servidor, server
 
 STATIC = os.path.join(APP, "static")
 # el icono por su extensión, no por su nombre (chuleta.ico en esta rama, tenca.ico tras el renombrado)
@@ -79,7 +79,7 @@ class FuentesTests(unittest.TestCase):
     def test_se_sirven_como_font_woff2(self):
         self.assertEqual(server.MIME[".woff2"], "font/woff2")
         # la última línea del diccionario no cambia: scripts/lookfeel_spike.py la busca para añadir .webmanifest
-        self.assertIn('".png": "image/png", ".ico": "image/x-icon"}', read(APP, "server.py"))
+        self.assertIn('".png": "image/png", ".ico": "image/x-icon"}', codigo_del_servidor())
         srv = server.Server(("127.0.0.1", 0), server.Handler)
         port = srv.server_address[1]
         saved = (server.PORT, server.URL, server.Handler.app, getattr(server.Handler, "token", None))

@@ -22,6 +22,18 @@ import engines  # noqa: E402
 import live  # noqa: E402
 
 PATH_NAMES = ("ROOT", "APP_DIR", "STATIC_DIR", "EXPORT_DIR", "DATA_DIR")
+# server.py se partio en modulos el 15/11/2026: server.py (la fachada, con main() y App) y los que salieron de el.
+# Los tests que miran el codigo («la ruta X esta registrada», «main() hace Y») leen todos juntos.
+PARTES_DEL_SERVIDOR = ("server.py", "diagnostico.py", "inicio_windows.py", "rutas.py")
+
+
+def codigo_del_servidor():
+    """El texto de server.py y de los modulos que salieron de el, uno detras de otro."""
+    out = []
+    for n in PARTES_DEL_SERVIDOR:
+        with open(os.path.join(APP, n), encoding="utf-8") as f:
+            out.append(f.read())
+    return "\n".join(out)
 
 
 def app_modules():
@@ -142,4 +154,4 @@ def bare_jobs(jobs):
 
 
 __all__ = ["server", "engines", "live", "TempTree", "patched_paths", "wav_bytes", "srt_text", "FakeJob",
-           "bare_jobs", "REPO", "APP"]
+           "bare_jobs", "REPO", "APP", "PARTES_DEL_SERVIDOR", "codigo_del_servidor"]

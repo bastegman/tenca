@@ -319,6 +319,13 @@ def bench_biblioteca(n_audios, reps):
     server.LINKS.clear()
     server.ROOT, server.APP_DIR, server.DATA_DIR = root, os.path.join(root, "_app"), data_dir
     server.STATIC_DIR = os.path.join(root, "_app", "static")
+    app_dir = os.path.dirname(os.path.abspath(server.__file__))
+    for m in list(sys.modules.values()):  # server.py partido en modulos: cada uno tiene su copia (tests/support.py)
+        f = getattr(m, "__file__", None)
+        if m is not server and f and os.path.dirname(os.path.abspath(f)) == app_dir:
+            for k in ("ROOT", "APP_DIR", "DATA_DIR", "STATIC_DIR"):
+                if hasattr(m, k):
+                    setattr(m, k, getattr(server, k))
     server.COMPLETE = server.Complete(os.path.join(data_dir, "completas.json"))
     out = {}
     try:
