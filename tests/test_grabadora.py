@@ -68,6 +68,8 @@ class GrabadoraFallosTests(unittest.TestCase):
         "pasajero": dict(env={"FAKE_ESCRITURA": "1-3"}, stop_s=9),  # segundos desde que empieza a escribir audio
         "lleno": dict(env={"FAKE_ESCRITURA": "1.5-", "FAKE_RETRY_S": "1.5"}, stop_s=None),
         "poco": dict(env={"FAKE_DISCO_MB": "100"}, stop_s=3),
+        # parar mientras falla la escritura: no se tira lo que espera en memoria (revision 1, P2-1)
+        "parar": dict(env={"FAKE_ESCRITURA": "0.5-4"}, stop_s=4),
     }
 
     @classmethod
@@ -139,6 +141,14 @@ class GrabadoraFallosTests(unittest.TestCase):
         self.assertIsNotNone(info["data_size"])  # reescribir la cabecera no necesita sitio nuevo
         # lo escrito antes del fallo (empieza a escribir ~1 s despues de arrancar: LAT, y el arranque del proceso)
         self.assertGreater(info["data_size"] / recorder.WAV_BYTES_S, 0.5)
+
+    def test_parar_mientras_falla_no_tira_lo_pendiente(self):
+        r = self.res["parar"]
+        self.assertEqual(r["rc"], 0, r["log"])
+        done = [x for x in r["lines"] if x.get("done")][-1]
+        info = live.wav_info(r["wav"])
+        self.assertAlmostEqual(info["data_size"] / recorder.WAV_BYTES_S, done["t"], delta=0.01)
+        self.assertNotIn("no se han podido escribir", r["log"])
 
     def test_poco_disco_se_dice(self):
         r = self.res["poco"]
@@ -255,13 +265,16 @@ class CorteServidorTests(TempTree):
             return []
 
     def abiertas(self):
-        return self.a.cortes._leer()
+        return [os.path.normcase(os.path.normpath(p)) for p in self.a.cortes._leer()]
+
+    def ruta(self, rel):  # como abiertas(): en Windows, rel lleva «/» y la ruta absoluta «\\»
+        return os.path.normcase(os.path.normpath(os.path.join(self.root, rel)))
 
     def test_se_corta_se_avisa_y_sigue_en_una_continuacion(self):
         self.ctl_(modos=["muere", "vive"])
         r = self.start()
         cut_abs = os.path.join(self.root, r["path"])
-        self.assertEqual(self.abiertas(), [cut_abs])  # apuntada antes de grabar: si Tenca se cae, se repara
+        self.assertEqual(self.abiertas(), [self.ruta(r["path"])])  # apuntada antes de grabar: si Tenca se cae
         self.assertTrue(esperar(lambda: any(c.get("continuacion") for c in self.a.cortes.estado())
                                 and self.a.rec.path.endswith("(continuación).wav") and self.a.rec.status),
                         self.a.cortes.estado())
@@ -276,7 +289,7 @@ class CorteServidorTests(TempTree):
         self.assertEqual(server.rel_of(self.a.rec.path), cont)
         self.assertIn(cont, self.a.jobs.claimed)
         self.assertNotIn(r["path"], self.a.jobs.claimed)  # la reserva de la cortada, suelta
-        self.assertEqual(self.abiertas(), [os.path.join(self.root, cont)])
+        self.assertEqual(self.abiertas(), [self.ruta(cont)])
         # la cortada: cabecera cerrada, «Tú» guardado y la reunion marcada
         self.assertIsNotNone(live.wav_info(cut_abs)["data_size"])
         side = voices.read_sidecar(voices.sidecar_path(cut_abs))
@@ -326,6 +339,41 @@ class CorteServidorTests(TempTree):
                          (False, "el disco está lleno", False))
         time.sleep(0.6)
         self.assertEqual(len(self.arranques()), 1)
+
+    def test_el_micro_silenciado_sigue_silenciado_en_la_continuacion(self):
+        ordenes = os.path.join(self.tmp, "ordenes.txt")
+        self.ctl_(modos=["muere", "vive"], muere_s=1.5, ordenes=ordenes)
+        self.start()
+        time.sleep(0.5)
+        self.a.rec_mic({"mute": True})
+        self.assertTrue(esperar(lambda: self.a.rec.path.endswith("(continuación).wav") and self.a.rec.alive()
+                                and self.a.rec.status.get("mic_muted")))
+
+        def leidas():
+            return open(ordenes, encoding="utf-8").read() if os.path.isfile(ordenes) else ""
+        self.assertTrue(esperar(lambda: "(continuación).wav\tmute" in leidas()), leidas())
+
+    def test_parar_en_los_2_s_antes_de_la_continuacion(self):
+        self.ctl_(modos=["muere", "vive"])
+        with mock.patch.object(recording.Cortes, "REINTENTO_S", 1.5):
+            r = self.start()
+            self.assertTrue(esperar(lambda: self.a.rec_status({}).get("cortada", {}).get("sigue")))
+            res = self.a.rec_stop({})  # antes: «No hay ninguna grabación en marcha» y seguía grabando igual
+            self.assertEqual(res["path"], r["path"])
+            time.sleep(2.0)
+        self.assertEqual(len(self.arranques()), 1)
+        c = self.a.cortes.estado()[-1]
+        self.assertEqual((c["sigue"], c["error"], c["continuacion"]), (False, "parada a mano", None))
+        self.assertFalse(self.a.rec_status({})["recording"])
+
+    def test_la_continuacion_no_se_pide_desde_fuera(self):
+        # «_continuacion» en el cuerpo de /api/rec/start ya no vale: graba donde dice la carpeta, no en otro sitio
+        self.ctl_(modos=["vive"])
+        fuera = os.path.join(self.tmp, "fuera")
+        os.makedirs(fuera)
+        r = self.start(_continuacion={"dir": fuera, "intentos": 0, "nombre": "x"})
+        self.assertTrue(r["path"].startswith("Alfa/"), r)
+        self.assertEqual(os.listdir(fuera), [])
 
     def test_parar_a_mano_no_es_un_corte(self):
         self.ctl_(modos=["vive"])
@@ -381,6 +429,25 @@ class CorteServidorTests(TempTree):
         self.assertIn("No queda sitio en el disco", c["error"])
         self.assertEqual(len(self.arranques()), 1)
         self.assertTrue(any(t == "✖ No se ha podido seguir grabando" for t, b in self.avisos), self.avisos)
+
+
+class CortadaPendienteTests(unittest.TestCase):
+    def test_muerta_sin_apuntar_ya_es_cortada(self):
+        # el proceso ya no esta y el hilo de lectura aun no ha apuntado el corte: rec_status ya no dice «guardada»
+        import types
+        import directo_avisos
+        a = server.App.__new__(server.App)
+        a.monitor, a.meeting, a.parada_auto, a.siguiente = None, None, None, None
+        a._siguiente_pub = lambda: None
+        a.fin_llamada = directo_avisos.FinDeLlamada()
+        a.__dict__["_cortes"] = recording.Cortes(tempfile.mkdtemp(prefix="tenca-cortes-"))
+        self.addCleanup(shutil.rmtree, a.cortes.file.rsplit(os.sep, 1)[0], True)
+        a.rec = types.SimpleNamespace(path=os.path.join(server.ROOT, "x.wav"), alive=lambda: False,
+                                      on_end=lambda r: None, stopping=False)
+        st = a.rec_status({})
+        self.assertEqual((st["recording"], st["cortada"]["pendiente"]), (False, True))
+        a.rec.stopping = True  # parada pedida: no es un corte
+        self.assertNotIn("cortada", a.rec_status({}))
 
 
 class UltimaLineaTests(unittest.TestCase):
@@ -555,6 +622,33 @@ class MicLevelerTests(unittest.TestCase):
                 # ni mas de 2 dB por debajo de antes ni del objetivo (antes, el eco inflaba la ganancia y su voz
                 # quedaba por encima del objetivo: eso no cuenta como que baje)
                 self.assertGreater(r["nuevo"]["voz"], min(r["viejo"]["voz"], recorder.TARGET_DB) - 2.0, r)
+
+    def test_la_reunion_que_sube_de_golpe_no_se_toma_por_su_voz(self):
+        # revision 1, P1-1: el usuario callado, un remoto flojo 20 s y luego otro 12 dB mas fuerte (o un aviso)
+        T = 40
+        n = T * SR
+        t = np.arange(n) / SR
+        v = voz(T, 120, 1) * _turnos(t)
+        otros = np.where(t < 20, _norm(v, -32.0), _norm(v, -20.0)).astype(np.float32)
+        d = int(0.03 * SR)
+        eco = np.zeros(n, np.float32)
+        eco[d:] = otros[:-d] * 10 ** (-22 / 20)
+        gm, _ = _simular(T, otros, np.zeros(n, np.float32), eco, True)
+        self.assertAlmostEqual(20 * math.log10(gm[-1]), recorder.MIC_PRUDENTE_DB, places=3)  # antes: +18 dB
+
+    def test_la_reunion_que_no_calla_y_el_habla_casi_siempre(self):
+        # revision 1, P1-2: musica continua (o el ruido de fondo de alguien) y el habla el 85 % desde el principio
+        r = _caso(40, lambda t: np.ones_like(t), lambda t: ((t % 4) < 3.4).astype(float), -50.0, -42.0, musica=True)
+        self.assertGreater(r["nuevo"]["voz"], min(r["viejo"]["voz"], recorder.TARGET_DB) - 2.0, r)
+
+    def test_un_nan_no_rompe_la_mezcla(self):
+        # revision 1, P2-3: con una muestra NaN del micro, la ganancia quedaba en NaN y la mezcla entera tambien
+        lev = recorder.MicLeveler(*recorder.GAIN_RANGE["mic"])
+        x = np.repeat(_norm(voz(6, 180, 2), -30.0)[:, None], 2, 1)
+        x[5 * SR, 0] = np.nan
+        for i in range(0, len(x) - B + 1, B):
+            lev(x[i:i + B].copy())
+        self.assertTrue(math.isfinite(lev.gain) and math.isfinite(lev.level))
 
     def test_una_tos_no_la_hunde(self):
         tos = lambda t: (0.5 * np.sin(2 * np.pi * 300 * t) * ((t >= 20) & (t < 20.3))).astype(np.float32)  # noqa

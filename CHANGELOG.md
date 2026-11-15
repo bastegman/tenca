@@ -34,10 +34,13 @@ Puntos 1 y 6 de la revisión del 14/11/2026. Rama `grabadora`.
   crecen se cierran y se dice («Se recuperó la grabación X, cortada a las hh:mm»). Solo las que Tenca apuntó al empezar
   a grabar: nunca un WAV de otro programa que siga grabando.
 - **Voces dobles con altavoces.** El nivelador del micro tomaba el eco de la reunión por tu voz entre dos frases tuyas
-  y lo subía hasta +18 dB: cada voz de los demás quedaba dos veces casi igual de fuerte. Ahora solo aprende de tu voz
-  (con la reunión callada, o claramente por encima de lo que el micro recoge cuando suena), baja despacio mientras
-  suena la reunión, ignora los golpes cortos (una tos) y empieza con una ganancia prudente. Medido con señal
-  sintética: el eco pasa de 0/−2,5 dB a −10/−15 dB frente a la voz directa, y tu voz se queda donde estaba.
+  y lo subía hasta +18 dB: cada voz de los demás quedaba dos veces casi igual de fuerte. Ahora aprende solo de lo que
+  entra por el micro con la reunión callada, ignora los golpes cortos (una tos) y empieza con una ganancia prudente;
+  si la reunión no calla nunca (música, un vídeo, ruido de fondo), aprende como antes pero baja despacio. Medido con
+  señal sintética: el eco pasa de 0/−2,5 dB a −10/−15 dB frente a la voz directa (también si otro habla de golpe más
+  fuerte, o con un altavoz Bluetooth), y tu voz se queda donde estaba.
+- Al parar con escrituras pendientes se siguen intentando hasta 8 s; con el micro silenciado, la continuación también
+  lo va; «Parar» en los 2 s antes de la continuación la cancela.
 
 ### Hoy, con un mes de agenda de Outlook (09/11/2026)
 

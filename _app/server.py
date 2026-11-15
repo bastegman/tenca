@@ -5352,6 +5352,9 @@ class App:
         c = next((x for x in reversed(out["cortes"]) if x["tipo"] == "cortada"), None)
         if not out["recording"] and r and c and c["path"] == rel_of(r.path):
             out["cortada"] = c  # la ultima grabacion no se paro: se corto (no es «Grabación guardada»)
+        elif not out["recording"] and r and r.path and getattr(r, "on_end", None) and not getattr(r, "stopping", True):
+            # el proceso ya no esta y aun no se ha apuntado el corte (se esta leyendo lo ultimo): ya es un corte
+            out["cortada"] = {"tipo": "cortada", "path": rel_of(r.path), "pendiente": True}
         if not out["recording"]:
             out["siguiente"] = self._siguiente_pub()
         return out
@@ -5368,7 +5371,8 @@ class App:
             self.monitor = RecorderProcess(None, b.get("mic"), b.get("sys"), APP_DIR, DATA_DIR)
         return {"ok": True}
 
-    def rec_start(self, b):
+    def rec_start(self, b, _cont=None):
+        """_cont: la continuacion de una grabacion cortada (solo _continuar; nunca desde la peticion HTTP)."""
         with self.rec_lock:
             if self.rec and self.rec.alive():
                 raise ApiError("Ya hay una grabación en marcha.")
@@ -5391,7 +5395,7 @@ class App:
             lt = time.localtime()
             label = clean_name(b["name"]) if b.get("name") else ""
             name = time.strftime("%Y-%m-%d %H-%M-%S", lt) + (f" - {label}" if label else "")
-            cont = b.get("_continuacion")  # la grabacion se corto: se sigue en la misma carpeta (_rec_terminada)
+            cont = _cont  # la grabacion se corto: se sigue en la misma carpeta (_rec_terminada)
             # una carpeta por reunion, «AAAA-MM-DD Nombre», dentro de la principal (msg 1158); se crea al grabar
             mname = fit_meeting_dir(folder, label, lt, name) if por_reunion(self.settings.get()) and not cont else None
             mdir = free_dir(folder, mname) if mname else None
@@ -5565,6 +5569,8 @@ class App:
     def rec_stop(self, b):
         with self.rec_lock:
             r = self.rec
+            if r and not r.alive() and self._cancelar_continuacion(r):  # «Parar» en los 2 s antes de la continuacion
+                return {"path": rel_of(r.path), "seconds": (r.status or {}).get("t", 0)}
             if not r or not r.alive():
                 raise ApiError("No hay ninguna grabación en marcha.")
             secs = r.stop()
@@ -5595,6 +5601,11 @@ class App:
         se guarda la línea de tiempo del micro, se suelta la reserva y se sigue grabando en una «(continuación)» en la
         misma carpeta a los ~2 s, como mucho Cortes.MAX_REINTENTOS veces."""
         rel, motivo, a_las = rel_of(r.path), r.motivo(), time.strftime("%H:%M")
+        cadena = dict(self.rec_cadena or {"intentos": 0, "nombre": ""})
+        sigue = self.rec is r and cadena["intentos"] < Cortes.MAX_REINTENTOS
+        # lo primero, antes de tocar el disco: un sondeo que llegue ahora ya ve «cortada»
+        e = self.cortes.apuntar(tipo="cortada", path=rel, nombre=os.path.basename(r.path), a_las=a_las, motivo=motivo,
+                                sigue=sigue, continuacion=None, error=None)
         self.jobs.claimed.discard(rel)
         self.cortes.cerrada(r.path)
         try:
@@ -5608,10 +5619,6 @@ class App:
                 self.notes_save({"path": rel, "props": {"interrumpida": f"{a_las} · {motivo}"}, "_al_grabar": True})
         except Exception:
             log_exc()
-        cadena = dict(self.rec_cadena or {"intentos": 0, "nombre": ""})
-        sigue = self.rec is r and cadena["intentos"] < Cortes.MAX_REINTENTOS
-        e = self.cortes.apuntar(tipo="cortada", path=rel, nombre=os.path.basename(r.path), a_las=a_las, motivo=motivo,
-                                sigue=sigue, continuacion=None, error=None)
         self.library.at = 0
         log(f"✖ Grabación interrumpida a las {a_las}: {rel} ({motivo})"
             + (" · se sigue en una continuación" if sigue else " · no se sigue"))
@@ -5622,19 +5629,30 @@ class App:
             threading.Thread(target=self._continuar, args=(r, e["id"], cadena), daemon=True,
                              name="continuar-grabacion").start()
 
+    def _cancelar_continuacion(self, r):
+        """Se cortó y aún no se sigue (los ~2 s de Cortes.REINTENTO_S): ya no se sigue. True si había algo que
+        cancelar."""
+        c = next((x for x in reversed(self.cortes.estado()) if x["tipo"] == "cortada"), None)
+        if not (c and c["path"] == rel_of(r.path) and c["sigue"] and not c["continuacion"]):
+            return False
+        self._sin_seguir = r
+        self.cortes.cambiar(c["id"], sigue=False, error="parada a mano")
+        log("■ Parada a mano antes de seguir en la continuación")
+        return True
+
     def _continuar(self, r, corte, cadena):
         """La continuación de una grabación cortada: lo mismo (tema, participantes, idioma, directo) en su carpeta."""
         time.sleep(Cortes.REINTENTO_S)
         with self.toggle_lock:
-            if self.rec is not r:  # entretanto se ha grabado otra cosa: no se sigue con esta
+            if self.rec is not r or getattr(self, "_sin_seguir", None) is r:  # se grabo otra cosa o se pidio parar
                 self.cortes.cambiar(corte, sigue=False)
                 return
             n = cadena["intentos"] + 1
             nombre = f"{cadena.get('nombre') or ''} {'(continuación)' if n == 1 else f'(continuación {n})'}".strip()
             sigue_en = dict(cadena, intentos=n, dir=os.path.dirname(r.path), corte=corte)
-            body = dict(self.rec_body or {}, name=nombre, _continuacion=sigue_en)
+            body = dict(self.rec_body or {}, name=nombre)
             try:
-                res = self.rec_start(body)
+                res = self.rec_start(body, _cont=sigue_en)
             except Exception as err:
                 msg = err.msg if isinstance(err, ApiError) else f"{err.__class__.__name__}: {err}"
                 self.cortes.cambiar(corte, sigue=False, error=msg, continuacion=None)
@@ -5642,6 +5660,11 @@ class App:
                 cue("error")
                 notify("✖ No se ha podido seguir grabando", msg)
                 return
+        if (r.status or {}).get("mic_muted"):  # el micro estaba silenciado a proposito: tambien en la continuacion
+            try:
+                self.rec_mic({"mute": True})
+            except ApiError:
+                log_exc()
         log(f"● Sigue grabando tras el corte: {res['path']} ({n} de {Cortes.MAX_REINTENTOS})")
         notify(f"● {APP_NAME} sigue grabando", f"En «{os.path.basename(res['path'])}», en la misma carpeta.")
 

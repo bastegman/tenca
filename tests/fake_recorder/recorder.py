@@ -36,10 +36,15 @@ def main():
     if modo == "nace":
         sys.stderr.write("Traceback (most recent call last):\nRuntimeError: no hay dispositivos\n")
         return 1
-    stop = threading.Event()
+    stop, muted = threading.Event(), [False]
 
     def leer():
         for line in sys.stdin:
+            if line.strip() in ("mute", "unmute"):
+                muted[0] = line.strip() == "mute"
+            if ctl.get("ordenes"):  # lo que le manda el servidor (mute, unmute, stop), con la grabacion
+                with open(ctl["ordenes"], "a", encoding="utf-8") as fo:
+                    fo.write(f"{os.path.basename(path or '')}\t{line.strip()}\n")
             if line.strip() == "stop":
                 break
         stop.set()
@@ -57,7 +62,7 @@ def main():
             f.write(b"\0" * 48000)  # 0,25 s de silencio
             f.flush()
         out.write(json.dumps({"t": t, "mic": {"db": -20, "name": "Micro"}, "sys": {"db": -60, "name": "Altavoces"},
-                              "disco_min": ctl.get("disco_min")}) + "\n")
+                              "mic_muted": muted[0], "disco_min": ctl.get("disco_min")}) + "\n")
         out.flush()
         if modo in ("muere", "fatal") and t >= ctl.get("muere_s", 1.0):
             if modo == "fatal":

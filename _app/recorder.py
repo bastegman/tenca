@@ -93,29 +93,34 @@ class Leveler:
 # El micro con altavoces: entre dos frases suyas el micro solo recoge el eco de la reunion (20-25 dB por debajo). Con
 # el nivelador de arriba la estimacion bajaba en ~1,7 s, tomaba el eco por su voz y lo subia hasta +18 dB: cada voz de
 # los demas quedaba dos veces casi igual de fuerte (medido el 14/11/2026: eco a 0/-2,5 dB de la voz directa, la queja
-# de «escucho las voces dos veces»). Este solo aprende de lo que es su voz: con la reunion callada, o con la reunion
-# sonando si el micro supera en ECO_MARGEN_DB lo que suele recoger entonces (el eco). Sube hacia la mediana del ultimo
-# segundo de su voz (una tos no la mueve). Baja despacio (MIC_BAJA_S) mientras suena la reunion, donde confundir el eco
-# con su voz es lo que hay que evitar, y algo mas deprisa (MIC_BAJA_SOLO_S) cuando habla solo: si empezo hablando
-# fuerte y luego normal, su voz no se queda un minuto baja. Hasta oirle, una ganancia prudente.
+# de «escucho las voces dos veces»). Este aprende solo de lo que es su voz: lo que entra por el micro con la reunion
+# callada (la salida, lo mas fuerte de los ultimos REF_COLA_S por el retardo de la sala, por debajo de REF_CALLA_DB).
+# Con la reunion sonando no aprende: ni sube con el eco ni baja con el (ni con otro que hable mas fuerte o un aviso).
+# Sube hacia la mediana del ultimo segundo de su voz (una tos no la mueve; la primera vez, con 0,6 s de voz en 2 s) y
+# baja como antes, ~1,5 s, porque solo puede ser el. Hasta oirle, una ganancia prudente.
+# Si la reunion no calla nunca (musica, un video, el ruido de fondo de alguien: MIC_SIEMPRE_S seguidos sin 0,3 s de
+# silencio) no hay de donde aprender sin el eco: entonces aprende de todo, como antes, pero baja despacio (MIC_BAJA_S)
+# para que el eco entre dos frases suyas no se la lleve. Asi su voz nunca queda por debajo de lo de antes.
 # No es cancelacion de eco: no toca el audio, solo decide de que bloques aprende la ganancia.
 MIC_PRUDENTE_DB = 6.0   # ganancia hasta oir su voz (antes, hasta +18 dB sobre el eco de lo primero que sonase)
-MIC_BAJA_S = 30.0       # constante de tiempo al bajar la estimacion con la reunion sonando (antes ~1,7 s)
-MIC_BAJA_SOLO_S = 1.5   # ...y con la reunion callada (solo puede ser el: como antes, ~1,7 s)
+MIC_BAJA_S = 30.0       # constante de tiempo al bajar si la reunion no calla nunca (antes ~1,7 s siempre)
+MIC_BAJA_SOLO_S = 1.5   # ...y al bajar con la reunion callada (solo puede ser el: como antes)
 MIC_SUBE_S = 0.3
 MIC_VENTANA_S = 1.0     # sube hacia la mediana de su voz en este ultimo segundo...
 MIC_VOZ_MIN_S = 0.4     # ...si en el hay al menos esto de voz
+MIC_INICIO = (2.0, 0.6)  # la primera vez: al menos 0,6 s de su voz en los ultimos 2 s
+MIC_SIEMPRE_S = 8.0     # la reunion «no calla nunca» si en estos ultimos segundos no ha callado REF_COLA_S
 REF_CALLA_DB = -50.0    # la reunion (la salida, en crudo) calla por debajo de esto...
-REF_COLA_S = 0.3        # ...y desde hace esto (la cola del eco en la sala)
-ECO_MARGEN_DB = 10.0
-ECO_VENTANA_S = 10.0    # lo que el micro suele recoger con la reunion sonando: mediana de estos ultimos segundos
+REF_COLA_S = 0.3        # ...desde hace esto (la cola del eco en la sala)
 
 
 def block_db(x):
+    """dB del bloque; None si no hay bloque o no es un numero (un NaN o un inf del driver no puede envenenar nada)."""
     import numpy as np
     if x is None or not len(x):
         return None
-    return 20 * math.log10(float(np.sqrt(np.mean(np.square(x, dtype=np.float64)))) + 1e-12)
+    db = 20 * math.log10(float(np.sqrt(np.mean(np.square(x, dtype=np.float64)))) + 1e-12)
+    return db if math.isfinite(db) else None
 
 
 class MicLeveler(Leveler):
@@ -124,47 +129,50 @@ class MicLeveler(Leveler):
     def __init__(self, lo, hi):
         super().__init__(lo, hi)
         self.gain = 10 ** (min(max(MIC_PRUDENTE_DB, lo), hi) / 20)
-        self.t, self.ref_at, self.ref_seen, self.solo = 0.0, -1e9, False, False
-        self.recent = deque()   # (t, duracion, dB) de los bloques de su voz del ultimo MIC_VENTANA_S
-        self.eco = deque()      # (t, dB) del micro con la reunion sonando (ECO_VENTANA_S)
+        self.t, self.dur, self.solo, self.siempre = 0.0, 0.0, False, False
+        self.refs = deque()     # (t, dB de la salida) de los ultimos REF_COLA_S
+        self.recent = deque()   # (t, duracion, dB) de los bloques de su voz de los ultimos MIC_INICIO[0] s
+        self.hist = deque()     # (t, duracion, sonando) de los ultimos MIC_SIEMPRE_S
 
     def _mine(self, db, ref_db):
-        """¿Este bloque del micro es su voz?"""
+        """¿De este bloque se aprende? (su voz con la reunion callada; todo si la reunion no calla nunca)"""
         if ref_db is not None:
-            self.ref_seen = True
-            if ref_db > REF_CALLA_DB:
-                self.ref_at = self.t
-        sounding = self.ref_seen and self.t - self.ref_at <= REF_COLA_S
-        if sounding:
-            self.eco.append((self.t, max(db, -100.0)))
-        while self.eco and self.eco[0][0] < self.t - ECO_VENTANA_S:
-            self.eco.popleft()
+            self.refs.append((self.t, ref_db))
+        while self.refs and self.refs[0][0] < self.t - REF_COLA_S:
+            self.refs.popleft()
+        ref = max((r[1] for r in self.refs), default=None)
+        sounding = ref is not None and ref > REF_CALLA_DB
+        self.hist.append((self.t, self.dur, sounding))
+        while self.hist and self.hist[0][0] - self.hist[0][1] < self.t - MIC_SIEMPRE_S:
+            self.hist.popleft()
+        visto = self.t - (self.hist[0][0] - self.hist[0][1]) if self.hist else 0.0
+        callado = sum(h[1] for h in self.hist if not h[2])
+        self.siempre = sounding and visto >= MIC_SIEMPRE_S - 0.1 and callado < REF_COLA_S
+        self.solo = not sounding
         if db <= GATE_DB or (self.level is not None and db <= self.level - 15):
             return False
-        self.solo = not sounding
-        if not sounding:
-            return True
-        if len(self.eco) < 10:  # aun no se sabe cuanto eco hay: no se aprende de esto
-            return False
-        import numpy as np
-        return db > float(np.median([e[1] for e in self.eco])) + ECO_MARGEN_DB
+        return self.solo or self.siempre
 
     def __call__(self, x, update=True, ref=None):
         import numpy as np
         if not len(x):
             return x
-        dur = len(x) / SR
+        self.dur = dur = len(x) / SR
         self.t += dur
         db = block_db(x)
+        if db is None:  # un bloque roto (NaN): se aplica la ganancia de antes y no se aprende nada
+            update = False
         if update and self._mine(db, block_db(ref)):
             self.recent.append((self.t, dur, db))
-        while self.recent and self.recent[0][0] < self.t - MIC_VENTANA_S:
+        while self.recent and self.recent[0][0] < self.t - MIC_INICIO[0]:
             self.recent.popleft()
-        if update and self.recent and self.recent[-1][0] == self.t and sum(r[1] for r in self.recent) >= MIC_VOZ_MIN_S:
-            cand = float(np.median([r[2] for r in self.recent]))
+        last = [r for r in self.recent if r[0] >= self.t - MIC_VENTANA_S]
+        if update and last and last[-1][0] == self.t:
             if self.level is None:
-                self.level = cand
-            else:
+                if sum(r[1] for r in self.recent) >= MIC_INICIO[1]:
+                    self.level = float(np.median([r[2] for r in self.recent]))
+            elif sum(r[1] for r in last) >= MIC_VOZ_MIN_S:
+                cand = float(np.median([r[2] for r in last]))
                 tau = MIC_SUBE_S if cand > self.level else MIC_BAJA_SOLO_S if self.solo else MIC_BAJA_S
                 self.level += (cand - self.level) * (1 - math.exp(-dur / tau))
         target = self.gain
@@ -469,6 +477,7 @@ class AllOutputs:
 # de red que va y viene, el disco lleno mientras se libera sitio): lo que no se puede escribir se guarda en memoria y
 # se reintenta en cada vuelta, hasta WRITE_RETRY_S seguidos. Solo entonces se da por perdido y se dice el motivo.
 WRITE_RETRY_S = 20.0
+STOP_RETRY_S = 8.0      # al parar con escrituras pendientes, se sigue intentando esto (el servidor espera 10 s)
 WAV_BYTES_S = SR * 4                 # 48 kHz, estereo, 16 bits: 691 MB por hora
 DISK_CHECK_S = 30.0                  # cada cuanto se mira el espacio libre mientras se graba
 DISK_WARN_MIN = 15                   # aviso: quedan ~15 min de disco
@@ -671,9 +680,11 @@ def main():
                       # en memoria a poder escribirse (un fallo pasajero al escribir)
                       "disco_min": disk["min"], "pendiente_s": round(w.pend_n / WAV_BYTES_S, 1) if w else 0})
             if final:
-                if w and w.pend:
-                    w.flush()  # ultimo intento: lo que no se pueda escribir ya, se pierde (y se dice en el log)
-                break
+                fin = time.monotonic() + STOP_RETRY_S
+                while w and w.pend and time.monotonic() < fin:  # parar no tira lo que espera en memoria
+                    if not w.flush():
+                        time.sleep(0.2)
+                break  # lo que no se haya podido escribir se dice en recorder.log (abajo)
             time.sleep(0.05)
     except BaseException as e:  # el porque, para el servidor (rec_status: «cortada») y para recorder.log
         if not isinstance(e, (KeyboardInterrupt, SystemExit)):
