@@ -2,8 +2,9 @@
    La grabadora guarda tu micro en el canal izquierdo y lo que suena en el PC en el derecho (pistas.py). Sin esto se
    oirían tú en un oído y los demás en el otro. Al cargar un audio se mira su cabecera (una petición Range de 4 KB): si
    lleva la marca, el <audio> pasa por Web Audio y pistas-worklet.js lo mezcla en mono, con «Tú» y «Los demás» por
-   separado y el eco de los altavoces quitado del micro (solo si la grabadora vio eco: lo dice la cabecera, «eco=1»;
-   con cascos quitarlo solo se comería tu voz al hablar a la vez; se puede desactivar y no cambia el archivo).
+   separado y el eco de los altavoces quitado del micro (por defecto solo si la grabadora vio eco: lo dice la cabecera,
+   «eco=1», que escribe en cuanto lo ve; con cascos quitarlo solo se comería tu voz al hablar a la vez; la casilla
+   decide, y no cambia el archivo).
    Cualquier otro audio suena como siempre: Web Audio solo se monta la primera vez que se oye uno en dos pistas, y desde
    entonces los demás pasan por él tal cual.
    «Exportar audio mezclado» (POST /api/audio/mezclado) guarda en el Escritorio un WAV normal con esa mezcla. */
@@ -14,7 +15,8 @@ const Pistas = (() => {
   const cfg = Object.assign({ tu: 1, demas: 1, eco: true }, (() => {
     try { return JSON.parse(localStorage.getItem('pistas') || '{}'); } catch { return {}; }
   })());
-  let ctx = null, node = null, montado = null, fallo = false, doble = false, ecoArchivo = null, ruta = null;
+  let ctx = null, node = null, montado = null, fallo = false, doble = false, ecoArchivo = null, ecoForzado = null;
+  let ruta = null;
 
   function guardar() { localStorage.setItem('pistas', JSON.stringify(cfg)); }
 
@@ -92,7 +94,12 @@ const Pistas = (() => {
     return montado;
   }
 
-  function ecoEfectivo() { return ecoArchivo === false ? false : cfg.eco; }
+  /* Con eco visto (eco=1), lo que diga la casilla (se guarda); sin él (cascos, o aún no se sabe), no se quita salvo que
+     se marque para este audio. */
+  function ecoEfectivo() {
+    if (ecoForzado !== null) return ecoForzado;
+    return ecoArchivo === true ? cfg.eco : false;
+  }
   function enviar() {
     if (node) node.port.postMessage({ modo: doble ? 'doble' : 'normal', tu: cfg.tu, demas: cfg.demas, eco: ecoEfectivo() });
   }
@@ -107,6 +114,7 @@ const Pistas = (() => {
     ruta = path;
     doble = false;
     ecoArchivo = null;
+    ecoForzado = null;
     enviar();
     $('#player').classList.remove('pistas');
     const v = await esDoble(path);
@@ -115,6 +123,8 @@ const Pistas = (() => {
     ecoArchivo = v.eco;
     $('#player').classList.toggle('pistas', v.doble);
     marcarBoton();
+    const p = $('#pistasPanel');
+    if (p && !p.classList.contains('hidden')) p.pintar();  // abierto al cambiar de audio: con lo de este
     if (!v.doble) { cerrarPanel(); return; }
     if (fallo) return;
     try { await montar(); } catch { return; }
@@ -146,9 +156,8 @@ const Pistas = (() => {
     const pintar = () => {
       tu.value = cfg.tu; dem.value = cfg.demas;
       eco.checked = ecoEfectivo();
-      eco.disabled = ecoArchivo === false;
-      $('#ppEcoT', p).textContent = ecoArchivo === false ? 'Sin eco que quitar (se grabó sin eco de altavoces, con cascos)'
-        : 'Quitar el eco de los altavoces de tu micro';
+      $('#ppEcoT', p).textContent = 'Quitar el eco de los altavoces de tu micro' + (ecoArchivo === true ? ''
+        : ecoArchivo === false ? ' (al grabar no se vio eco: cascos)' : ' (aún no se sabe si hubo eco)');
       $('#ppTuV', p).textContent = pct(cfg.tu); $('#ppDemasV', p).textContent = pct(cfg.demas);
       for (const r of [tu, dem]) r.style.setProperty('--pct', (100 * r.value / 2) + '%');
       $('.pp-controles', p).classList.toggle('hidden', fallo);
@@ -156,7 +165,10 @@ const Pistas = (() => {
     };
     tu.addEventListener('input', () => { cfg.tu = +tu.value; pintar(); guardar(); enviar(); });
     dem.addEventListener('input', () => { cfg.demas = +dem.value; pintar(); guardar(); enviar(); });
-    eco.addEventListener('change', () => { cfg.eco = eco.checked; guardar(); enviar(); });
+    eco.addEventListener('change', () => {
+      if (ecoArchivo === true) { cfg.eco = eco.checked; ecoForzado = null; guardar(); } else ecoForzado = eco.checked;
+      enviar();
+    });
     $('#ppExportar', p).addEventListener('click', exportar);
     p.pintar = pintar;
     pintar();

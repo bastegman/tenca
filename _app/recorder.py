@@ -250,14 +250,14 @@ class SueloMic:
     su voz (como antes del 14/11) y la linea salia toda «1»; despues «Tú» no salia (revision 1 de dos-pistas, P1-2:
     ruido a -46/-43/-40 dBFS, con 67-98 % de pasos «1» sin su voz)."""
 
-    SUBE_S, SOBRE_DB = 20.0, 6.0
+    SUBE_S, SOBRE_DB, CERO_DB = 20.0, 6.0, -90.0
 
     def __init__(self):
         self.suelo = None
 
     def __call__(self, db, dur):
-        if db is None:
-            return False
+        if db is None or db < self.CERO_DB:  # silencio digital (micro silenciado en el equipo, dispositivo reabierto):
+            return False                     # no es ruido de fondo; si lo fuese, tardaria ~70 s en volver (revision 2)
         if self.suelo is None or db < self.suelo:
             self.suelo = db
         else:
@@ -735,6 +735,7 @@ def main():
     suelo = SueloMic()
     t0, written, last = time.perf_counter(), 0, 0.0
     dicho = [False]  # ya se mando una linea «fatal» con el motivo
+    eco_dicho = [False]  # ya se puso eco=1 en la cabecera
     base = int(round((t0 - EPOCH) * SR))  # posicion de la muestra 0 del fichero: lo capturado en t0
     try:
         while True:
@@ -767,6 +768,16 @@ def main():
                     tu.add(n, mine)
                 if w:
                     w.write((mix * 32767).astype("<i2").tobytes())
+                if a.pistas and f and not eco_dicho[0] and getattr(levelers.get("mic"), "eco_visto", False):
+                    # en cuanto la puerta ve el eco, eco=1 en la cabecera: asi lo sabe el reproductor tambien mientras
+                    # se graba o si se corta sin cerrar (revision 2: ahi quedaba «?» y se quitaba el eco con cascos)
+                    eco_dicho[0] = True
+                    try:
+                        f.seek(pistas.eco_off(SR))
+                        f.write(b"1")
+                        f.seek(0, 2)
+                    except OSError:
+                        pass
                 written += n
             elif w and w.pend:
                 w.flush()  # lo que quedo en memoria por un fallo al escribir

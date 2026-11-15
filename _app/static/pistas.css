@@ -9,7 +9,6 @@
 .pistas-panel { position: fixed; right: 22px; bottom: 86px; width: 340px; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); z-index: 30; display: grid; gap: 10px; font-size: 13.5px; }
 .pistas-panel .pp-tit { font-weight: 600; font-size: 14px; }
 .pistas-panel .pp-controles { display: grid; gap: 10px; }
-.pistas-panel .pp-check input:disabled + span { color: var(--muted); }
 .pistas-panel .pp-txt { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
 .pistas-panel .pp-fila { display: grid; grid-template-columns: 82px 1fr 46px; align-items: center; gap: 8px; color: var(--ink-2); }
 .pistas-panel .pp-fila span { font: 12px var(--mono); color: var(--muted); text-align: right; }

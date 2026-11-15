@@ -39,7 +39,7 @@ class PistasProcessor extends AudioWorkletProcessor {
       if (typeof d.eco === 'boolean') this.eco = d.eco;
       if (d.estado) {  // para los tests y el diagnóstico: niveles (RMS) de lo último que ha pasado
         const n = Math.max(1, this.medN), r = v => Math.sqrt(v / n);
-        this.port.postMessage({ modo: this.modo, g: this.g, bajado: this.bajado, ventanas: this.ventanas,
+        this.port.postMessage({ modo: this.modo, quita_eco: this.eco, g: this.g, bajado: this.bajado, ventanas: this.ventanas,
           rms: { izq: r(this.medL), der: r(this.medR), sale: r(this.medO), sale_der: r(this.medO1) } });
         this.medL = this.medR = this.medO = this.medO1 = this.medN = 0;
       }

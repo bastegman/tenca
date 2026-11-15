@@ -380,11 +380,13 @@ def exportar_peticion(abs_path, carpeta, body, grabando=None):
         return min(2.0, max(0.0, v)) if v == v else 1.0
     if not os.path.isdir(carpeta):
         raise ValueError(f"No encuentro la carpeta donde guardarlo ({carpeta}).")
+    with open(abs_path, "rb") as f:  # sin «eco» en la peticion: lo de la cabecera (como el reproductor)
+        eco_def = eco_de(f.read(CABECERA_MAX)) is True
     k = 1
     for _ in range(50):  # otra exportacion a la vez coge el mismo nombre: se prueba el siguiente
         dst = nombre_mezcla(abs_path, carpeta, k)
         try:
-            segundos = exportar_mezcla(abs_path, dst, num("tu"), num("demas"), si((body or {}).get("eco")))
+            segundos = exportar_mezcla(abs_path, dst, num("tu"), num("demas"), si((body or {}).get("eco"), eco_def))
         except FileExistsError:
             k = int(re.search(r"\(mezclado(?: (\d+))?\)\.wav$", dst).group(1) or 1) + 1
             continue

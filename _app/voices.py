@@ -648,6 +648,10 @@ PISTA_JUNTAR_DB = -55.0  # muy por debajo de una voz (el nivelador la deja hacia
 PISTA_PAUSA_S = 1.0
 PISTA_MICRO_SOBRE_DB = 6.0   # del micro se diariza lo que pasa de su ruido de fondo esto (pasos_micro)...
 PISTA_MICRO_MIN_DB = -55.0   # ...y de esto
+PISTA_SUENA_SOBRE_DB = 10.0  # el PC «suena» si pasa de su propio fondo esto...
+PISTA_SUENA_MAX_DB = -30.0   # ...pero a partir de aqui siempre
+PISTA_TU_NIVEL_DB = 6.0      # sin «Tú» por la linea (dos del micro con «1»): el que suena 6 dB mas que los otros del
+#                              micro es el que esta junto a el (elegir_tu)
 PISTA_COPIA_DB = 6.0     # ...y esos dos solo si la copia va al menos 6 dB por debajo del otro canal en esos tramos
 #                          (el original suena mas: es el mismo criterio que pistas.ganancias_eco al reproducir)
 
@@ -681,24 +685,37 @@ def actividad(x16, paso=pistas.PASO, umbral_db=PISTA_VOZ_DB, trozo_s=60.0):
     return niveles_db(x16, paso, trozo_s) > umbral_db
 
 
+def _suelos(d, b):
+    """El ruido de fondo de una serie de niveles por paso: el percentil 10 de cada bloque de b pasos, sin pasar del de
+    toda la reunión + 6 dB (quien habla un bloque entero sin pausas no se convierte en «ruido de fondo»)."""
+    out = np.empty(len(d))
+    total = float(np.percentile(d, 10)) if len(d) else -120.0
+    for i in range(0, len(d), b):
+        out[i:i + b] = min(float(np.percentile(d[i:i + b], 10)), total + 6.0)
+    return out
+
+
 def pasos_micro(dl, dr, bits=None, bloque_s=30.0, paso=pistas.PASO):
     """bool por paso: lo que el micro recoge que no es eco, para diarizarlo (no para decidir quién es «Tú»: eso lo hace
-    la línea de la grabadora). Con el PC callado (lo que ha sonado en los últimos 0,75 s no pasa de -45 dB: ni eco ni su
-    cola), lo que pasa de su ruido de fondo (el percentil 10 de cada bloque_s) PISTA_MICRO_SOBRE_DB y de
-    PISTA_MICRO_MIN_DB; con el PC sonando, solo los pasos «1» de la línea (bits), que vienen de la puerta de eco de la
-    grabadora: por nivel no se distingue el eco (con altavoces fuertes, el nivelador del micro lo deja al nivel de los
-    demás: medido, DER 0,19 -> 0,53 y 8 personas para 6). Así entra también quien está en la sala lejos del micro, que
-    la línea no marca (revisión 1, P1-1: 18 dB por debajo de tu voz, 2 % de sus pasos «1» y 65 de 72 s sin hablante)."""
+    la línea de la grabadora). Con el PC callado (ni eco ni su cola: lo que ha sonado en los últimos 0,75 s no pasa de
+    PISTA_SUENA_SOBRE_DB sobre su propio fondo, ni de -45 dB), lo que pasa de su ruido de fondo PISTA_MICRO_SOBRE_DB y
+    de PISTA_MICRO_MIN_DB; con el PC sonando, solo los pasos «1» de la línea (bits), que vienen de la puerta de eco de
+    la grabadora: por nivel no se distingue el eco (con altavoces fuertes, el nivelador del micro lo deja al nivel de
+    los demás: medido, DER 0,19 -> 0,53 y 8 personas para 6). Así entra también quien está en la sala lejos del micro,
+    que la línea no marca (revisión 1, P1-1: 18 dB por debajo de tu voz, 2 % de sus pasos «1» y 65 de 72 s sin
+    hablante); también con un fondo de ruido en la llamada (revisión 2: a -44 dB, se perdía el 78 % de su voz)."""
     k = len(dl)
-    out = np.zeros(k, bool)
+    if not k:
+        return np.zeros(0, bool)
     b = max(1, int(bloque_s / paso))
-    for i in range(0, k, b):
-        suelo = float(np.percentile(dl[i:i + b], 10))
-        out[i:i + b] = dl[i:i + b] > max(suelo + PISTA_MICRO_SOBRE_DB, PISTA_MICRO_MIN_DB)
+    out = dl > np.maximum(_suelos(dl, b) + PISTA_MICRO_SOBRE_DB, PISTA_MICRO_MIN_DB)
     ref = dr.copy()
     for d in (1, 2):  # lo que ha sonado en los ultimos 0,75 s (la cola del eco)
         ref[d:] = np.maximum(ref[d:], dr[:-d])
-    out &= ref <= pistas.ECO_SOBRE_DB
+    # «el PC suena»: por encima de su fondo; el umbral, entre -45 dB (un PC callado) y -30 dB (por alto que salga el
+    # fondo, una voz de los demás, nivelada hacia -22 dB, siempre cuenta)
+    umbral = np.clip(_suelos(dr, b) + PISTA_SUENA_SOBRE_DB, pistas.ECO_SOBRE_DB, PISTA_SUENA_MAX_DB)
+    out &= ref <= umbral
     if bits is not None and len(bits):
         m = min(k, len(bits))
         out[:m] |= bits[:m]
@@ -747,6 +764,12 @@ def descompactar(tramos, mapa):
             if hi > lo:
                 out.append({"inicio": round(r0 + lo - c0, 2), "fin": round(r0 + hi - c0, 2), "h": t["h"]})
     return out
+
+
+def _mediana_pasos(niveles, tramos, paso=pistas.PASO):
+    """La mediana de los niveles por paso (niveles_db) dentro de los tramos [(a, b)]; -120 si no hay ninguno."""
+    idx = [i for a, b in tramos for i in range(max(0, int(a / paso)), min(len(niveles), int(math.ceil(b / paso))))]
+    return float(np.median(niveles[idx])) if idx else -120.0
 
 
 def _fraccion(tramos, bits, paso=pistas.PASO):
@@ -810,7 +833,8 @@ def diarize_pistas(stereo16, micro, data_dir, threads=2, progress=None, cancelle
         del comp_s
     res_s = dict(rs, tramos=descompactar(rs["tramos"], mapa_s))
     mic_bits = np.frombuffer(micro["activo"].encode("ascii"), np.uint8) == ord("1")
-    del_micro = pasos_micro(niveles_db(izq), dr, mic_bits)
+    dl = niveles_db(izq)
+    del_micro = pasos_micro(dl, dr, mic_bits)
     mios = pistas.tramos_de_bits("".join("1" if b else "0" for b in del_micro))
     voz_mic = sum(b - a for a, b in mios)
     res_m = {"tramos": [], "hablantes": {}, "huellas": {}}
@@ -856,6 +880,9 @@ def diarize_pistas(stereo16, micro, data_dir, threads=2, progress=None, cancelle
         tramos += [{"inicio": round(a, 2), "fin": round(b, 2), "h": h} for a, b in g["tramos"]]
         hablantes[h] = {"persona": None, "score": None, "segundos": round(g["secs"], 1), "provisional": False,
                         "breve": g["secs"] < BREVE_S, "pista": g["pista"]}
+        if g["pista"] == "micro":  # lo cerca que esta del micro (elegir_tu): la mediana de sus pasos, que un trozo
+            # de otra voz mas fuerte metido en su grupo no mueve (revision 2: con la media, 5,8 dB en vez de ~13)
+            hablantes[h]["nivel_db"] = round(_mediana_pasos(dl, g["tramos"]), 1)
         if g["vec"] is not None:
             huellas[h] = [round(float(x), 5) for x in g["vec"]]
     tramos.sort(key=lambda t: (t["inicio"], t["fin"]))
@@ -873,6 +900,29 @@ def fuera_de_tu(data):
     if (data or {}).get("pistas"):
         out |= {h for h, i in hablantes.items() if i.get("pista") == "sistema"}
     return out
+
+
+def elegir_tu(data, micro, ratios=None):
+    """«Tú»: el hablante que coincide >= 60 % con la linea del micro y el siguiente <= 30 % (pick_user), entre los que
+    pueden serlo (fuera_de_tu). En dos pistas, si asi no sale (dos voces del micro con «1»: alguien a tu lado, la charla
+    de la oficina con cascos), el del micro que coincide >= 60 % y suena PISTA_TU_NIVEL_DB mas que los otros del micro:
+    el que esta junto a el (revision 2: charla 13 dB por debajo, «Tú» no salia y la base si). ratios: mic_ratios ya
+    calculado (si no, se calcula)."""
+    if not micro:
+        return None
+    hablantes = (data or {}).get("hablantes") or {}
+    fuera = fuera_de_tu(data)
+    if ratios is None:
+        ratios = mic_ratios((data or {}).get("tramos", []), micro, skip=fuera)
+    r = {h: v for h, v in ratios.items() if h not in fuera}
+    tu = pick_user(r)
+    if tu or not (data or {}).get("pistas"):
+        return tu
+    cands = sorted(((float(hablantes[h].get("nivel_db", -120.0)), h) for h in r
+                    if hablantes.get(h, {}).get("pista") == "micro"), reverse=True)
+    if cands and r[cands[0][1]] >= 0.6 and (len(cands) < 2 or cands[0][0] - cands[1][0] >= PISTA_TU_NIVEL_DB):
+        return cands[0][1]
+    return None
 
 
 def canal_de(data, h):
@@ -1516,8 +1566,7 @@ def identify(data, huellas, voices, micro=None):
     breve = {h for h, i in hablantes.items() if i.get("breve")}
     ratios = mic_ratios(data.get("tramos", []), micro, skip=breve) if micro else {}
     if micro:
-        fuera = fuera_de_tu(data)
-        data["tu"] = pick_user({h: r for h, r in ratios.items() if h not in fuera})
+        data["tu"] = elegir_tu(data, micro, ratios)
     tu = data.get("tu")
     for h, info in hablantes.items():
         if info.get("origen") != "huella" or not info.get("persona"):
@@ -1818,7 +1867,7 @@ def main(argv=None):
                 "micro": micro}
         if res.get("pistas"):
             data["pistas"] = True
-        data["tu"] = mark_user(data["tramos"], data["micro"], skip=fuera_de_tu(data)) if data["micro"] else None
+        data["tu"] = elegir_tu(data, data["micro"]) if data["micro"] else None
         write_sidecar(a.out, data)
         send({"type": "result", "sidecar": a.out, "huellas": res["huellas"], "hablantes": len(res["hablantes"]),
               "duracion_s": res["duracion_s"]})

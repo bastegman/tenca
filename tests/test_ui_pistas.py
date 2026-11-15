@@ -61,6 +61,7 @@ class ReproductorPistasUI(unittest.TestCase):
             # izquierda (tu micro): 0,2 de pico; derecha (los demás): 0,1. RMS 0,141 y 0,071; la suma, 0,158
             escribir_doble(os.path.join(root, "Alfa", "Dos pistas.wav"), tono(300), tono(900, amp=0.1))
             escribir_doble(os.path.join(root, "Alfa", "Sin eco.wav"), tono(300), tono(900, amp=0.1), eco=b"0")
+            escribir_doble(os.path.join(root, "Alfa", "En duda.wav"), tono(300), tono(900, amp=0.1), eco=b"?")
             # un estéreo de antes con los dos canales distintos: tiene que seguir sonando así (no mezclado)
             escribir_antes(os.path.join(root, "Alfa", "De antes.wav"), tono(600), tono(600) * 0)
         cls.srv = Servidor(preparar)
@@ -165,11 +166,33 @@ class ReproductorPistasUI(unittest.TestCase):
         pg.click("#pPistas")
         pg.wait_for_selector("#pistasPanel:not(.hidden) #ppEco", timeout=5000)
         self.assertFalse(pg.is_checked("#ppEco"))
-        self.assertTrue(pg.is_disabled("#ppEco"))
-        self.assertIn("Sin eco que quitar", pg.text_content("#ppEcoT"))
+        self.assertIn("no se vio eco", pg.text_content("#ppEcoT"))
         st = self.estado(pg)
         self.assertIs(st["eco"], False, st)
+        self.assertIs(st["quita_eco"], False, st)  # lo que recibe el nodo, no solo la casilla
         self.captura(pg, "sin-eco")
+        pedidos = []
+
+        def falso(route, request):
+            pedidos.append(json.loads(request.post_data))
+            route.fulfill(status=200, content_type="application/json",
+                          body=json.dumps({"destino": "/x/m.wav", "nombre": "m.wav", "segundos": 30.0}))
+        pg.route("**/api/audio/mezclado", falso)
+        pg.click("#ppExportar")
+        pg.wait_for_selector("#toasts :text('m.wav')", timeout=5000)
+        self.assertIs(pedidos[-1]["eco"], False)
+        # se puede marcar igual (la puerta pudo no llegar a verlo): vale para este audio
+        pg.click("#ppEco")
+        self.assertIs(self.estado(pg)["quita_eco"], True)
+        # una en duda («?»: grabándose o cortada sin ver eco): no se quita por defecto, y el panel abierto se repinta
+        pg.evaluate("p => loadAudio(S.audios.get(p))", "Alfa/En duda.wav")
+        pg.wait_for_function("() => !audio.paused && S.playing === 'Alfa/En duda.wav'", timeout=10000)
+        pg.wait_for_function("() => document.querySelector('#ppEcoT').textContent.includes('aún no se sabe')",
+                             timeout=5000)
+        self.assertFalse(pg.is_checked("#ppEco"))
+        st = self.estado(pg)
+        self.assertIs(st["quita_eco"], False, st)
+        self.assertIsNone(st["eco"], st)
         self.assertEqual(self.errores, [])
 
     def test_sin_gesto_se_reanuda_al_darle(self):
