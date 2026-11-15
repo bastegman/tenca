@@ -870,6 +870,8 @@ class Voices:
             if item is None:
                 return len(p.get("huellas") or [])
             pend.remove(item)
+            if vector is not None:  # con su huella, las demas de esa misma reunion sobran: daria la misma voz otra vez
+                pend[:] = [x for x in pend if x.get("reunion") != reunion]  # (una vuelta despues de un corte)
             if not pend:
                 p.pop("rehacer", None)
             if vector is not None:

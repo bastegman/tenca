@@ -242,7 +242,9 @@ class Voces:
         puesta igual («origen», provisional). Si no, se ha vuelto a identificar o el usuario lo ha corregido (otra
         persona, nadie, «Son la misma persona»): la huella de h ya no es de esa persona."""
         ahora, side = voices.read_sidecar(voices.sidecar_path(audio)) or {}, side or {}
-        a, b = (ahora.get("hablantes") or {}).get(h), (side.get("hablantes") or {}).get(h)
+        uno, otro = ahora.get("hablantes"), side.get("hablantes")  # (un sidecar tocado a mano: no un objeto)
+        a = uno.get(h) if isinstance(uno, dict) else None
+        b = otro.get(h) if isinstance(otro, dict) else None
         return (ahora.get("creado") == side.get("creado") and isinstance(a, dict) and isinstance(b, dict)
                 and all(a.get(k) == b.get(k) for k in ("persona", "origen", "provisional")))
 
@@ -254,13 +256,16 @@ class Voces:
             return "grabando"
         with self.jobs.lock:
             vivos = [j for j in self.jobs.list if j.status in ("queued", "running")]
+            held = list(getattr(self.jobs, "held", None) or {})
         if any(getattr(j, "live", False) for j in vivos):
             return "directo"
         if any(j.kind == "voces" for j in vivos):
             return "identificando_voces"
         # una transcripcion (Whisper en el PC) y lo que encadena al acabar (las voces aun no estan en cola): tambien
-        # ocupan el PC (revision 1, P2-2). Un resumen no
-        if any(j.kind != "summary" for j in vivos) or getattr(self.jobs, "held", None):
+        # ocupan el PC (revision 1, P2-2). Un resumen no (en la nube o el agente del PC: poco), aunque su hilo tambien
+        # retenga la reunion (held) mientras corre (revision 2, P2-A)
+        resumiendo = {j.path for j in vivos if j.kind == "summary"}
+        if any(j.kind != "summary" for j in vivos) or any(r not in resumiendo for r in held):
             return "transcribiendo"
         if any(a.get("recording") for a in list(getattr(self.library, "flat", None) or [])):
             return "grabando"

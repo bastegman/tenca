@@ -322,6 +322,66 @@ class RehacerAlArrancarTests(TempTree):
         self.app.jobs.list, self.app.jobs.held = [], {"x.wav": 1}
         self.assertEqual(self.app._rehacer_ocupado(), "transcribiendo")
 
+    def test_un_resumen_en_marcha_no_hace_esperar(self):
+        """Revisión 2 (P2-A): el hilo de la cola retiene la reunión (held) también mientras resume."""
+        jobs = self.app.jobs
+        jobs.list = [types.SimpleNamespace(path="x.wav", kind="summary", status="running", live=False)]
+        jobs._hold("x.wav")  # lo que hace Jobs._worker antes de _run_summary
+        self.assertIsNone(self.app._rehacer_ocupado())
+        jobs._hold("y.wav")  # otra reunión retenida sin resumen (lo que encadena una transcripción): sí
+        self.assertEqual(self.app._rehacer_ocupado(), "transcribiendo")
+
+    def test_la_misma_reunion_dos_veces_y_un_corte_da_una_huella(self):
+        """Revisión 2 (P2-B): «Recordar» dos veces en la misma reunión (dos huellas de antes por rehacer) y la primera
+        cortada por una grabación: una sola huella, también tras la vuelta extra."""
+        d = leer_voces(self.voces)
+        yo = next(p for p in d["personas"] if p["nombre"] == "Yo")
+        yo["huellas"].append(dict(yo["huellas"][0], fecha="2026-11-04T10:00:00"))
+        with open(self.voces, "w", encoding="utf-8") as f:
+            f.write(voices.protect(json.dumps(d).encode("utf-8")))
+        n = [0]
+
+        def corta_la_primera(rel, h, cancel=None):
+            n[0] += 1
+            if n[0] == 1:
+                raise engines.Cancelled()
+            return self.speaker_vector(rel, h)
+        self.app.jobs.speaker_vector = corta_la_primera
+        out = {}
+        t = threading.Thread(target=lambda: out.update(res=self.app.rehacer_huellas()), daemon=True)
+        t.start()
+        t.join(30)
+        self.assertFalse(t.is_alive())
+        yo = self.persona("Yo")
+        self.assertEqual(([h["reunion"] for h in yo["huellas"]], yo.get("rehacer")), (["2026-11-01 Semanal.wav"], None))
+
+    def test_un_cambio_en_como_se_puso_el_hablante_tampoco(self):
+        """Revisión 2 (P2-D): la persona es la misma pero ya no es «a mano» (o es provisional): no vale."""
+        side = voices.sidecar_path(os.path.join(self.root, "2026-11-01 Semanal.wav"))
+        for cambio in ({"provisional": True}, {"origen": "huella"}):
+            with self.subTest(cambio):
+                def lento(rel, h, cancel=None, cambio=cambio):
+                    if rel == "2026-11-01 Semanal.wav":
+                        d = voices.read_sidecar(side)
+                        d["hablantes"]["h1"].update(cambio)
+                        voices.write_sidecar(side, d)
+                    return self.speaker_vector(rel, h)
+                self.app.jobs.speaker_vector = lento
+                self.app.rehacer_huellas()
+                self.assertEqual(self.persona("Yo")["huellas"], [])
+                d = voices.read_sidecar(side)  # vuelta a como estaba, para el siguiente
+                d["hablantes"]["h1"].update(origen="manual", provisional=False)
+                voices.write_sidecar(side, d)
+
+    def test_un_sidecar_tocado_a_mano_no_tumba_nada(self):
+        """Revisión 2 (P2-E): «hablantes» que no es un objeto."""
+        side = voices.sidecar_path(os.path.join(self.root, "2026-11-01 Semanal.wav"))
+        self.assertFalse(app_voces.Voces._rehacer_mismo(os.path.join(self.root, "2026-11-01 Semanal.wav"), "h1",
+                                                        {"hablantes": ["raro"]}))
+        voices.write_sidecar(side, {"version": 1, "hablantes": ["raro"]})
+        self.assertFalse(app_voces.Voces._rehacer_mismo(os.path.join(self.root, "2026-11-01 Semanal.wav"), "h1",
+                                                        {"hablantes": {"h1": {}}}))
+
     def test_un_fallo_al_calcular_se_queda_para_la_proxima(self):
         def falla(rel, h, cancel=None):
             raise server.ApiError("No se pudo calcular la huella de ese hablante.")
