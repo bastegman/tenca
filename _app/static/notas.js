@@ -334,23 +334,40 @@ main.addEventListener('focusout', e => {
 
 /* ---------------------------------------------------------------- pestanas Resumen / Transcripcion / Notas */
 const defaultTab = a => S.tab || (isLive(a) ? 'tx' : a.has_summary ? 'sum' : (a.txt || a.srt) ? 'tx' : 'notes');
+/* resumen y transcripción lado a lado cuando hay ancho (B5, punto 22 del review): con resumen y texto, en la página de
+   una reunión que no está en directo. Notas sigue en su pestaña */
+const DUAL_MQ = matchMedia('(min-width: 1360px)');
+const dosCol = a => S.viewMode === 'normal' && DUAL_MQ.matches && !!a.has_summary && !!(a.txt || a.srt) && !isLive(a);
+DUAL_MQ.addEventListener('change', () => { const a = curAudio(); if (a && $('#aTabs')) applyTab(a); });
 function tabsHtml(a) {
-  const tab = defaultTab(a), sj = sumJobFor(a.path);
+  const tab = defaultTab(a), sj = sumJobFor(a.path), dual = dosCol(a) && tab !== 'notes';
+  // el aviso del resumen (quién lo hizo y cuándo) va con el resumen (renderSummary), no aquí: aquí decía la
+  // configuración de ahora, también en un resumen hecho con otra
   return `<div class="ptabs">
-    <button data-tab="sum" class="${tab === 'sum' ? 'on' : ''}">${I.spark}Resumen${sj ? ' <i class="tab-dot busy"></i>' : a.has_summary ? ' <i class="tab-dot"></i>' : ''}</button>
-    <button data-tab="tx" class="${tab === 'tx' ? 'on' : ''}">${I.chat}Transcripción</button>
+    <button data-tab="sum" class="${tab === 'sum' || dual ? 'on' : ''}">${I.spark}Resumen${sj ? ' <i class="tab-dot busy"></i>' : a.has_summary ? ' <i class="tab-dot"></i>' : ''}</button>
+    <button data-tab="tx" class="${tab === 'tx' || dual ? 'on' : ''}">${I.chat}Transcripción</button>
     <button data-tab="notes" class="${tab === 'notes' ? 'on' : ''}">${I.notes}Notas${a.has_notes ? ' <i class="tab-dot"></i>' : ''}</button>
-    <span class="sp"></span><span class="muted ptab-hint">${tab === 'notes' ? 'Se guardan solas en un .md junto al audio' : tab === 'sum' ? `Hecho con IA en ${provName()}: no carga tu portátil` : ''}</span>
+    <span class="sp"></span><span class="muted ptab-hint">${tab === 'notes' ? 'Se guardan solas en un .md junto al audio' : ''}</span>
   </div>`;
 }
 function applyTab(a) {
-  const tab = defaultTab(a);
+  const tab = defaultTab(a), dual = dosCol(a) && tab !== 'notes', txv = tab === 'tx' || dual;
   $('#aTabs') && ($('#aTabs').innerHTML = tabsHtml(a));
-  $('#aTx')?.classList.toggle('hidden', tab !== 'tx');
+  $('#main .reunion-page')?.classList.toggle('dual', dual);
+  $('#aTx')?.classList.toggle('hidden', !txv);
+  if (S.viewMode === 'normal') $('#aVoz')?.classList.toggle('hidden', !txv);  // «Quién habla» va con la transcripción
   $('#aNotes')?.classList.toggle('hidden', tab !== 'notes');
-  $('#aSum')?.classList.toggle('hidden', tab !== 'sum');
+  $('#aSum')?.classList.toggle('hidden', !(tab === 'sum' || dual));
   if (tab === 'notes' && (!S.notes || S.notes.path !== a.path)) loadNotes(a);
-  if (tab === 'sum' && (!S.sum || S.sum.path !== a.path)) loadSummary(a);
+  if ((tab === 'sum' || dual) && (!S.sum || S.sum.path !== a.path)) loadSummary(a);
+}
+/* quién hizo el resumen y cuándo, de la cabecera de su .resumen.md (modelo y generado) */
+function resumenAutor(m) {
+  const mod = String(m.modelo || '').trim();
+  const quien = !mod ? '' : /claude|sonnet|opus|haiku/i.test(mod) ? `Claude (${mod})` : mod;
+  const g = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(m.generado || '');
+  const cuando = g ? `el ${+g[3]} ${MES[+g[2] - 1]} ${g[1]} a las ${g[4]}:${g[5]}` : '';
+  return `Resumen hecho con IA${quien ? ` por ${esc(quien)}` : ''}${cuando ? ` ${cuando}` : ''}`;
 }
 
 /* ---------------------------------------------------------------- resumen con IA */
@@ -484,7 +501,7 @@ function renderSummary(a) {
   }
   const m = s.meta || {};
   box.innerHTML = progress + err + `<div class="sum-tools">
-      <span class="muted">${I.spark}Generado con IA${m.modelo ? ` (${esc(m.modelo)})` : ''}${m.generado ? ` · ${esc(m.generado)}` : ''} · revísalo antes de compartirlo</span>
+      <span class="muted sum-autor">${I.spark}${resumenAutor(m)} · revísalo antes de compartirlo</span>
       <span class="sp"></span>
       <button class="btn sm" data-act="sum-copy" title="Título, fecha, asistentes confirmados y el resumen, con formato y sin los minutos: para pegarlo en un correo o en Teams">${I.copy}Copiar para correo</button>
       <button class="btn sm" data-act="sum-to-notes">${I.plus}A mis notas</button>
