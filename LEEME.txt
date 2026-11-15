@@ -19,19 +19,21 @@ ABRIR
 
 GRABAR
   "● Grabar", o Ctrl+Alt+R desde cualquier programa (otra vez para parar). Al parar, Tenca
-  termina de transcribir y, con Claude o una API, hace el resumen. Si ya tienes el audio (del
-  móvil, de WhatsApp), "Subir audio".
+  termina de transcribir y, con Claude o una API (salvo Azure OpenAI), hace el resumen. Si ya
+  tienes el audio (del móvil, de WhatsApp), "Subir audio".
 
 DÓNDE QUEDA TODO
-  - Tus reuniones (audio, transcripción, notas y resumen): en C:\Users\<tu usuario>\Tenca, una
-    carpeta por reunión dentro de la de su proyecto.
+  - Tus reuniones (audio, transcripción, notas y resumen): en esta misma carpeta, la de este
+    LEEME, una carpeta por reunión dentro de la de su proyecto.
   - Ajustes, claves y voces guardadas: en %LOCALAPPDATA%\AudiosApp, fuera de OneDrive.
   - Para quitarla: Configuración > Aplicaciones > Tenca > Desinstalar. Tus reuniones se quedan.
 
 SI ALGO FALLA
   - INSTALAR.bat se puede volver a ejecutar sin problema.
   - Si el acceso directo no abre nada, ABRIR TENCA.bat la arranca con una ventana de mensajes.
-  - Para pedir ayuda: ⚙ Ajustes > Ayuda > "Copiar diagnóstico" (sin nombres ni claves).
+  - Si no consigue descargar las librerías, suele ser el proxy de la red: prueba con otra red.
+  - Para pedir ayuda: ⚙ Ajustes > Ayuda > "Copiar diagnóstico" (solo datos técnicos; revísalo
+    antes de pegarlo).
   - Registros: en %LOCALAPPDATA%\AudiosApp. Llevan nombres y rutas: no los compartas tal cual.
 
 Todo lo demás (Hoy, quién habla, vocabulario, privacidad, límites de Groq…) está en el README:

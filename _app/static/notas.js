@@ -820,7 +820,9 @@ function tblProy(a) {
   const p = a.props || {};
   if (!p.workstream) return '';
   const v = (S.vocab || []).length ? vocabOf(a) : null;
-  return (v && v.project) || p.proyecto || '';
+  // el de la lista solo si es del proyecto de la cabecera (vocabOf se queda con la única lista de ese nombre aunque sea
+  // de otro proyecto; find_vocab en server.py no): si no, lo que dice la cabecera, como Hoy (revisión 1, P1-1)
+  return (v && deProyecto(v, p.proyecto) && v.project) || p.proyecto || '';
 }
 function tblProyTxt(a) { const pr = tblProy(a), ws = (a.props || {}).workstream; return pr && ws ? `${pr} › ${ws}` : pr || ws || ''; }
 /* qué columnas y filtros tienen datos: «Proyecto» si hay proyectos (si no, «Carpeta», como antes), «Etiquetas» y
@@ -888,10 +890,19 @@ function viewTable() {
   if (!cols.proy) t.proy = '*';
   if (!cols.tags) t.tag = '*';
   if (!cols.estado) t.estado = '*';
+  // un proyecto guardado que ya no existe: el desplegable diría «Todos» con la tabla vacía
+  if (t.proy !== '*' && t.proy !== '' && !tblProyectos().some(x => fold(x) === fold(t.proy))) t.proy = '*';
   const grupos = [['month', 'Agrupar por mes'], ...(cols.proy ? [['proy', 'Agrupar por proyecto']] : [['folder', 'Agrupar por carpeta']]),
     ...(cols.estado ? [['estado', 'Agrupar por estado']] : []), ['none', 'Sin agrupar']];
   if (!grupos.some(([v]) => v === t.group)) t.group = cols.proy && t.group === 'folder' ? 'proy' : 'month';
-  const list = tableRows();
+  let list = tableRows();
+  // agrupado por proyecto, carpeta o estado: cada grupo junto, en el orden de su reunión más reciente (ordenadas solo
+  // por fecha, un grupo se abría cada vez que cambiaba: «Alfa, Beta, Alfa»; revisión 1, P1-2)
+  if (['proy', 'folder', 'estado'].includes(t.group)) {
+    const g = new Map();
+    list.forEach(a => { const k = groupKey(a); if (!g.has(k)) g.set(k, []); g.get(k).push(a); });
+    list = [...g.values()].flat();
+  }
   const ncol = 4 + (cols.proy ? 1 : 0) + (cols.carpeta ? 1 : 0) + (cols.tags ? 1 : 0) + (cols.estado ? 1 : 0);
   const sel = (k, opts) => `<select data-tbl="${k}" aria-label="${esc(TBL_NOMBRES[k])}">${opts.map(([v, l]) => `<option value="${esc(v)}"${v === t[k] ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
   let body = '', g = null;

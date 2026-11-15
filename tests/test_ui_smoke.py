@@ -1790,7 +1790,8 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         pg, errores, red = self.pagina()
         pg.goto(f"{self.base}/?t={self.token}", wait_until="networkidle")
         pg.wait_for_selector("#main h1:has-text('Hoy')", timeout=15000)
-        guardado = "{folder: 'Proyecto', group: 'folder', estado: 'Revisada'}"  # lo de antes, en este navegador
+        # lo de antes, en este navegador: una carpeta que no la contiene y un proyecto que ya no existe
+        guardado = "{folder: 'Otra carpeta', proy: 'Ya no existe', group: 'folder', estado: 'Revisada'}"
         pg.evaluate(f"localStorage.setItem('tbl', JSON.stringify({guardado}))")
         pg.reload(wait_until="networkidle")
         pg.wait_for_selector("#main h1:has-text('Hoy')", timeout=15000)
@@ -1810,7 +1811,8 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         self.assertEqual(nombres["proy"], "Proyecto")
         self.assertNotIn("folder", nombres)  # con proyectos, el filtro de carpeta se va
         self.assertTrue(all(nombres.values()), nombres)
-        # lo guardado de antes (carpeta) ya no filtra, y «Agrupar por carpeta» pasa a «por proyecto»
+        # lo guardado de antes (carpeta, proyecto que no existe) ya no filtra, y «por carpeta» pasa a «por proyecto»
+        self.assertEqual(pg.input_value("[data-tbl='proy']"), "*")
         self.assertEqual(pg.input_value("[data-tbl='group']"), "proy")
         js = "tds => tds.map(t => t.firstChild.textContent.trim())"
         grupos = pg.eval_on_selector_all("#main .db-table tr.grp td", js)
