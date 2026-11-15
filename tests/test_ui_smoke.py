@@ -224,7 +224,8 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         pg.press("#sThreads", "Tab")
         self.guardado_junto_a(pg, "#sThreads")
         self.assertEqual(pg.evaluate("api('/api/config')")["threads"], 2)  # guardado desde una sección oculta al abrir
-        pg.evaluate("n => api('/api/settings', {threads: n})", hilos)
+        # (con setConfig: si no, el siguiente Ajustes ve otro config_rev y se repinta solo, como con otra ventana)
+        pg.evaluate("n => api('/api/settings', {threads: n}).then(setConfig)", hilos)
         pg.keyboard.press("Escape")
         # ⚙ abre en «Al grabar» (rediseño B2); volver de un subdiálogo (openSettings sin sección), en la última vista
         pg.click("#btnSettings")
