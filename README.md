@@ -83,13 +83,17 @@ grabaciones, transcripciones y notas se guardan en la carpeta de Tenca, `%USERPR
 
 ## Instalar (Windows, sin permisos de administrador)
 
-1. Consigue el zip `Tenca - instalador.zip` o este repositorio. Antes de descomprimirlo, clic derecho → Propiedades →
-   «Desbloquear» → Aceptar: así Windows no marca `INSTALAR.bat` como bajado de Internet y no sale el aviso «Unknown
-   publisher» («Windows protegió su PC»; si sale igual, «Más información» → «Ejecutar de todas formas»: el instalador
-   no lleva firma digital, nada más). Descomprímelo donde sea (Descargas vale). El zip lo
-   crea una copia que ya funciona (⚙ Ajustes → Ayuda → Compartir Tenca → «Crear instalador para otra persona») o
-   `scripts/build_zip.py` (ver «Generar el zip instalable»); el repositorio se descarga entero con Code → Download
-   ZIP.
+1. **Descargar:** `Tenca-instalador.zip` del [último Release](https://github.com/bastegman/tenca/releases/latest)
+   (enlace directo: <https://github.com/bastegman/tenca/releases/latest/download/Tenca-instalador.zip>). Cada Release
+   es una versión con su fecha y su commit, y en su página está el sha256 del zip: para comprobar que es ese, en la
+   carpeta donde lo descargaste, `certutil -hashfile Tenca-instalador.zip SHA256` tiene que dar la misma línea. Antes
+   de descomprimirlo, clic derecho → Propiedades → «Desbloquear» → Aceptar: así Windows no marca `INSTALAR.bat` como
+   bajado de Internet y no sale el aviso «Unknown publisher» («Windows protegió su PC»; si sale igual, «Más
+   información» → «Ejecutar de todas formas»: el instalador no lleva firma digital, nada más). Descomprímelo donde sea
+   (Descargas vale). Un zip con lo mismo, pero con otra fecha y por tanto sin el sha256 publicado, lo crea una copia
+   que ya funciona (⚙ Ajustes → Ayuda → Compartir Tenca → «Crear instalador para otra persona», con el nombre
+   `Tenca - instalador.zip`) o `scripts/build_zip.py` (ver «Generar el zip instalable»). Code → Download ZIP
+   descarga el repositorio tal como está en ese momento, sin versión ni sha256.
 2. Doble clic en `INSTALAR.bat`. Copia la app a su carpeta propia, `%USERPROFILE%\Tenca` (fuera de Descargas y de
    OneDrive; si esa carpeta ya existe con otras cosas, `Tenca (2)`), donde se guardarán las reuniones; para otra
    carpeta, nueva o vacía, `INSTALAR.bat -Destino <carpeta>` (solo la primera vez: si ya está instalada, se actualiza
@@ -116,16 +120,16 @@ grabaciones, transcripciones y notas se guardan en la carpeta de Tenca, `%USERPR
    Para salir del todo: clic derecho en el icono → Salir (o ⚙ Ajustes → Ayuda → Apagar Tenca). El mismo menú tiene
    «Arrancar con Windows» (copia el acceso directo del menú Inicio en la carpeta Inicio de Windows; apagado por
    defecto). Sin WebView2 (la app se abre en Edge) no hay icono: se apaga desde Ajustes.
-5. Para actualizar, descomprime el zip nuevo y ejecuta su `INSTALAR.bat`: encuentra la instalación anterior (por
-   Aplicaciones instaladas, por su acceso directo o en su carpeta propia, también con los nombres anteriores de la
-   app, «Chuleta» y «Notas») y la actualiza en su carpeta con tus grabaciones (nunca las mueve). Instalada encima de
-   Chuleta, no queda nada con ese nombre: sus accesos directos (escritorio, menú Inicio y «Arrancar con Windows»)
-   pasan a llamarse «Tenca», sin duplicados; su entrada de Aplicaciones instaladas y su `ABRIR CHULETA.bat` se
-   quitan. La carpeta de las reuniones conserva su nombre (`%USERPROFILE%\Chuleta`: renombrarla rompería lo que
-   apunta a ella), la app la enseña con ese nombre («Se guarda en Chuleta\…») y los datos siguen en
-   `%LOCALAPPDATA%\AudiosApp`. Un anclaje de la barra de tareas no lo puede
-   cambiar un instalador: el instalador lo detecta y dice cómo volver a anclarla. Si varias copias de Tenca usan la
-   misma carpeta de reuniones (otro PC, OneDrive), actualízalas todas a la vez (ver «Privacidad»).
+5. Para actualizar, descarga el zip del último Release (como en el paso 1), descomprímelo y ejecuta su `INSTALAR.bat`:
+   encuentra la instalación anterior (por Aplicaciones instaladas, por su acceso directo o en su carpeta propia, también
+   con los nombres anteriores de la app, «Chuleta» y «Notas») y la actualiza en su carpeta con tus grabaciones (nunca
+   las mueve). Instalada encima de Chuleta, no queda nada con ese nombre: sus accesos directos (escritorio, menú Inicio
+   y «Arrancar con Windows») pasan a llamarse «Tenca», sin duplicados; su entrada de Aplicaciones instaladas y su
+   `ABRIR CHULETA.bat` se quitan. La carpeta de las reuniones conserva su nombre (`%USERPROFILE%\Chuleta`: renombrarla
+   rompería lo que apunta a ella), la app la enseña con ese nombre («Se guarda en Chuleta\…») y los datos siguen en
+   `%LOCALAPPDATA%\AudiosApp`. Un anclaje de la barra de tareas no lo puede cambiar un instalador: el instalador lo
+   detecta y dice cómo volver a anclarla. Si varias copias de Tenca usan la misma carpeta de reuniones (otro PC,
+   OneDrive), actualízalas todas a la vez (ver «Privacidad»).
 
 ### Instalar con Setup.exe (otra forma, la misma instalación)
 
@@ -314,6 +318,15 @@ en un sitio público. `server.log` y `voces.log` sí llevan nombres de reuniones
 
 ### CI
 
+`main` está protegida con una regla del repositorio (Settings → Rules → Rulesets, «main»), sin excepciones: no admite
+force-push ni borrarla, y solo acepta un commit que ya tenga en verde los 10 checks de `tests.yml` (los 8 de la suite,
+`lint` y `agnosticismo`). No exige pull request: un commit se sube primero a su rama, su CI pasa ahí y luego ese mismo
+commit se lleva a `main` (`git push origin <sha>:main`). Si un check de `tests.yml` cambia de nombre o sale de la
+matriz, hay que cambiarlo también en la regla: si no, `main` no acepta nada. Dependabot (`.github/dependabot.yml`)
+propone cada semana, en un pull request, las versiones nuevas de las acciones y de `requirements*.txt` (las de pip salen
+en rojo hasta que se cambie también la lista de `_app/instalar.ps1`, que `test_package` exige igual), y las alertas de
+seguridad están activadas.
+
 - `tests.yml`, con cada push y pull request: la suite en Ubuntu y Windows × Python 3.10–3.13, el parseo de
   `_app/*.ps1` con Windows PowerShell 5.1, flake8 y el job `agnosticismo`.
 - `ui-smoke` (la interfaz en Chromium con Playwright, en Ubuntu y Windows: arranque con token, Ajustes, Reuniones,
@@ -375,6 +388,20 @@ python3 scripts/build_zip.py            # deja dist/Tenca - instalador.zip (sin 
 
 `--vocab [CARPETA]` añade las listas `<proyecto>/Vocabulario/*.txt` de esa carpeta (por defecto, la raíz del repo):
 llevan nombres de personas y empresas, así que ese zip es solo para gente del mismo proyecto, nunca para publicar.
+
+### Publicar una versión (Release)
+
+```
+python scripts/publicar_release.py               # prepara y comprueba el zip de origin/main y las notas, sin publicar
+python scripts/publicar_release.py --publicar    # además crea el Release vAAAA.MM.DD-<sha corto>
+```
+
+Exporta con `git archive` los ficheros versionados de esa versión (nada ignorado ni sin commitear de la copia de
+trabajo), genera el zip con su `build_zip.py` **sin** `--vocab` y lo comprueba: ninguna carpeta `Vocabulario`, ningún
+`.txt` fuera de los de la app y ningún fichero que no esté en git. Si algo falla, no publica. Sube
+`Tenca-instalador.zip` y su `.sha256`; las notas llevan el sha256, cómo comprobarlo y los apartados del CHANGELOG
+nuevos desde el Release anterior. Al final descarga lo publicado y comprueba que el sha256 es el mismo. Solo publica
+versiones que ya están en `origin/main` y nunca dos veces la misma. Necesita `gh` con sesión iniciada y numpy.
 
 ### Generar el Setup.exe
 
