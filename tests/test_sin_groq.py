@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Sin Groq por defecto: a quien instala por primera vez no se le sugiere un servicio concreto. En una
-instalación nueva lo de por defecto es «Solo en este PC» y nada sugiere ni preselecciona Groq: ni la portada, ni el
-asistente, ni Ajustes. Groq sigue dentro de «API externa» para quien lo elija, y quien ya lo usa no nota nada.
+"""Ningún proveedor de la nube por defecto: a quien instala por primera vez no se le sugiere un servicio concreto. En
+una instalación nueva lo de por defecto es «Solo en este PC» y nada sugiere ni preselecciona un proveedor: ni la
+portada, ni el asistente, ni Ajustes. Todos siguen dentro de «API externa», y quien ya usa uno no nota nada.
 El servidor de verdad y la interfaz en Chromium (como test_ui_smoke; en ui-smoke.yml, Ubuntu y Windows)."""
 import json
 import os
@@ -45,24 +45,24 @@ class GuardarTests(TempTree):
         return a
 
     def test_un_proveedor_vacio_no_se_guarda(self):
-        """«Elige el proveedor…» sin elegir: si llegara vacío, el motor tomaría Groq (engines: provider or "groq")."""
+        """«Elige el proveedor…» sin elegir: si llegara vacío, el motor tomaría el de por defecto (engines.endpoint)."""
         a = self.app()
         a.save_settings({"cloud": {"provider": "", "chunk_minutes": 10}})
         self.assertEqual(a.settings.get()["cloud"]["provider"], "groq")  # el de los ajustes, sin tocar
         a.save_settings({"cloud": {"provider": "inventado"}})
         self.assertEqual(a.settings.get()["cloud"]["provider"], "groq")
         a.save_settings({"cloud": {"extra_keys_by": {"": ["gsk_sin_proveedor"]}}})
-        self.assertEqual(a.settings.get()["cloud"].get("extra_keys") or [], [])  # no van a parar a las de Groq
+        self.assertEqual(a.settings.get()["cloud"].get("extra_keys") or [], [])  # ni a las del de por defecto
         a.save_settings({"cloud": {"provider": "openai"}})
         self.assertEqual(a.settings.get()["cloud"]["provider"], "openai")
 
     def test_la_prueba_sin_proveedor_no_va_a_groq(self):
-        """La prueba del asistente con un proveedor vacío o desconocido no va a Groq (revisor 2). Que «Guardar» y
+        """La prueba del asistente con un proveedor vacío o desconocido no va al de por defecto. Que «Guardar» y
         «Aplicar ahora» no guarden la API sin proveedor lo pone la interfaz (test_portada_asistente_y_ajustes_sin_groq):
         el servidor sigue aceptando {procesado: api} como antes, que es lo que esperan otros caminos y tests."""
         a = self.app()
         st, _ = a._candidata({"candidata": {"procesado": "api", "cloud": {"provider": "", "api_key": "k"}}})
-        self.assertEqual(st["cloud"]["provider"], "")  # el motor lo rechaza: nada sale hacia Groq
+        self.assertEqual(st["cloud"]["provider"], "")  # el motor lo rechaza: nada sale hacia ningún proveedor
         st, _ = a._candidata({"candidata": {"procesado": "api", "cloud": {"provider": "inventado", "api_key": "k"}}})
         self.assertEqual(st["cloud"]["provider"], "")
         st, _ = a._candidata({"candidata": {"procesado": "api", "cloud": {"provider": "openai", "api_key": "k"}}})
@@ -71,7 +71,8 @@ class GuardarTests(TempTree):
         self.assertEqual((a.settings.get()["procesado"], a.settings.get()["cloud"]["provider"]), ("api", "openai"))
 
     def test_quien_ya_tiene_groq_puede_volver_a_la_api(self):
-        """Con su clave de Groq guardada (y el procesado en local), «Aplicar ahora» con la API sigue como siempre."""
+        """Con su clave del de por defecto guardada (y el procesado en local), «Aplicar ahora» con la API sigue como
+        siempre."""
         a = self.app(cloud={"provider": "groq", "api_key": "gsk_x"}, procesado="local")
         a.save_settings({"procesado": "api"})
         self.assertEqual((a.settings.get()["procesado"], a.settings.get()["cloud"]["provider"]), ("api", "groq"))
@@ -80,7 +81,7 @@ class GuardarTests(TempTree):
 
     def test_el_motor_no_manda_a_groq_sin_proveedor(self):
         """La prueba del asistente sin proveedor (marcada por _candidata) no sale. Unos ajustes GUARDADOS con un
-        proveedor vacío van a Groq, como hasta fe29522 (fix-groq, tests/test_fix_groq.py)."""
+        proveedor vacío van al de por defecto, como hasta fe29522 (tests/test_fix_groq.py)."""
         from support import engines
         for p in ("", "inventado"):
             with self.subTest(p=p), self.assertRaises(engines.EngineError) as cm:
@@ -91,7 +92,7 @@ class GuardarTests(TempTree):
 
 @unittest.skipUnless(sync_playwright, "playwright no instalado")
 class InstalacionNuevaTests(unittest.TestCase):
-    """Una instalación nueva (sin settings.json) y otra que ya usa Groq, en Chromium."""
+    """Una instalación nueva (sin settings.json) y otra que ya usa el proveedor por defecto, en Chromium."""
 
     @classmethod
     def setUpClass(cls):
@@ -127,7 +128,7 @@ class InstalacionNuevaTests(unittest.TestCase):
             pg.screenshot(path=os.path.join(self.art, f"singroq_{nombre}.png"))
 
     def visible(self, pg):
-        """El texto que se ve, sin las listas desplegables (sus opciones son la lista de proveedores, también Groq)."""
+        """El texto que se ve, sin las listas desplegables (sus opciones son la lista de proveedores)."""
         return pg.evaluate("() => { const st = document.createElement('style');"
                            " st.textContent = 'select{display:none!important}'; document.head.append(st);"
                            " const t = document.body.innerText; st.remove(); return t }")
@@ -190,7 +191,7 @@ class InstalacionNuevaTests(unittest.TestCase):
         self.assertFalse(self.nueva.get("/api/config")["cloud"]["elegido"])
         self.assertNotEqual(self.nueva.get("/api/config").get("procesado"), "api")
         self.assertNotRegex(self.visible(pg), r"\ba el\b")  # «las envía a tu proveedor», no «a el proveedor…»
-        # el asistente, con Groq elegido a mano: el modelo es el guardado (el más preciso), no el primero de la lista
+        # el asistente, con su proveedor elegido a mano: el modelo es el guardado (el más preciso), no el primero
         pg.keyboard.press("Escape")
         cand = pg.evaluate("() => { abrirConfigurar({paso: 2, modo: 'api'}); W.cloud.provider = 'groq'; "
                            "const c = wzCandidata(); closeModal(false); return c }")
@@ -206,7 +207,7 @@ class InstalacionNuevaTests(unittest.TestCase):
         pg.evaluate("() => openSettings({sec: 'procesado'})")
         pg.wait_for_selector("#modal .cfg-estado", timeout=10000)
         self.assertIn("Groq", pg.locator("#modal .cfg-estado").text_content())  # su proveedor, como siempre
-        self.assertIn("whisper-large-v3", pg.locator("#cModel").inner_text())  # y los modelos de Groq
+        self.assertIn("whisper-large-v3", pg.locator("#cModel").inner_text())  # y los modelos de su proveedor
         pg.keyboard.press("Escape")
         pg.evaluate("() => abrirConfigurar({paso: 2, modo: 'api'})")
         pg.wait_for_selector(".wz-body h2", timeout=5000)
@@ -219,8 +220,8 @@ class InstalacionNuevaTests(unittest.TestCase):
         self.sin_errores()
 
 
-# settings.json de quien ya usa Groq tal como lo dejaba la versión anterior (main 7b1b3a6) al guardar desde Ajustes:
-# el bloque «cloud» entero de sus DEFAULT_SETTINGS, con su clave, una clave adicional de otra cuenta de Groq (la
+# settings.json de quien ya usa el proveedor por defecto tal como lo dejaba la versión anterior (main 7b1b3a6) al
+# guardar desde Ajustes: el bloque «cloud» entero de sus DEFAULT_SETTINGS, con su clave, una de otra cuenta (la
 # rotación del cupo del directo) y lo demás como venía
 CLAVE_2 = "gsk_" + "segunda" * 5
 GROQ_VIEJO = {"procesado": "api", "preset": "nube", "live_preset": "nube", "language": "es-en",
@@ -240,7 +241,7 @@ def _claro(v):
 
 @unittest.skipUnless(sync_playwright, "Playwright no instalado")
 class ActualizarConGroqTests(unittest.TestCase):
-    """Quien ya usa Groq instala esta versión encima: su configuración sigue igual al arrancar y
+    """Quien ya usa el proveedor por defecto instala esta versión encima: su configuración sigue igual al arrancar y
     también después de abrir Ajustes › Procesado y pulsar «Guardar» sin tocar nada (integración del 09/11/2026)."""
 
     @classmethod
@@ -303,6 +304,71 @@ class ActualizarConGroqTests(unittest.TestCase):
         self.assertTrue(cfg["cloud"]["elegido"])
         self.assertEqual((cfg["procesado"], cfg["cloud"]["provider"]), ("api", "groq"))
         self.assertEqual(errores, [])
+
+
+class TextosDelProveedorTests(unittest.TestCase):
+    """Los avisos de cupo, esperas y límites nombran al proveedor elegido (engines.provider_name), nunca a uno fijo:
+    hasta el 16/11/2026 el resumen y el directo decían siempre el mismo aunque se usara otro."""
+
+    def test_como_se_llama(self):
+        from support import engines
+        self.assertEqual(engines.provider_name({"provider": "openai"}), "OpenAI")
+        self.assertEqual(engines.provider_name({"provider": "azure"}), "Azure OpenAI")
+        self.assertEqual(engines.provider_name({"provider": "custom"}), "tu API")
+        self.assertEqual(engines.provider_name({"provider": "custom"}, inicio=True), "Tu API")
+        for cfg in ({}, None, {"provider": ""}, {"provider": "inventado"}):  # el que usa el motor
+            with self.subTest(cfg=cfg):
+                self.assertEqual(engines.provider_name(cfg), engines.PROVIDERS[server.DEFAULT_SETTINGS["cloud"]
+                                                                               ["provider"]]["label"])
+
+    def test_directo_y_cola(self):
+        from support import engines
+        from test_directo import Clock, FakeResponse
+        from test_directo_auditoria import Net, chunk_file, post
+        largo = FakeResponse(429, {"retry-after": "5400"}, {"error": {"message": "daily limit"}})
+        ok = FakeResponse(200, {}, {"text": "hola", "segments": [], "language": "spanish"})
+        for cfg, nombre in (({"provider": "openai", "api_key": "sk-a"}, "OpenAI"),
+                            ({"provider": "custom", "api_key": "k", "base_url": "https://api.empresa.example/v1"},
+                             "Tu API")):
+            with self.subTest(nombre=nombre):
+                tmp, chunk = chunk_file(self)
+                eng = engines.CloudEngine(tmp)
+                eng.keys.clock = Clock()
+                with Net([largo]), self.assertRaises(engines.EngineError) as cm:
+                    post(eng, cfg, chunk)
+                self.assertIn(f"{nombre} pide esperar 90 min", str(cm.exception))
+        tmp, chunk = chunk_file(self)
+        eng = engines.CloudEngine(tmp)
+        eng.keys.clock = Clock()
+        etapas = []
+        with Net([largo, ok]):
+            eng._post({"provider": "openai", "api_key": "sk-a", "extra_keys_openai": ["sk-b"]}, chunk, None, None,
+                      lambda **k: etapas.append(k.get("stage")), lambda: False)
+        self.assertIn("Esa cuenta de OpenAI ha agotado su cupo: se sigue con la siguiente clave…", etapas)
+
+    def test_resumen(self):
+        from support import engines
+        from test_directo import Clock, FakeResponse
+        from test_directo_auditoria import CHAT_OK, Net
+        cfg = {"provider": "openai", "api_key": "sk-a"}
+
+        def chat(respuestas, s=None):
+            s = s or engines.Summarizer()
+            s.keys.clock = Clock()
+            etapas = []
+            with Net(respuestas):
+                s._chat(cfg, "sistema", "texto", 50, lambda **k: etapas.append(k.get("stage")), lambda: False,
+                        attempts=2)
+            return etapas
+        self.assertIn("OpenAI pide esperar 5 s (límite por minuto)…",
+                      chat([FakeResponse(429, {"retry-after": "5"}, {}), FakeResponse(200, {}, CHAT_OK)]))
+        s = engines.Summarizer()
+        s.remaining, s.reset_at = 0, time.time() + 30  # sin tokens en este minuto: se espera
+        self.assertTrue(any(e and e.startswith("Esperando al límite por minuto de OpenAI (")
+                            for e in chat([FakeResponse(200, {}, CHAT_OK)], s)))
+        with self.assertRaises(engines.EngineError) as cm:
+            chat([FakeResponse(429, {"retry-after": "9000"}, {})])
+        self.assertIn("Límite diario de OpenAI alcanzado", str(cm.exception))
 
 
 if __name__ == "__main__":

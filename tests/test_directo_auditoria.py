@@ -140,8 +140,8 @@ def run_session(spans, total, latency=0.8, remaining=None, translate=False, fail
 
 class ClavesPorProveedorTests(unittest.TestCase):
     def test_las_de_groq_no_salen_hacia_azure(self):
-        """El caso de la auditoria: con Azure y claves adicionales de Groq guardadas, la segunda peticion salia hacia
-        …openai.azure.com con la clave de Groq (Azure tambien manda x-ratelimit-remaining-requests)."""
+        """El caso de la auditoria: con Azure y claves adicionales del de por defecto guardadas, la segunda peticion
+        salia hacia …openai.azure.com con una de esas claves (Azure tambien manda x-ratelimit-remaining-requests)."""
         tmp, chunk = chunk_file(self)
         cfg = dict(AZURE, extra_keys=[K2])
         eng = engines.CloudEngine(tmp)
@@ -159,7 +159,7 @@ class ClavesPorProveedorTests(unittest.TestCase):
         cfg = {"api_key": "main", "extra_keys": ["g1"], "extra_keys_openai": ["o1"], "extra_keys_azure": ["a1"],
                "extra_keys_custom": ["c1", "main"]}
         self.assertEqual(engines.cloud_keys(dict(cfg, provider="groq")), ["main", "g1"])
-        self.assertEqual(engines.cloud_keys(cfg), ["main", "g1"])  # sin proveedor = Groq, como siempre
+        self.assertEqual(engines.cloud_keys(cfg), ["main", "g1"])  # sin proveedor = el de por defecto, como siempre
         self.assertEqual(engines.cloud_keys(dict(cfg, provider="openai")), ["main", "o1"])
         self.assertEqual(engines.cloud_keys(dict(cfg, provider="azure")), ["main", "a1"])
         self.assertEqual(engines.cloud_keys(dict(cfg, provider="custom")), ["main", "c1"])
@@ -183,14 +183,14 @@ class ClavesPorProveedorAjustesTests(unittest.TestCase):
         groq = ["gsk_a_000000001", "gsk_b_000000002"]  # mascaras distintas (gsk_…0001 y gsk_…0002)
         self.app.save_settings({"cloud": {"extra_keys": groq}})
         masks = [server.masked(k) for k in groq]
-        # la interfaz de antes reenviaba las mascaras de Groq al pasar a Azure: no se convierten en claves de Azure
+        # la interfaz de antes reenviaba las mascaras del de por defecto al pasar a Azure: no son claves de Azure
         self.app.save_settings({"cloud": {"provider": "azure", "azure_endpoint": "https://r.openai.azure.com",
                                           "azure_deployment": "whisper", "extra_keys": masks}})
         c = self.cloud()
-        self.assertEqual(c["extra_keys"], groq)  # se conservan, con Groq
+        self.assertEqual(c["extra_keys"], groq)  # se conservan, con el de por defecto
         self.assertEqual(c["extra_keys_azure"], [])
         self.assertEqual(engines.cloud_keys(c), ["gsk_main_000000000"])
-        # las de Azure se guardan con Azure; al volver a Groq, las de Groq
+        # las de Azure se guardan con Azure; al volver al de por defecto, las suyas
         self.app.save_settings({"cloud": {"extra_keys_by": {"azure": ["az-extra-0000000000"], "groq": masks}}})
         self.assertEqual(engines.cloud_keys(self.cloud()), ["gsk_main_000000000", "az-extra-0000000000"])
         self.app.save_settings({"cloud": {"provider": "groq"}})
@@ -203,7 +203,7 @@ class ClavesPorProveedorAjustesTests(unittest.TestCase):
         self.app.save_settings({"cloud": {"extra_keys_by": {"custom": ["clave-de-la-pasarela-0001"]}}})
         with open(self.app.settings.path, encoding="utf-8") as f:
             raw = f.read()
-        self.assertNotIn("clave-de-la-pasarela-0001", raw)  # cifrada como las de Groq
+        self.assertNotIn("clave-de-la-pasarela-0001", raw)  # cifrada como las demas
         again = server.Store(self.app.settings.path, server.DEFAULT_SETTINGS)
         self.assertEqual(again.get()["cloud"]["extra_keys_custom"], ["clave-de-la-pasarela-0001"])
         self.app.jobs = types.SimpleNamespace(cloud=engines.CloudEngine(self.tmp), summary_ready=lambda: True)
@@ -212,12 +212,12 @@ class ClavesPorProveedorAjustesTests(unittest.TestCase):
             cfg = server.App.config(self.app, {})
         self.assertNotIn("clave-de-la-pasarela-0001", json.dumps(cfg))
         self.assertEqual(cfg["cloud"]["extra_keys_by"]["custom"], [server.masked("clave-de-la-pasarela-0001")])
-        self.assertEqual(cfg["cloud"]["extra_keys"], [])  # el proveedor es Groq: las de la pasarela no son suyas
+        self.assertEqual(cfg["cloud"]["extra_keys"], [])  # es el de por defecto: las de la pasarela no son suyas
 
 
 class DiagnosticoClavesTests(TempTree):
     def test_enmascara_las_adicionales_de_todos_los_proveedores(self):
-        """scrub recibe las claves adicionales de todos los proveedores, no solo las de Groq. Se mira lo que recibe y
+        """scrub recibe las claves adicionales de todos los proveedores, no solo las de uno. Se mira lo que recibe y
         no solo el texto: con la lista blanca de fix-privacidad, una linea que no es de la app ya sale como «<texto>»,
         pero scrub sigue siendo lo que enmascara las claves en lo que si sale."""
         app = server.App.__new__(server.App)
@@ -238,7 +238,7 @@ class DiagnosticoClavesTests(TempTree):
                      "este test vigila la fusion")
 class AjustesRotosClavesPorProveedorTests(unittest.TestCase):
     """settings.json cortado: el rescate (Store.RESCUE, que lleva todos los SECRETS) recupera tambien las claves
-    adicionales de OpenAI, Azure y la pasarela, no solo las de Groq, y el aviso las cuenta todas."""
+    adicionales de OpenAI, Azure y la pasarela, no solo las del de por defecto, y el aviso las cuenta todas."""
 
     def test_se_rescatan_las_de_todos_los_proveedores(self):
         tmp = tempfile.mkdtemp(prefix="chuleta-ajustes-")
@@ -293,7 +293,7 @@ class InterfazTextosTests(unittest.TestCase):
         js = read("directo.js")
         self.assertIn("extra_keys_by", js)  # cada proveedor, sus claves
         self.assertIn("directoOwnerText(cur, state)", js)
-        self.assertNotIn("Pega aquí la API key de otra cuenta de Groq'", js)  # el proveedor, no Groq fijo
+        self.assertNotIn("Pega aquí la API key de otra cuenta de Groq'", js)  # el proveedor, no uno fijo
         self.assertIn('id="cLiveModelCustom"', js)  # «Otra (compatible)»: su modelo del directo
         self.assertIn("out.live_model_custom", js)
 
@@ -374,7 +374,7 @@ class SinPasarDelLimitePorMinutoTests(unittest.TestCase):  # P1-14: ponerse al d
         p = pool()
         p.note("k", "whisper", 200, {"x-ratelimit-remaining-requests": "0", "x-ratelimit-reset-requests": "45s"})
         self.assertAlmostEqual(p.reserve("k", "whisper", per_minute=True), 45.0)
-        q = pool()  # en Groq el limite y la renovacion son del dia: ni hueco de 60/2000 s ni esperar horas
+        q = pool()  # con cupo diario, el limite y la renovacion son del dia: ni hueco de 60/2000 s ni esperar horas
         q.note("k", "whisper", 200, {"x-ratelimit-limit-requests": "2000", "x-ratelimit-remaining-requests": "0",
                                      "x-ratelimit-reset-requests": "5h"})
         self.assertEqual(q.reserve("k", "whisper", per_minute=True), 0.0)

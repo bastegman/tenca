@@ -7,8 +7,8 @@ Mientras tanto, cada pocos segundos se lee lo nuevo, se pasa a 16 kHz mono, se c
 pausa (VAD) y se transcribe ese trozo. El .txt/.srt junto al audio se reescribe tras cada trozo,
 asi que en la app se va viendo el texto casi al momento.
 
-En la nube (Groq) el directo va en trozos de 3-6 s cortados en la primera pausa, solo con la voz
-(sin los silencios de los extremos) y al ritmo que permite el cupo gratuito del dia: con menos
+En la nube el directo va en trozos de 3-6 s cortados en la primera pausa, solo con la voz
+(sin los silencios de los extremos) y al ritmo que permite el cupo del dia del proveedor: con menos
 peticiones restantes, trozos mas largos; con muy pocas, el directo se pausa (la grabacion sigue y
 lo que falte se transcribe despues en trozos grandes, mas el repaso final). Si la API va mas lenta que
 la reunion (un cupo por minuto bajo, la red), lo pendiente se junta en peticiones mas grandes hasta
@@ -406,7 +406,7 @@ def fmt_phases(p):
 class Latency:
     """Latencia del directo: del final del audio de cada trozo (cuando ya estaba en el fichero) al texto escrito.
     marks: (segundos grabados, hora de pared en que el fichero llegaba hasta ahi), una por lectura.
-    Ademas, por fases (PHASES), para saber si el cuello esta en la red/Groq o en este lado."""
+    Ademas, por fases (PHASES), para saber si el cuello esta en la red/el proveedor o en este lado."""
 
     def __init__(self, keep=400):
         self.marks, self.samples, self.keep = [], [], keep
@@ -468,16 +468,17 @@ def no_key_message(why):
             "y lo que falte se transcribe al terminar.")
 
 
-def pause_message(q):
-    """Texto del estado cuando el directo se pausa por falta de cupo."""
+def pause_message(q, proveedor):
+    """Texto del estado cuando el directo se pausa por falta de cupo. proveedor: como se llama en los textos el de la
+    nube (engines.provider_name)."""
     if q.get("blocked_for"):
-        head = f"Groq pide esperar {fmt_wait(q['blocked_for'])}"
+        head = f"{proveedor} pide esperar {fmt_wait(q['blocked_for'])}"
     elif q.get("remaining") is not None:
-        head = f"quedan {q['remaining']} peticiones de Groq hoy"
+        head = f"quedan {q['remaining']} peticiones de {proveedor} hoy"
         if q.get("reset_in"):
             head += f" (se renuevan en {fmt_wait(q['reset_in'])})"
     else:
-        head = "sin cupo en Groq"
+        head = f"sin cupo en {proveedor}"
     return (f"Directo en pausa: {head}. La grabación sigue; lo que falte se transcribe al terminar "
             "y el repaso final se hace igual.")
 
@@ -885,7 +886,8 @@ def run(job, path, opts, write, log):
                 except engines.EngineError as e:  # sin API key (se quito en Ajustes): en pausa, sin mandar nada
                     why = str(e)
                 if pace is None and job.recording:
-                    msg = pause_message(keys.public(cfg, model=lm)) if why is None else no_key_message(why)
+                    msg = (pause_message(keys.public(cfg, model=lm), engines.provider_name(cfg)) if why is None
+                           else no_key_message(why))
                     if not paused_logged:
                         log("   " + msg)
                         paused_logged = True
@@ -956,7 +958,7 @@ def run(job, path, opts, write, log):
                         if not cloud:  # en local, como siempre
                             raise
                         # en la nube la sesion no se cae por un trozo (tampoco al ponerse al dia ni el ultimo): se
-                        # salta, la grabacion sigue y el repaso final lo recupera; si Groq ha bloqueado la clave, la
+                        # salta, la grabacion sigue y el repaso final lo recupera; si el proveedor bloquea la clave, la
                         # siguiente vuelta entra en pausa. Tambien un fallo inesperado (una respuesta rara del proxy)
                         err = str(e) if isinstance(e, engines.EngineError) else f"{e.__class__.__name__}: {e}"
                         new, job.live_error, fallo = [], err, True

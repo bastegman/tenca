@@ -5,7 +5,7 @@ corto, y comprobar que lo que la interfaz enseña junto a «Modelo» cuadra con 
 
 - «Solo en este PC»: Whisper medium de verdad (1,5 GB desde Hugging Face, con su progreso en MB y %).
 - «Con tu cuenta de Claude»: transcribe el mismo Whisper; «Comprobar» y el resumen, con un Claude Code falso en el PATH.
-- «API externa» (Groq): contra un Groq falso en 127.0.0.1 que imita su API (cabeceras de cupo incluidas). Nunca una
+- «API externa»: contra una API falsa en 127.0.0.1 que imita la de verdad (cabeceras de cupo incluidas). Nunca una
   clave real en la CI.
 
 La voz se sintetiza en el momento (SAPI en Windows, `say` en macOS): no hay audio en el repo. Pesado (descarga 1,5 GB,
@@ -38,7 +38,7 @@ ACTIVO = os.environ.get("CHULETA_E2E_PROCESADO") == "1"
 FRASE = ("Hello, this is a test of the meeting notes application. We are checking that the transcription works on "
          "this computer.")
 GROQ_TEXTO = " This is the fake Groq transcription."
-CLAVE = "gsk_prueba_e2e_" + "0" * 24  # falsa: solo la ve el Groq de 127.0.0.1
+CLAVE = "gsk_prueba_e2e_" + "0" * 24  # falsa: solo la ve la API falsa de 127.0.0.1
 
 
 def puerto_libre():
@@ -115,7 +115,8 @@ class GrabacionEnCurso:
 
 
 class GroqFalso:
-    """Imita /openai/v1/audio/transcriptions y /chat/completions de Groq: verbose_json, cabeceras de cupo y 401 si la
+    """Imita /openai/v1/audio/transcriptions y /chat/completions del proveedor por defecto: verbose_json, cabeceras de
+    cupo y 401 si la
     clave no es la de la prueba. Apunta cada petición (ruta, modelo, clave)."""
 
     def __init__(self):
@@ -308,7 +309,7 @@ class TresModosE2E(unittest.TestCase):
         pg.check(f".dialog.wz input[name='wzModo'][value='{modo}']")
         pg.click(".wz-foot [data-wz='sig']")
         if modo == "api":
-            if pg.locator("#wzProv").is_visible():  # en una instalación nueva no hay proveedor elegido (sin-groq)
+            if pg.locator("#wzProv").is_visible():  # en una instalación nueva no hay proveedor elegido
                 pg.select_option("#wzProv", "groq")
                 pg.wait_for_selector("#wzKey", timeout=5000)
             pg.fill("#wzKey", CLAVE)
@@ -399,7 +400,7 @@ class TresModosE2E(unittest.TestCase):
         self.assertEqual((job["preset"], job["engine"]), ("medium", "live"))
         t = self.esperar_texto(rel, "test", 300)
         print(f"   directo local: {t!r}", flush=True)
-        self.assertFalse([p for p in self.groq.peticiones], "en local no puede salir nada hacia Groq")
+        self.assertFalse([p for p in self.groq.peticiones], "en local no puede salir nada hacia la nube")
         self.idioma_en_pleno_directo_local()
         self.idioma_propuesto_local()
 
@@ -437,7 +438,7 @@ class TresModosE2E(unittest.TestCase):
     def idioma_propuesto_local(self):
         """B6, punto 3, con el Whisper medium de verdad: la reunión en «Solo español» y la voz en inglés. El worker oye
         el idioma de cada trozo en la salida del encoder (worker._Escucha) y, con dos trozos seguidos y 30 s de voz,
-        el directo propone «Lo último suena a inglés» (directo.propuesta). Sin nube: nada sale hacia Groq."""
+        el directo propone «Lo último suena a inglés» (directo.propuesta). Sin nube: nada sale hacia la API."""
         rel = "Pruebas/" + time.strftime("%Y-%m-%d %H-%M-%S") + " - Directo propuesta.wav"
         grab = GrabacionEnCurso(os.path.join(self.root, rel), self.pcm * 6)
         try:
@@ -463,7 +464,7 @@ class TresModosE2E(unittest.TestCase):
                 self.pg.wait_for_function("() => /Lo último suena a inglés/.test((document.querySelector("
                                           "'[data-lh-avisos]') || {}).innerText || '')", timeout=15000)
                 self.foto("1-idioma-propuesto-local")
-            self.assertFalse([p for p in self.groq.peticiones], "en local no puede salir nada hacia Groq")
+            self.assertFalse([p for p in self.groq.peticiones], "en local no puede salir nada hacia la nube")
         finally:
             grab.cerrar()
 
@@ -497,12 +498,12 @@ class TresModosE2E(unittest.TestCase):
                       pg.inner_text("#lHero [data-modo-linea]"))
         self.assertNotIn("groq", pg.text_content(".lh-label").lower())
         self.esperar_texto(rel, "test", 300)
-        self.assertFalse([p for p in self.groq.peticiones], "con Claude no puede salir nada hacia Groq")
+        self.assertFalse([p for p in self.groq.peticiones], "con Claude no puede salir nada hacia la API")
 
     def test_3_api_externa_groq(self):
         pg = self.pg
         self.ajustes()
-        self.elegir("api")  # con Groq y la clave (el Groq falso de 127.0.0.1)
+        self.elegir("api")  # con el proveedor por defecto y la clave (la API falsa de 127.0.0.1)
         self.foto("3-ajustes-groq")
         pg.keyboard.press("Escape")
         pg.wait_for_function("document.querySelector('#modal').classList.contains('hidden')", timeout=10000)
@@ -513,7 +514,7 @@ class TresModosE2E(unittest.TestCase):
         self.assertEqual(motor, "en la nube · Groq")
         self.assertEqual(job["preset"], "nube")
         t = self.esperar_texto(rel, "fake groq", 120)
-        print(f"\n   directo en Groq (falso): {t!r}", flush=True)
+        print(f"\n   directo en la API (falsa): {t!r}", flush=True)
         modelos = {m for p, m, ok in self.groq.peticiones if p.endswith("/audio/transcriptions") and ok}
         self.assertIn("whisper-large-v3-turbo", modelos)  # el directo, con el modelo rápido
         self.assertTrue(all(ok for _, _, ok in self.groq.peticiones), self.groq.peticiones)

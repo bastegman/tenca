@@ -36,7 +36,7 @@ SI ALGO FALLA
     antes de pegarlo).
   - Registros: en %LOCALAPPDATA%\AudiosApp. Llevan nombres y rutas: no los compartas tal cual.
 
-Todo lo demás (Hoy, quién habla, vocabulario, privacidad, límites de Groq…) está en el README:
+Todo lo demás (Hoy, quién habla, vocabulario, privacidad, el cupo de tu API…) está en el README:
 https://github.com/bastegman/tenca#readme
 
 Tenca es gratis. Si te ayuda, puedes invitar al autor a un café:

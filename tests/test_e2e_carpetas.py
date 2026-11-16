@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """E2E de «cambiar la carpeta en pleno directo» (B1c) con la app de verdad: el servidor arrancado como lo
 arranca el acceso directo, la grabadora real (`recorder.py`) con la tarjeta de sonido falsa de tests/fake_soundcard
-(en la CI no hay dispositivos de audio), el directo, el repaso final y el resumen en un Groq falso en 127.0.0.1, y la
+(en la CI no hay dispositivos de audio), el directo, el repaso final y el resumen en una API falsa en 127.0.0.1, y la
 interfaz en Chromium (Playwright):
 
 1. graba 33 s en el proyecto Alfa: la grabación va a su carpeta «AAAA-MM-DD Comité de seguimiento» (B1b);
@@ -29,7 +29,7 @@ try:
 except ImportError:  # pragma: no cover
     sync_playwright = None
 
-from test_e2e_procesado import CLAVE, GroqFalso, puerto_libre  # Groq falso (nunca una clave real en la CI)
+from test_e2e_procesado import CLAVE, GroqFalso, puerto_libre  # API falsa (nunca una clave real en la CI)
 
 ACTIVO = os.environ.get("CHULETA_E2E_CARPETAS") == "1"
 FAKE = os.path.join(REPO, "tests", "fake_soundcard")
@@ -208,7 +208,7 @@ class CarpetaEnDirectoE2E(unittest.TestCase):
         self.assertIn(f"\\Beta\\{hoy} {NOMBRE}\\", " ".join(pg.evaluate("window.__toasts")))
         self.foto("4-movida")
         self.assertEqual(self.errores, [])
-        print(f"   grabado {GRABAR_S} s; movida a {nueva} tras el resumen; peticiones a Groq: "
+        print(f"   grabado {GRABAR_S} s; movida a {nueva} tras el resumen; peticiones a la API: "
               f"{len(self.groq.peticiones)}", flush=True)
 
 

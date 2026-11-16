@@ -51,7 +51,7 @@ def _detalle(texto, n=120):
 
 def explicar(err, proveedor=None):
     """{frase, accion, tecnico} de un error (excepción o texto). accion: None o {tipo, etiqueta[, url]}.
-    proveedor: nombre del proveedor de la nube («Groq»…), para las frases que lo necesitan."""
+    proveedor: nombre del proveedor de la nube («OpenAI»…), para las frases que lo necesitan."""
     tecnico = str(err or "").strip()
     if isinstance(err, BaseException) and not tecnico:
         tecnico = err.__class__.__name__

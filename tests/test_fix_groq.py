@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""fix-groq (10/11/2026: con unos ajustes de antes, el directo se quedaba «cargando» y nunca transcribía).
-Desde sin-groq (d74bf0a) el motor rechazaba unos ajustes con un proveedor vacío o desconocido, que hasta
-fe29522 transcribían con Groq. Ahora solo los rechaza en «Probar» del asistente sin proveedor elegido (la marca
-engines.SIN_PROVEEDOR que pone server._candidata); unos ajustes guardados siguen yendo a Groq, como siempre. Una
-instalación nueva sigue sin sugerir Groq (test_sin_groq)."""
+"""Ajustes de antes con un proveedor que no existe (10/11/2026: el directo se quedaba «cargando» y nunca transcribía).
+Desde d74bf0a el motor rechazaba unos ajustes con un proveedor vacío o desconocido, que hasta fe29522 transcribían
+con el proveedor por defecto. Ahora solo los rechaza en «Probar» del asistente sin proveedor elegido (la marca
+engines.SIN_PROVEEDOR que pone server._candidata); unos ajustes guardados siguen yendo al de por defecto, como
+siempre. Una instalación nueva sigue sin sugerir ninguno (test_sin_groq)."""
 import json
 import os
 import shutil
@@ -29,14 +29,14 @@ except ImportError:  # pragma: no cover
 
 class MotorTests(unittest.TestCase):
     def test_ajustes_guardados_con_proveedor_vacio_van_a_groq(self):
-        """Como en fe29522: «provider» vacío, desconocido o ausente en unos ajustes guardados = Groq."""
+        """Como en fe29522: «provider» vacío, desconocido o ausente en unos ajustes guardados = el de por defecto."""
         for cfg in ({"provider": "", "api_key": "k"}, {"provider": "inventado", "api_key": "k"},
                     {"provider": None, "api_key": "k"}, {"api_key": "k"}):
             with self.subTest(cfg=cfg):
                 url, headers, model = engines.CloudEngine.endpoint(cfg)
                 self.assertEqual(url, engines.PROVIDERS["groq"]["url"])
                 self.assertEqual(headers, {"Authorization": "Bearer k"})
-                self.assertEqual(model, "whisper-large-v3-turbo")  # el primero de Groq, como antes
+                self.assertEqual(model, "whisper-large-v3-turbo")  # el primero del de por defecto, como antes
         self.assertEqual(engines.CloudEngine.endpoint({"provider": "", "api_key": "k", "model": "whisper-large-v3"})[2],
                          "whisper-large-v3")
 
@@ -49,7 +49,7 @@ class MotorTests(unittest.TestCase):
     @unittest.skipUnless(av, "PyAV no instalado (el FLAC de la petición de verdad lo necesita)")
     def test_transcribe_de_verdad_contra_un_groq_falso(self):
         """Una petición real (CloudEngine.test, la de «Probar conexión») con unos ajustes guardados sin proveedor:
-        llega a Groq con la clave guardada. Con 0d5169b fallaba antes de salir («Elige el proveedor…»)."""
+        llega al de por defecto con la clave guardada. Con 0d5169b fallaba antes de salir («Elige el proveedor…»)."""
         groq = GroqFalso()
         tmp = tempfile.mkdtemp(prefix="fixgroq-")
         antes = dict(engines.PROVIDERS["groq"])
@@ -83,7 +83,8 @@ class CandidataTests(TempTree):
         self.assertNotIn(engines.SIN_PROVEEDOR, a.settings.get()["cloud"])  # la prueba no guarda nada
 
     def test_quien_ya_usa_groq_sin_proveedor_guardado(self):
-        """Unos ajustes viejos con «provider» vacío y su clave: la prueba (sin elegir nada) y la cola, a Groq."""
+        """Unos ajustes viejos con «provider» vacío y su clave: la prueba (sin elegir nada) y la cola, al de por
+        defecto."""
         a = self.app(procesado="api", cloud={"provider": "", "api_key": "gsk_x"})
         st, _ = a._candidata({"candidata": {"procesado": "api", "cloud": {}}})
         self.assertNotIn(engines.SIN_PROVEEDOR, st["cloud"])  # elegido (procesado api): no se marca
@@ -96,7 +97,7 @@ GSK = "gsk_" + "prueba" * 6  # falsa: nunca sale a ningún sitio
 SIN_PROVEEDOR = {"procesado": "api", "preset": "nube", "live_preset": "nube",
                  "cloud": {"provider": "", "api_key": GSK, "model": "whisper-large-v3"}}
 # …y lo que dejaba en ese caso un «Guardar» de 0d5169b: el desplegable no marcaba ninguno, el navegador marcaba el
-# primero (Azure OpenAI, con el orden alfabético de sin-groq) y se guardaba Azure sin endpoint
+# primero (Azure OpenAI, con el orden alfabético del 09/11) y se guardaba Azure sin endpoint
 AZURE_DE_0D5169B = {"procesado": "api", "preset": "nube", "live_preset": "nube",
                     "cloud": {"provider": "azure", "api_key": GSK, "model": "whisper-large-v3", "azure_endpoint": "",
                               "azure_deployment": "", "azure_api_version": "2024-06-01"}}
@@ -109,7 +110,7 @@ class RepararProveedorTests(TempTree):
                  (dict(AZURE_DE_0D5169B["cloud"]), "groq"),
                  (dict(AZURE_DE_0D5169B["cloud"], azure_endpoint="https://r.openai.azure.com"), "azure"),
                  (dict(AZURE_DE_0D5169B["cloud"], azure_deployment="whisper"), "azure"),
-                 (dict(AZURE_DE_0D5169B["cloud"], api_key="clave-de-azure"), "azure"),  # no es de Groq: es suya
+                 (dict(AZURE_DE_0D5169B["cloud"], api_key="clave-de-azure"), "azure"),  # no es «gsk_…»: es suya
                  (dict(AZURE_DE_0D5169B["cloud"], api_key=""), "azure"),
                  ({"provider": "groq", "api_key": GSK}, "groq"), ({"provider": "openai", "api_key": GSK}, "openai"),
                  ({"provider": "custom", "api_key": GSK}, "custom")]
@@ -144,8 +145,8 @@ class RepararProveedorTests(TempTree):
 @unittest.skipUnless(sync_playwright, "Playwright no instalado")
 class ArrancarYGuardarTests(unittest.TestCase):
     """El servidor de verdad con los dos estados de arriba en settings.json (la clave, cifrada al escribir: DPAPI en
-    Windows): al arrancar pasa a Groq, Ajustes › Procesado lo enseña elegido y «Guardar» sin tocar nada lo deja en
-    Groq, con la misma clave. Con 0d5169b, el primero salía como «Azure OpenAI» y «Guardar» lo dejaba en Azure."""
+    Windows): al arrancar pasa al de por defecto, Ajustes › Procesado lo enseña elegido y «Guardar» sin tocar nada lo
+    deja así, con la misma clave. Con 0d5169b, el primero salía como «Azure OpenAI» y «Guardar» lo dejaba en Azure."""
 
     @classmethod
     def setUpClass(cls):

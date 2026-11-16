@@ -117,7 +117,7 @@ class Ajustes:
             c = b.get("cloud") or {}
             for k in ("provider", "model", "base_url", "azure_endpoint", "azure_deployment", "azure_api_version"):
                 if k == "provider" and c.get(k) not in engines.PROVIDERS:
-                    continue  # «Elige el proveedor…» sin elegir: no se guarda vacio (el motor tomaria Groq)
+                    continue  # «Elige el proveedor…» sin elegir: no se guarda vacio (el motor usaria el de por defecto)
                 if k in c:
                     d["cloud"][k] = (c[k] or "").strip()
             # 20 min de FLAC 16 kHz ~ 22 MB: por debajo del limite de 25 MB por archivo de las APIs
@@ -130,18 +130,18 @@ class Ajustes:
                 d["cloud"]["api_key"] = c["api_key"].strip()
             if c.get("clear_key"):
                 d["cloud"]["api_key"] = ""
-            for k in ("live_model", "live_model_custom"):  # el del directo en Groq y el de una pasarela propia
+            for k in ("live_model", "live_model_custom"):  # el del directo del de por defecto y el de una pasarela
                 if k in c:
                     d["cloud"][k] = (c[k] or "").strip()[:80]
-            # claves adicionales: cada lista es de su proveedor (las de Groq, en extra_keys). La interfaz manda las de
-            # cada proveedor en extra_keys_by; extra_keys a secas son las del proveedor que se guarda. Las ya guardadas
-            # vuelven enmascaradas y se conservan, pero solo dentro de su proveedor: nunca pasan a otro
+            # claves adicionales: cada lista es de su proveedor (las del de por defecto, en extra_keys). La interfaz
+            # manda las de cada proveedor en extra_keys_by; extra_keys a secas son las del proveedor que se guarda. Las
+            # ya guardadas vuelven enmascaradas y se conservan, pero solo dentro de su proveedor: nunca pasan a otro
             lists = c.get("extra_keys_by") if isinstance(c.get("extra_keys_by"), dict) else {}
             if not lists and isinstance(c.get("extra_keys"), list):
                 lists = {d["cloud"].get("provider") or "groq": c["extra_keys"]}
             for prov, incoming in lists.items():
                 if prov not in engines.PROVIDERS:
-                    continue  # sin proveedor elegido no hay de quien: no se guardan como claves de Groq
+                    continue  # sin proveedor elegido no hay de quien: no se guardan como claves del de por defecto
                 field = engines.extra_keys_field(prov)
                 if not field or not isinstance(incoming, list):
                     continue
@@ -229,7 +229,7 @@ class Ajustes:
         st["cloud"] = dict(st.get("cloud") or {})
         for k in ("provider", "model", "base_url", "azure_endpoint", "azure_deployment", "azure_api_version"):
             if k == "provider" and cl.get(k) not in engines.PROVIDERS:
-                continue  # como al guardar: un proveedor vacio o desconocido no se prueba como si fuera Groq
+                continue  # como al guardar: un proveedor vacio o desconocido no se prueba con el de por defecto
             if k in cl:
                 st["cloud"][k] = (cl[k] or "").strip()
         key = (cl.get("api_key") or "").strip()
@@ -237,7 +237,7 @@ class Ajustes:
             st["cloud"]["api_key"] = key
         if st.get("procesado") == "api" and not elegido:
             # el motor lo rechaza con «Elige el proveedor…» (por la marca: sin ella, unos ajustes guardados con un
-            # proveedor vacio van a Groq, como siempre): nada sale hacia Groq
+            # proveedor vacio van al de por defecto, como siempre): nada sale hacia ningun proveedor
             st["cloud"]["provider"] = ""
             st["cloud"][engines.SIN_PROVEEDOR] = True
         return st, True

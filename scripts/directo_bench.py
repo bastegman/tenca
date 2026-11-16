@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
-"""Banco de pruebas del directo en la nube (chunker + ritmo + latencia), sin tocar Groq salvo que se pida.
+"""Banco de pruebas del directo en la nube (chunker + ritmo + latencia), sin tocar la API salvo que se pida.
 
     python scripts/directo_bench.py synth --lang es --out /tmp/es.wav     # audio sintetico con `say` (macOS)
     python scripts/directo_bench.py run /tmp/es.wav --latency 1.0        # reproduce el WAV por live.run con reloj falso
-    python scripts/directo_bench.py run /tmp/es.wav --real               # Groq de verdad: GROQ_API_KEY del entorno
+    python scripts/directo_bench.py run /tmp/es.wav --real               # la API de verdad: ver --help
 
 `run` hace crecer una copia del WAV como si OBS la estuviera grabando (cabecera abierta), con un reloj falso que
 avanza cuando el directo duerme, y un transcriptor falso que tarda --latency segundos por trozo. Imprime la
 distribucion de tamanos de trozo, cuanto silencio se ha mandado, la latencia (fin del audio del trozo -> texto
-escrito) y el ritmo de peticiones. Con --real el reloj y la grabacion van en tiempo real y las peticiones van a Groq
-(gasta cupo: unas 15 peticiones por minuto de audio con voz seguida).
+escrito) y el ritmo de peticiones. Con --real el reloj y la grabacion van en tiempo real y las peticiones van al
+proveedor por defecto de engines.PROVIDERS, con la clave de la variable de entorno que dice --help (gasta cupo: unas
+15 peticiones por minuto de audio con voz seguida).
 """
 import argparse
 import os
@@ -281,7 +282,7 @@ def run(path, latency, real, remaining, pace, verbose):
     print(f"Audio: {os.path.basename(path)} · {fmt(total)} s · voz {fmt(voice_total)} s "
           f"({len(full_ts)} tramos, VAD {vad_name})")
     print(f"Chunker: ventana {pace[0] if pace else live.DIRECT_PACE[0]}–{pace[1] if pace else live.DIRECT_PACE[1]} s · "
-          f"solape {live.DIRECT_OVERLAP_S} s · {'Groq real' if real else f'API falsa de {fmt(latency)} s por trozo'}"
+          f"solape {live.DIRECT_OVERLAP_S} s · {'API real' if real else f'API falsa de {fmt(latency)} s por trozo'}"
           + (f" · cupo simulado: quedan {remaining}" if remaining is not None else ""))
     print(f"Peticiones: {len(calls)} · audio enviado {fmt(sum(secs))} s "
           f"({fmt(100 * sum(secs) / max(voice_total, 1e-9), 0)} % de la voz; silencio enviado ≈ "
@@ -341,7 +342,9 @@ def main():
     r.add_argument("--latency", type=float, default=1.0, help="segundos que tarda la API falsa por trozo (1,0)")
     r.add_argument("--remaining", type=int, help="simular que a la clave le quedan N peticiones hoy")
     r.add_argument("--pace", help="forzar la ventana, p. ej. 6,10")
-    r.add_argument("--real", action="store_true", help="Groq de verdad con GROQ_API_KEY del entorno (tiempo real)")
+    r.add_argument("--real", action="store_true",
+                   help="la API de verdad (el proveedor por defecto, con la clave de GROQ_API_KEY del entorno; tiempo "
+                        "real)")
     r.add_argument("-v", "--verbose", action="store_true")
     a = ap.parse_args()
     if a.cmd == "synth":

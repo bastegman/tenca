@@ -3,7 +3,7 @@
 Motores de transcripcion.
 
   LocalEngine  -> faster-whisper en la CPU del portatil (modo por lotes = mucho mas rapido)
-  CloudEngine  -> API compatible con OpenAI: Groq, OpenAI o Azure OpenAI.
+  CloudEngine  -> API compatible con OpenAI: los proveedores de PROVIDERS o una API propia.
                   El audio se convierte a FLAC 16 kHz mono, se corta en trozos por silencios
                   y los trozos se transcriben en paralelo.
 
@@ -131,7 +131,7 @@ PROVIDERS = {
     # pasarela interna, proxy de empresa, LiteLLM, vLLM... cualquier API con el formato de OpenAI
     "custom": {"label": "Otra (compatible con OpenAI)", "url": "", "models": ["whisper-large-v3"], "keys": ""},
 }
-LIVE_MODEL_DEFAULT = "whisper-large-v3-turbo"  # directo en Groq: ~1 s por trozo; el repaso final usa cloud.model
+LIVE_MODEL_DEFAULT = "whisper-large-v3-turbo"  # directo en la nube: ~1 s por trozo; el repaso final usa cloud.model
 # marca de server._candidata en cloud: «Probar» del asistente con «API externa» y sin proveedor elegido. Solo con ella
 # el motor rechaza un proveedor vacio; unos ajustes guardados nunca la llevan (CloudEngine.endpoint)
 SIN_PROVEEDOR = "_sin_proveedor"
@@ -207,16 +207,16 @@ def style_for(language):
     return STYLE_PROMPT.get(language or "", "")
 
 
-# Groq/OpenAI devuelven el idioma con su nombre en ingles
+# las API compatibles con OpenAI devuelven el idioma con su nombre en ingles
 LANG_CODES = {"spanish": "es", "english": "en", "portuguese": "pt", "french": "fr", "italian": "it",
               "german": "de", "catalan": "ca", "es": "es", "en": "en", "pt": "pt", "fr": "fr", "it": "it",
               "de": "de", "ca": "ca"}
 
 
 # --- prompt = frase de estilo + vocabulario
-# Whisper solo lee los ultimos 223 tokens del prompt (faster-whisper, Groq y OpenAI igual) y si se pasa
-# corta por el PRINCIPIO, que es la frase de estilo (la que da puntuacion y spanglish). Groq ademas no
-# admite mas de 896 BYTES (la ñ y las tildes ocupan 2).
+# Whisper solo lee los ultimos 223 tokens del prompt (faster-whisper y las API en la nube igual) y si se pasa
+# corta por el PRINCIPIO, que es la frase de estilo (la que da puntuacion y spanglish). Alguna API en la nube
+# ademas no admite mas de 896 BYTES (la ñ y las tildes ocupan 2).
 PROMPT_TOKENS = 223
 CLOUD_PROMPT_BYTES = 860
 _TOKENIZER = {}
@@ -863,10 +863,11 @@ def hf_snapshot(name, need=("model.bin", "config.json", "tokenizer.json")):
 # Hasta el 07/11/2026 los descargaba faster-whisper dentro de worker.py la primera vez que hacian falta: sin progreso
 # (la interfaz decia «Descargando modelo medium (solo la primera vez)…» durante minutos: medium son 1,5 GB; medido en
 # un Mac: tiny, 75 MB, 33 s con ese unico mensaje), con 1 h de tope por intento y desde un proceso sin truststore (los
-# certificados de Windows), asi que en una red que inspecciona HTTPS podia fallar aunque Groq funcionara. Ahora los
-# descarga el servidor con requests (certificados de Windows y proxies, como Groq) por HTTP simple: progreso en MB y %,
-# reanudacion, tamano y sha256 comprobados, a DATA_DIR/models/whisper/<modelo>. worker.py solo carga carpetas locales
-# y nunca toca la red. Lo que ya descargaron versiones anteriores (cache de Hugging Face) se usa sin descargar nada.
+# certificados de Windows), asi que en una red que inspecciona HTTPS podia fallar aunque la nube funcionara. Ahora los
+# descarga el servidor con requests (certificados de Windows y proxies, como la nube) por HTTP simple: progreso en MB
+# y %, reanudacion, tamano y sha256 comprobados, a DATA_DIR/models/whisper/<modelo>. worker.py solo carga carpetas
+# locales y nunca toca la red. Lo que ya descargaron versiones anteriores (cache de Hugging Face) se usa sin descargar
+# nada.
 # Revision fija (commit) y huella del model.bin leidas de la API de Hugging Face el 07/11/2026.
 WHISPER_URL = "https://huggingface.co/{repo}/resolve/{rev}/{file}"
 _TOK = ("tokenizer.json", 2203239, None)
@@ -1401,10 +1402,11 @@ class LocalEngine:
         return clean_segments(segs, res.get("prompt"), res.get("language")), res.get("language"), res.get("duration")
 
 
-# ----------------------------------------------------------------------------- cupo y claves (Groq)
-# El plan gratuito de Groq limita por organizacion (= por clave) y por modelo: cada Whisper 20 peticiones/min y
-# 2.000/dia; chat (gpt-oss) 30/min, 1.000/dia y 8.000 tokens/min. Cada respuesta trae x-ratelimit-remaining-requests
-# (lo que queda HOY), x-ratelimit-reset-requests ("2m59.56s") y, en un 429, retry-after (segundos).
+# ----------------------------------------------------------------------------- cupo y claves (nube)
+# Un proveedor con cupo por dia (DAILY_PROVIDERS) limita por organizacion (= por clave) y por modelo, p. ej. cada
+# Whisper 20 peticiones/min y 2.000/dia; chat (gpt-oss) 30/min, 1.000/dia y 8.000 tokens/min. Cada respuesta trae
+# x-ratelimit-remaining-requests (lo que queda HOY), x-ratelimit-reset-requests ("2m59.56s") y, en un 429,
+# retry-after (segundos).
 # El KeyPool guarda eso por clave, familia y modelo (el directo con -turbo y el repaso final con whisper-large-v3 no
 # se descuentan uno al otro), reparte las peticiones entre la clave principal y las adicionales y le dice al directo
 # que ventana usar segun lo que queda del dia. Nunca escribe una clave en el log.
@@ -1416,7 +1418,7 @@ RPM_MAX_SPACING = 30.0     # con un limite por minuto declarado, el hueco entre 
 LIVE_PACES = ((600, (3, 6)), (300, (6, 10)), (60, (10, 15)))  # peticiones restantes -> ventana del directo (s)
 LIVE_PAUSE_BELOW = 60      # con menos en TODAS las claves, el directo se pausa (el repaso final sigue)
 DAILY_PROVIDERS = ("groq",)  # cabeceras de peticiones por DIA: la politica de ventana del directo solo vale ahi
-# claves adicionales: cada proveedor tiene su lista (las de Groq siguen en extra_keys). Pertenecen al proveedor con el
+# claves adicionales: cada proveedor tiene su lista (las del de por defecto, en extra_keys). Son del proveedor con el
 # que se guardaron y solo se mandan a el: al cambiar de proveedor no salen hacia otro servicio.
 EXTRA_KEYS_FIELDS = {"groq": "extra_keys", "openai": "extra_keys_openai", "azure": "extra_keys_azure",
                      "custom": "extra_keys_custom"}
@@ -1448,6 +1450,15 @@ def daily_quota(cfg):
     return cfg.get("provider", "groq") in DAILY_PROVIDERS
 
 
+def provider_name(cfg, inicio=False):
+    """Como se llama en los textos al proveedor de la nube de cfg: su label de PROVIDERS («OpenAI»…) o, con una API
+    propia («Otra (compatible)»), «tu API». Vacio o desconocido: el que usa el motor (CloudEngine.endpoint). inicio:
+    para empezar una frase («Tu API pide esperar…»)."""
+    p = (cfg or {}).get("provider") or "groq"
+    nombre = "tu API" if p == "custom" else (PROVIDERS.get(p) or PROVIDERS["groq"])["label"]
+    return nombre[:1].upper() + nombre[1:] if inicio else nombre
+
+
 class KeyPool:
     """Estado de cupo por (clave, familia, modelo) y eleccion de la clave para cada peticion. model=None cuando no se
     sabe (Azure: lo fija el deployment). Una clave que responde 401/403 queda marcada como no valida (en todas las
@@ -1470,7 +1481,7 @@ class KeyPool:
             st = self.state[(key, family, model)] = {"remaining": None, "limit": None, "reset_at": None,
                                                      "retry_after": None, "blocked_until": 0.0, "last_request": 0.0,
                                                      "not_before": 0.0, "used": 0}
-        if st["reset_at"] and self.clock() >= st["reset_at"]:  # el dia de Groq se renovo: se olvida lo gastado
+        if st["reset_at"] and self.clock() >= st["reset_at"]:  # el dia del proveedor se renovo: se olvida lo gastado
             st.update(remaining=None, reset_at=None)
         return st
 
@@ -1519,9 +1530,9 @@ class KeyPool:
         """Reserva un hueco para una peticion con esa clave y devuelve los segundos que hay que esperar antes de
         mandarla (ritmo por minuto y, tras un 429 corto, el retry-after que pidio el servicio). Con varias
         peticiones a la vez cada una recibe el hueco siguiente. per_minute: el proveedor declara su limite por minuto
-        en x-ratelimit-limit-requests (OpenAI, Azure, una pasarela; en Groq es por dia): no se pasa de el (un hueco de
-        60/limite s, como mucho RPM_MAX_SPACING) y, si no queda ninguna y se renueva en menos de un minuto, se
-        espera."""
+        en x-ratelimit-limit-requests (OpenAI, Azure, una pasarela; en DAILY_PROVIDERS es por dia): no se pasa de el
+        (un hueco de 60/limite s, como mucho RPM_MAX_SPACING) y, si no queda ninguna y se renueva en menos de un
+        minuto, se espera."""
         with self.lock:
             st, now = self._st(key, family, model), self.clock()
             spacing = RATE_SPACING.get(family, 0.0)
@@ -1633,9 +1644,9 @@ class KeyPool:
 # Repaso en la nube de una reunion que cambia de idioma (review del 14/11/2026, motor 12): Whisper fija el idioma al
 # principio de cada peticion, asi que una parte de 10 min que empieza en ingles y pasa al portugues puede salir entera
 # en ingles. Con una mezcla (o un tramo en que se detectaba), partes de ~1,5 min (60-135 s, cortadas en un silencio);
-# con un idioma fijo, las de siempre. El cupo gratuito de Groq (20 peticiones/min, 7.200 s de audio/h) no cambia: el
-# ritmo lo marca el KeyPool y los segundos de audio son los mismos (Groq cobra al menos 10 s por peticion: con 60 s,
-# nada). Medido sin Groq con faster-whisper (que decide el idioma igual, una vez por peticion): docs en la nota IMPL.
+# con un idioma fijo, las de siempre. El cupo del proveedor (p. ej. 20 peticiones/min, 7.200 s de audio/h) no cambia:
+# el ritmo lo marca el KeyPool y los segundos de audio son los mismos (si cobra al menos 10 s por peticion, con 60 s no
+# cambia nada). Medido sin la nube con faster-whisper (que decide el idioma igual, una vez por peticion).
 MEZCLA_PARTE_S = 90
 TRAMO_MIN_S = 10.0   # un tramo de idioma mas corto (dos cambios seguidos) se une al anterior
 TRAMO_AJUSTE_S = 8.0  # el corte entre dos idiomas se lleva al silencio mas cercano a esta distancia como mucho
@@ -1723,8 +1734,8 @@ class CloudEngine:
         if p is None:
             # «Probar» del asistente con «API externa» y sin proveedor (server._candidata lo marca): a nadie. Unos
             # ajustes GUARDADOS con un proveedor vacio o desconocido (de una version anterior o escritos a mano)
-            # siguen yendo a Groq, como hasta fe29522: a quien ya transcribia con Groq no se le corta (fix-groq,
-            # 10/11/2026)
+            # siguen yendo al proveedor por defecto, como hasta fe29522: a quien ya transcribia con el no se le corta
+            # (10/11/2026)
             if cfg.get(SIN_PROVEEDOR):
                 raise EngineError("Elige el proveedor de la API externa en Ajustes ⚙ → Procesado.")
             p = PROVIDERS["groq"]
@@ -1733,9 +1744,9 @@ class CloudEngine:
 
     @staticmethod
     def live_model(cfg):
-        """Modelo del directo en la nube. Groq: cloud.live_model (whisper-large-v3-turbo por defecto: mas rapido por
-        trozo). «Otra (compatible)»: cloud.live_model_custom, el que escriba el usuario para su pasarela; vacio = el
-        de la cola (cloud.model), porque no se puede dar por hecho que la pasarela tenga los modelos de Groq.
+        """Modelo del directo en la nube. El proveedor por defecto: cloud.live_model (whisper-large-v3-turbo por
+        defecto: mas rapido por trozo). «Otra (compatible)»: cloud.live_model_custom, el que escriba el usuario para su
+        pasarela; vacio = el de la cola (cloud.model), porque no se puede dar por hecho que la pasarela tenga esos.
         OpenAI (whisper-1) y Azure (lo fija el deployment): el de siempre (None). El repaso final y la cola siguen
         con cloud.model."""
         provider = cfg.get("provider", "groq")
@@ -1862,10 +1873,11 @@ class CloudEngine:
                 wait = _duration_s(r.headers.get("retry-after", "")) or 3 * 2 ** attempt
                 if r.status_code == 429 and self.keys.blocked(key, family, qm):  # retry-after largo (cupo del dia)
                     if others and self.keys.pick(cfg, family, model=qm) != key:
-                        report(stage="Esa cuenta de Groq ha agotado su cupo: se sigue con la siguiente clave…")
+                        report(stage=f"Esa cuenta de {provider_name(cfg)} ha agotado su cupo: se sigue con la "
+                                     "siguiente clave…")
                         continue  # otra clave disponible: sin esperar
                     # sin alternativa: fallar ya, con el tiempo que pide (esperar aqui bloquearia el directo)
-                    raise EngineError(f"Groq pide esperar {int(wait // 60)} min ({last})")
+                    raise EngineError(f"{provider_name(cfg, inicio=True)} pide esperar {int(wait // 60)} min ({last})")
             if attempt == attempts - 1:  # tras el ultimo intento no se espera: se falla ya
                 break
             wait = min(max(wait, 1.0), max_wait)
@@ -2085,7 +2097,7 @@ def json_body(r):
 # ----------------------------------------------------------------------------- resumen con IA
 
 SUMMARY_MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b",
-                  "qwen/qwen3.8-27b"]  # TODO verificar en console.groq.com/docs/models que este id existe
+                  "qwen/qwen3.8-27b"]  # TODO verificar en la lista de modelos del proveedor que este id existe
 CHAT_URLS = {"groq": "https://api.groq.com/openai/v1/chat/completions",
              "openai": "https://api.openai.com/v1/chat/completions"}
 SUMMARY_LANGS = {"es": "español", "en": "inglés", "same": "el mismo idioma en que se habla en la reunión"}
@@ -2120,7 +2132,7 @@ def chat_missing(cfg, what="El resumen con IA"):
 
 
 def _duration_s(v):
-    """'6.08s', '2m59.5s', '1h2m', '750ms' (cabeceras de limites de Groq) o '120' (retry-after) -> segundos."""
+    """'6.08s', '2m59.5s', '1h2m', '750ms' (cabeceras x-ratelimit-reset-*) o '120' (retry-after) -> segundos."""
     s = str(v or "").strip().lower()
     total, num, i = 0.0, "", 0
     while i < len(s):
@@ -2771,11 +2783,11 @@ AGENTES = {"claude": ClaudeCode}
 
 
 class Summarizer:
-    """Resumen estilo Notion AI Meeting Notes con un modelo de chat (Groq u OpenAI).
+    """Resumen estilo Notion AI Meeting Notes con un modelo de chat de una API compatible con OpenAI.
 
-    El plan gratuito de Groq permite ~8K tokens por minuto y una reunion de 1 h son ~15-20K: se
+    Un plan gratuito puede permitir ~8K tokens por minuto y una reunion de 1 h son ~15-20K: se
     resume por partes (apuntes de cada trozo) y luego se juntan en el resumen final, respetando el
-    ritmo que marca Groq en sus cabeceras de limites."""
+    ritmo que marca el proveedor en sus cabeceras de limites."""
 
     CHUNK_CHARS = 11000    # ~3K tokens por trozo + respuesta: cabe en 8K por minuto
     SINGLE_CHARS = 15000   # reuniones cortas: una sola llamada
@@ -2850,10 +2862,10 @@ class Summarizer:
         for attempt in range(attempts):
             if cancelled():
                 raise Cancelled()
-            # al ritmo de Groq: si no queda cupo de tokens en este minuto, se espera a que se libere
+            # al ritmo del proveedor: si no queda cupo de tokens en este minuto, se espera a que se libere
             if self.remaining is not None and self.remaining < need and time.time() < self.reset_at:
                 wait = self.reset_at - time.time() + 1
-                report(stage=f"Esperando al límite por minuto de Groq ({wait:.0f} s)…")
+                report(stage=f"Esperando al límite por minuto de {provider_name(cfg)} ({wait:.0f} s)…")
                 if not pause(wait):
                     last = f"hay que esperar {wait:.0f} s al límite por minuto"
                     break
@@ -2902,14 +2914,15 @@ class Summarizer:
             if r.status_code == 429:
                 wait = _duration_s(r.headers.get("retry-after", "")) or 20
                 if self.keys.blocked(key, family, model) and others and self.keys.pick(cfg, family, model=model) != key:
-                    report(stage="Esa cuenta de Groq ha agotado su cupo: se sigue con la siguiente clave…")
+                    report(stage=f"Esa cuenta de {provider_name(cfg)} ha agotado su cupo: se sigue con la "
+                                 "siguiente clave…")
                     continue
                 if wait > 300:  # limite diario de tokens: no tiene sentido esperar aqui
-                    raise EngineError(f"Límite diario de Groq alcanzado (se libera en ~{wait / 3600:.1f} h). "
-                                      "Vuelve a pulsar «Resumir» más tarde.")
+                    raise EngineError(f"Límite diario de {provider_name(cfg)} alcanzado (se libera en "
+                                      f"~{wait / 3600:.1f} h). Vuelve a pulsar «Resumir» más tarde.")
                 last = api_error(r)
                 if attempt < attempts - 1:
-                    report(stage=f"Groq pide esperar {wait:.0f} s (límite por minuto)…")
+                    report(stage=f"{provider_name(cfg, inicio=True)} pide esperar {wait:.0f} s (límite por minuto)…")
                     if not pause(wait + 1):
                         break
                 continue
@@ -2953,9 +2966,9 @@ class Summarizer:
 
     @classmethod
     def translate_model(cls, cfg):
-        """Modelo de la traduccion del directo: gpt-oss-20b en Groq (rapido y barato en cupo), gpt-4o-mini en OpenAI
-        y, en una pasarela propia, el modelo del resumen (el modelo de chat que se configura para ella: no se da por
-        hecho que tenga los de Groq). None si no hay chat (Azure OpenAI)."""
+        """Modelo de la traduccion del directo: TRANSLATE_MODEL con el proveedor por defecto (rapido y barato en cupo),
+        gpt-4o-mini en OpenAI y, en una pasarela propia, el modelo del resumen (el modelo de chat que se configura para
+        ella: no se da por hecho que tenga los demas). None si no hay chat (Azure OpenAI)."""
         if not chat_url(cfg):
             return None
         provider = cfg.get("provider", "groq")

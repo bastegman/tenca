@@ -314,7 +314,7 @@ class NotasInternasTests(unittest.TestCase):
         ficheros = {
             "CHANGELOG.md": f"uno\nlo pidió (ms{''}g 1479)\nms{''}gs 1150-1152 y MS{''}G 1386\n",
             "_app/a.py": f"# en el portátil de {nombre}\nx = 1  # decisión de {asistente}\n"
-                         f"# (fix-groq, ms{''}gs\n#   1468)\n# revisión 1 (Fa{''}ble 5.2)\n",
+                         f"# (fix-proveedor, ms{''}gs\n#   1468)\n# revisión 1 (Fa{''}ble 5.2)\n",
             "tests/b.py": f'ruta = "/Us{""}ers/alguien/Projects/tenca"\nusers = "/users/x"  # minúsculas: una URL\n'
                           f'apodo = "{nombre[:-2]}"\n',
             "_app/instalar.ps1": f'$AppId = "{nombre}.Chuleta"\r\n$Publisher = "{nombre} {apellido}"\r\n'
@@ -343,6 +343,139 @@ class NotasInternasTests(unittest.TestCase):
                          + [("_app/static/e.js", 1, "mensaje"), ("_app/static/e.js", 1, autor)]
                          + [("tests/b.py", 1, "ruta personal"), ("tests/b.py", 3, autor)]
                          + [("tests/t1.py", 1, autor), ("tests/t1.py", 1, autor)])
+
+    def test_sin_proveedor_fijo(self):
+        """Ningún proveedor de la nube por delante de los demás: el que se quitó de la documentación y de los textos de
+        la app (PROVEEDOR_QUITADO) no vuelve fuera de su tabla (engines.PROVIDERS y CHAT_URLS) ni de sus
+        identificadores (buscar_proveedor_fijo dice dónde puede estar)."""
+        hits = buscar_proveedor_fijo(ficheros_del_repo())
+        if hits:
+            lineas = [f"  {rel}:{n} ({tipo}: {texto!r})" for rel, n, tipo, texto in hits[:80]]
+            if len(hits) > 80:
+                lineas.append(f"  … y {len(hits) - 80} más")
+            self.fail(f"{len(hits)} menciones de un proveedor concreto fuera de su tabla (en los textos, «tu API», «el "
+                      "proveedor» o su nombre por engines.provider_name):\n" + "\n".join(lineas))
+
+    def test_proveedor_fijo_casa_y_respeta_la_tabla(self):
+        """Casa con el nombre en cada sitio publicado (también en minúsculas en un documento, en un fichero CRLF y en
+        una f-string) y deja pasar la tabla de proveedores, los identificadores («groq» entre comillas, una variable de
+        entorno, el nombre de un test en un workflow, una rama en un comentario) y los tests y scripts, que no son
+        texto publicado (sus datos de prueba configuran ese proveedor)."""
+        root = tempfile.mkdtemp(prefix="tenca-proveedor-")
+        p = "Gr" + "oq"  # en trozos: el propio test no lo nombra
+        ident = p.lower()
+        ficheros = {
+            "README.md": f"uno\ncon {p} o con OpenAI\nmira api.{ident}.com\n",
+            "LEEME.txt": f"uno\r\nlímites de {p}\r\n",
+            "CHANGELOG.md": f"- `tests/test_sin_{ident}.py`\n- nada\n",
+            ".github/workflows/w.yml": f"# un {p} falso\nrun: python -m unittest test_sin_{ident} test_fix_{ident}\n",
+            "_app/static/x.js": (f"const prov = c.provider || '{ident}';\nif (p !== \"{ident}\") t = `{p} pide`;\n"
+                                 f"// el cupo de {p}\nconst u = 'https://console.{ident}.com';\n"),
+            "_app/static/x.html": f"<p>{p}</p>\n",
+            "_app/a.py": (f'"""Modulo: con {p} o sin el."""\nC = {{"provider": "{ident}"}}  # rama fix-{ident}\n'
+                          f'E = "CHULETA_PRUEBAS_URL_{p.upper()}"\nm = f"{p} pide esperar {{n}} s"\n'
+                          f'# cupo de {p}\n\n\ndef f():\n    """cloud.provider "{ident}" por defecto."""\n'
+                          f'    return "pasa a {p}"\n'),
+            "_app/engines.py": (f'PROVIDERS = {{\n    "{ident}": {{"label": "{p}", "url": "https://x.{ident}.com"}},\n'
+                                f'}}\nCHAT_URLS = {{"{ident}": "https://api.{ident}.com/chat"}}\nX = "{p}"\n'),
+            "tests/t.py": f'class {p}Falso:\n    """Un {p} falso."""\n',
+            "scripts/s.py": f'URL = "https://api.{ident}.com"  # {p}\n',
+        }
+        for rel, texto in ficheros.items():
+            os.makedirs(os.path.dirname(os.path.join(root, rel)) or root, exist_ok=True)
+            with open(os.path.join(root, rel), "w", encoding="utf-8", newline="") as f:
+                f.write(texto)
+        hits = [(rel, n, tipo) for rel, n, tipo, _ in buscar_proveedor_fijo(sorted(ficheros), root)]
+        self.assertEqual(hits, [(".github/workflows/w.yml", 1, "workflow"),
+                                ("CHANGELOG.md", 1, "documento"), ("LEEME.txt", 2, "documento"),
+                                ("README.md", 2, "documento"), ("README.md", 3, "documento"),
+                                ("_app/a.py", 1, "docstring"), ("_app/a.py", 4, "texto"),
+                                ("_app/a.py", 5, "comentario"), ("_app/a.py", 10, "texto"),
+                                ("_app/engines.py", 5, "texto"),
+                                ("_app/static/x.html", 1, "texto"), ("_app/static/x.js", 2, "texto"),
+                                ("_app/static/x.js", 3, "texto"), ("_app/static/x.js", 4, "texto")])
+
+
+# Ningún proveedor de la nube por delante de los demás (16/11/2026). El nombre del que se quitó de la documentación y
+# de los textos de la app, con una letra entre corchetes para no casar consigo mismo en este fichero. Puede estar en la
+# tabla de proveedores (PROVEEDOR_TABLA, la única que lo nombra) y como identificador: «groq» entre comillas (el valor
+# de cloud.provider), una variable de entorno en mayúsculas, el nombre de un test o de una rama en minúsculas. Los
+# tests y los scripts no son texto publicado: sus datos de prueba configuran ese proveedor.
+PROVEEDOR_QUITADO = re.compile(r"gr[o]q", re.I)
+PROVEEDOR_NOMBRE = re.compile(r"\bGr[o]q\b|\bGR[O]Q\b(?!_)")  # como nombre propio, no dentro de un identificador
+PROVEEDOR_ID = re.compile(r"^(?:[a-z0-9_]*gr[o]q[a-z0-9_]*|[A-Z0-9_]*GR[O]Q[A-Z0-9_]*)$")  # «groq», «URL_GROQ»…
+PROVEEDOR_ID_JS = re.compile(r"(['\"])gr[o]q\1")  # el valor de cloud.provider en el JS
+PROVEEDOR_DOCS = ("README.md", "LEEME.txt", "_app/export/LEEME.txt", "CHANGELOG.md")
+PROVEEDOR_TABLA = {"_app/engines.py": ("PROVIDERS", "CHAT_URLS")}
+
+
+def _proveedor_en_python(rel, text):
+    """[(línea, tipo, texto)] de un .py de _app: en comentarios y docstrings, el nombre propio (PROVEEDOR_NOMBRE); en
+    las demás cadenas, cualquier mención que no sea un identificador entero (PROVEEDOR_ID), fuera de la tabla."""
+    import ast
+    import tokenize
+    tree = ast.parse(text)
+    docs, tabla = set(), set()
+    for node in ast.walk(tree):
+        cuerpo = getattr(node, "body", None)
+        if (isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and cuerpo
+                and isinstance(cuerpo[0], ast.Expr) and isinstance(cuerpo[0].value, ast.Constant)
+                and isinstance(cuerpo[0].value.value, str)):
+            docs.add(cuerpo[0].lineno)
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id in PROVEEDOR_TABLA.get(rel, ())
+                                                for t in node.targets):
+            tabla.update(range(node.lineno, node.end_lineno + 1))
+    out = []
+    for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+        n = tok.start[0]
+        if tok.type == tokenize.COMMENT or (tok.type == tokenize.STRING and n in docs):
+            out += [(n, "comentario" if tok.type == tokenize.COMMENT else "docstring", m.group(0))
+                    for m in PROVEEDOR_NOMBRE.finditer(tok.string)]
+        elif tok.type in (tokenize.STRING, getattr(tokenize, "FSTRING_MIDDLE", None)) and n not in tabla:
+            try:
+                valor = ast.literal_eval(tok.string) if tok.type == tokenize.STRING else tok.string
+            except (ValueError, SyntaxError):  # una f-string antes de Python 3.12: un solo token
+                valor = tok.string
+            if isinstance(valor, bytes):
+                valor = valor.decode("utf-8", "replace")
+            if not PROVEEDOR_ID.match(valor):
+                out += [(n, "texto", m.group(0)) for m in PROVEEDOR_QUITADO.finditer(valor)]
+    return out
+
+
+def buscar_proveedor_fijo(rels, root=REPO):
+    """[(fichero, línea, tipo, texto)] de cada mención de PROVEEDOR_QUITADO donde no puede estar: cualquiera en los
+    documentos publicados (PROVEEDOR_DOCS); el nombre propio en los workflows (sus comentarios); en _app/, en los .py
+    lo de _proveedor_en_python y en los demás ficheros (la interfaz de _app/static/, los scripts de instalación…)
+    cualquiera salvo el identificador entre comillas. Los tests y los scripts de desarrollo no cuentan."""
+    import bisect
+    hits = []
+    for rel in rels:
+        path = os.path.join(root, rel)
+        en_docs, en_app = rel in PROVEEDOR_DOCS, rel.startswith("_app/")
+        en_workflow = rel.startswith(".github/workflows/")
+        if not (en_docs or en_app or en_workflow) or not os.path.isfile(path):
+            continue
+        with open(path, "rb") as f:
+            data = f.read()
+        if b"\0" in data[:8192]:
+            continue  # binario (iconos, imágenes)
+        text = data.decode("utf-8-sig", "replace").replace("\r\n", "\n")
+        if not PROVEEDOR_QUITADO.search(text):
+            continue
+        if en_app and rel.endswith(".py"):
+            hits += [(rel, n, tipo, t) for n, tipo, t in _proveedor_en_python(rel, text)]
+            continue
+        if en_docs:
+            rx, tipo = PROVEEDOR_QUITADO, "documento"
+        elif en_workflow:
+            rx, tipo = PROVEEDOR_NOMBRE, "workflow"
+        else:
+            text = PROVEEDOR_ID_JS.sub(lambda m: "·" * len(m.group(0)), text)  # mismo largo: no mueve nada
+            rx, tipo = PROVEEDOR_QUITADO, "texto"
+        saltos = [m.start() for m in re.finditer("\n", text)]
+        hits += [(rel, bisect.bisect_left(saltos, m.start()) + 1, tipo, m.group(0)) for m in rx.finditer(text)]
+    return sorted(hits)
 
 
 # Notas internas que no van en un repo público (punto 50 del review del 14/11/2026). Cada patrón lleva una letra entre

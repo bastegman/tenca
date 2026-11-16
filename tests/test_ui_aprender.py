@@ -3,7 +3,7 @@
 transcripción, pulsa «Listo» y encima del texto le sale «¿Añadir «Orvalia» al vocabulario de Finanzas?»; con un clic el
 término va a la lista (también a una carpeta de listas conectada, o le dice por qué no puede) y, si lo deja marcado,
 Tenca lo cambia en las próximas reuniones del proyecto: subrayado, con «Deshacer» y con la pregunta de si dejar de
-hacerlo. En ui-smoke.yml (Ubuntu y Windows). La regla aplicada al transcribir va contra un Groq falso en 127.0.0.1
+hacerlo. En ui-smoke.yml (Ubuntu y Windows). La regla aplicada al transcribir va contra una API falsa en 127.0.0.1
 (test_e2e_procesado.GroqFalso; nunca una clave real) y necesita PyAV, como la cola de verdad."""
 import json
 import os
@@ -400,8 +400,8 @@ class AprenderEnLaInterfazTests(unittest.TestCase):
 
     @unittest.skipUnless(av, "PyAV no instalado (la cola de verdad lo necesita)")
     def test_regla_aplicada_al_transcribir_subrayada_y_deshacer(self):
-        """De punta a punta: la regla aprendida «fake Groq» → «FakeGroq» (Cliente Alfa) se aplica al transcribir con
-        el Groq falso una reunión de ese proyecto, y no la de otro; se ve subrayada, se deshace y se olvida."""
+        """De punta a punta: la regla aprendida (Cliente Alfa) sobre el texto de la API falsa se aplica al transcribir
+        con ella una reunión de ese proyecto, y no la de otro; se ve subrayada, se deshace y se olvida."""
         from test_e2e_procesado import CLAVE
         rel, base = self.reunion("Con Groq", ["x"])
         for e in (".srt", ".txt"):
@@ -434,8 +434,8 @@ class AprenderEnLaInterfazTests(unittest.TestCase):
         self.assertEqual(w.text_content(), "FakeGroq")
         self.assertEqual(w.get_attribute("title"), "Lo cambió Tenca: Whisper escribió «fake Groq»")
         self.assertEqual(pg.locator(".apr-card").count(), 0)  # lo que cambió Tenca no se propone como tuyo
-        # la búsqueda cuenta igual con el subrayado: «fake groq» son dos trozos pegados, un solo resaltado (como
-        # hlTerms sin subrayado), con lo que cambió Tenca dentro
+        # la búsqueda cuenta igual con el subrayado: las dos palabras de la regla son dos trozos pegados, un solo
+        # resaltado (como hlTerms sin subrayado), con lo que cambió Tenca dentro
         pg.fill("#tq", "fake groq")
         pg.wait_for_function("() => S.tq === 'fake groq'", timeout=5000)
         self.assertEqual(pg.locator("#txBody mark").count(), 1)
