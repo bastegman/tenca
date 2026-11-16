@@ -292,6 +292,9 @@ class Reuniones:
         self.jobs.schedule_outputs(rel_of(abs_path))  # destinos de salida: el documento con las notas nuevas
         self.library.at = 0
         if "audio" in (b.get("props") or {}) and hasattr(self, "audio_despertar"):
+            lib_no = getattr(getattr(self, "library", None), "audio_no", None)
+            if isinstance(lib_no, dict):
+                lib_no.pop(rel_of(abs_path), None)  # otra política: lo que no se pudo, se vuelve a mirar
             self.audio_despertar()  # si ya toca, que no espere al repaso de cada 10 min
         out = {"props": with_theme_id(props, rel_of(abs_path)),
                "mtime": os.path.getmtime(md) if os.path.isfile(md) else 0}

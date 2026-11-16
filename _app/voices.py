@@ -550,7 +550,7 @@ def diarize(samples16, data_dir, threads=2, progress=None, cancelled=None, shift
         raise VoicesError("Faltan los modelos de voces (activa la opcion en Ajustes para descargarlos)")
     total_s = len(samples16) / SR
     n_blocks = max(1, int(math.ceil(total_s / BLOQUE_S)))
-    block = int(BLOQUE_S * SR) if rejilla else int(math.ceil(len(samples16) / n_blocks))
+    block = max(1, int(BLOQUE_S * SR) if rejilla else int(math.ceil(len(samples16) / n_blocks)))
     bounds = [(off, min(off + block, len(samples16))) for off in range(0, len(samples16), block)] or [(0, 0)]
     if rejilla and len(bounds) > 1 and bounds[-1][1] - bounds[-1][0] < COLA_MIN_S * SR:
         # una cola corta (la grabacion acabo poco despues de un bloque) va con el bloque anterior: sola, sus pocos
@@ -642,6 +642,7 @@ def _bloque(so, paths, threads, shift, umbral_grupos, part, t_off, samples16, cb
 
 BLOQUES_DIR = "voces-bloques"   # en DATA_DIR: lo de cada bloque ya diarizado (bloque_guardar)
 COLA_MIN_S = 600.0              # con rejilla, un ultimo bloque mas corto que esto va con el anterior
+HEREDAR_MIN_S = 30.0            # carry_manual con lo parcial: voz minima antes del corte para heredar un nombre
 BLOQUES_VIEJO_S = 3 * 86400     # lo de hace mas de esto ya no es de ninguna reunion en curso
 
 
@@ -1442,6 +1443,11 @@ def carry_manual(old, new, usuario=None, known=None, hasta=None):
         mine = mask(new["tramos"], h)
         if corte is not None:
             mine[corte:] = False
+            # con lo de antes del corte: al menos HEREDAR_MIN_S de voz ahí (unos segundos no bastan para dar un nombre
+            # a quien habla 20 min después), y nunca encima de una huella que lo reconoce como otra persona
+            # (revisión 2 de motor-lote2b, P2)
+            if int(mine.sum()) * step < HEREDAR_MIN_S:
+                continue
         total = int(mine.sum())
         if not total:
             continue
@@ -1449,6 +1455,10 @@ def carry_manual(old, new, usuario=None, known=None, hasta=None):
         if cover / total >= 0.5:
             pid = olds[best].get("persona")
             if pid and known is not None and pid not in known:
+                continue
+            info = new["hablantes"][h]
+            if corte is not None and info.get("origen") == "huella" and info.get("persona") \
+                    and not info.get("provisional") and info.get("persona") != pid:
                 continue
             assign(new, h, pid, usuario)
     return new

@@ -16,7 +16,7 @@ const AUDIO_POL_AYUDA = {
 // por qué no se ha mandado aún (conservar.debe_borrar en el servidor: a.audio_espera; y lo que sabe la interfaz)
 const AUDIO_ESPERA = {
   grabando: 'cuando termine de grabarse', sin_texto: 'cuando esté transcrita',
-  a_medias: 'cuando la transcripción llegue hasta el final',
+  a_medias: 'cuando la transcripción llegue hasta el final («Volver a transcribir» la completa)',
   huecos: 'cuando esté transcrita entera: al directo le faltan trozos («Volver a transcribir» la completa)',
   sin_resumen: 'cuando tenga resumen',
   voces: 'cuando se sepa quién habla en toda la reunión («Volver a identificar»)',

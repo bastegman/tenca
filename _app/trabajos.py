@@ -625,14 +625,12 @@ class Jobs:
             segs, lang = live.run(job, abs_path, opts, writer, log)
             job.detected = lang
             err = getattr(job, "live_error", None)  # el ultimo trozo de la nube que no salio (live.run lo salta)
+            self._huecos_del_directo(job)
             if segs:
                 writer(segs)
                 if job.edits:  # lo que transcribio Whisper, para poder "Restaurar original" despues
                     save_original(job.path, segs)
                 COMPLETE.set(job.path)  # llego hasta el final (si se corta antes, queda "a medias")
-                # pero si se salto algun trozo de la nube, su texto tiene huecos hasta que lo recupere el repaso final
-                # (o «Volver a transcribir»): mientras, su audio no va a la papelera (punto 17, conservar.Huecos)
-                conservar.huecos().set(job.path, bool(err))
                 if not self._final_pass(job):  # si hay repaso final, el resumen se hace al acabar este
                     self._after_transcribe(job.path)
                 job.status, job.stage, job.progress = "done", "Hecho", 1.0
@@ -646,9 +644,11 @@ class Jobs:
                 job.error = (f"No se ha podido transcribir en directo ({err}). El audio se conserva: transcríbelo "
                              "desde la cola." if err else "No se ha detectado voz en la grabación.")
         except engines.Cancelled:
+            self._huecos_del_directo(job)
             job.status, job.stage = "cancelled", "Directo detenido"
             log(f"■ {job.name}  directo detenido")
         except Exception as e:
+            self._huecos_del_directo(job)
             job.status, job.stage, job.error = "error", "Error", str(e) or e.__class__.__name__
             log(f"✖ {job.name}  {job.error}")
             log_exc()
@@ -659,6 +659,18 @@ class Jobs:
             job.recording = False
             job.finished = time.time()
             self.library.at = 0
+
+    @staticmethod
+    def _huecos_del_directo(job):
+        """Si el directo se saltó algún trozo de la nube (job.live_error; también uno que se para, se corta o falla),
+        su texto tiene huecos: se apunta (punto 17, conservar.Huecos) y su audio no va a la papelera hasta que una
+        transcripción de la reunión entera (el repaso final, «Volver a transcribir») termine bien. Aquí solo se
+        apunta: un directo reanudado sin errores no quita los huecos del anterior (revisión 2, P1)."""
+        if getattr(job, "live_error", None):
+            try:
+                conservar.huecos().set(job.path, True)
+            except Exception:
+                log_exc()
 
     def submit(self, paths, preset, language, resume=False):
         """resume: las que se quedaron a medias se continuan desde donde acaba el texto (el resto, enteras).
@@ -1212,8 +1224,8 @@ class Jobs:
         abs_path = _con_audio(rel)
         if (voices.read_sidecar(voices.sidecar_path(abs_path)) or {}).get("parcial"):
             # identificada por bloques mientras se graba (punto 56): con el bloque siguiente «h2» puede ser otra voz
-            raise ApiError("Mientras se graba no se guarda la huella de una voz: ponle nombre ahora y pulsa "
-                           "«Recordar» al terminar.", 409)
+            raise ApiError("Las voces de esta reunión están identificadas solo en parte: ponle nombre sin "
+                           "«Recordar» y guarda su huella cuando estén enteras.", 409)
         args = ["--fingerprint", h, "--diarize", abs_path, "--out", voices.sidecar_path(abs_path)]
         m = self._voices_subprocess(None, args, idle_timeout=600, cancel=cancel)
         vec = (m.get("huellas") or {}).get(h)
@@ -1486,7 +1498,8 @@ class Jobs:
             # en la nube solo si lo fue este trabajo y, al continuar una a medias, tambien lo de antes
             self._cloud_text().set(job.path, job.engine == "cloud" and (not start or job.path in self._cloud_text()))
             COMPLETE.set(job.path)  # aunque el texto acabe antes que el audio, esta completa
-            conservar.huecos().set(job.path, False)  # transcrita entera: si el directo dejo huecos, ya no los hay
+            if not start:  # transcrita entera desde el principio: si el directo dejo huecos, ya no los hay (continuar
+                conservar.huecos().set(job.path, False)  # desde donde se corto no los recupera: revision 2, P1)
             if job.final_pass:
                 self._final_pass_over(job.path)
             self._after_transcribe(job.path)

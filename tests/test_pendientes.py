@@ -307,6 +307,22 @@ class Revision1PendientesTests(unittest.TestCase):
         corto = pendientes.conservar_hechas("- [x] Persona 2: acta\n", "- [ ] Ana: acta\n")
         self.assertIn("- [ ] Ana: acta", corto)
 
+    def test_una_abierta_de_otro_no_sale_hecha(self):
+        """Revisión 2, P2: la tarea abierta de otra persona con el mismo texto que una hecha (que no vuelve tal cual) no
+        se marca: ya estaba en el resumen viejo, no es «la misma con otro responsable»."""
+        viejo = ("## Próximos pasos\n- [x] Ana: revisar el borrador del contrato [30:10]\n"
+                 "- [ ] Yo: revisar el borrador del contrato [30:10]\n")
+        nuevo = ("## Próximos pasos\n- [ ] Ana: mandar sus comentarios al borrador [30:40]\n"
+                 "- [ ] Yo: revisar el borrador del contrato [30:10]\n")
+        out = pendientes.conservar_hechas(viejo, nuevo)
+        self.assertIn("- [ ] Yo: revisar el borrador del contrato [30:10]", out)
+        self.assertIn("- [x] Ana: revisar el borrador del contrato [30:10]", out)
+
+    def test_minutos_sin_cerrar_no_cuelgan(self):
+        t0 = time.time()
+        pendientes.normalizar("[ 1:23" * 12000)
+        self.assertLess(time.time() - t0, 1.0)
+
     def test_la_gemela_no_se_marca(self):
         """P3: dos tareas iguales en distinto minuto; si las líneas se movieron, se marca la del mismo texto."""
         texto = "- [ ] Yo: llamar a Ana [10:00]\n- [ ] Yo: llamar a Ana [50:00]\n"

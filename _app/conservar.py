@@ -25,7 +25,7 @@ import time
 from datetime import datetime, timedelta
 
 from common import WINDOWS, ApiError, fold, log, read_text
-from rutas import AUDIO_EXT, DATA_DIR, MARCA_SIN_AUDIO
+from rutas import AUDIO_EXT, CLOUD_ONLY, DATA_DIR, MARCA_SIN_AUDIO
 
 POLITICAS = ("guardar", "15-dias", "borrar")
 POR_DEFECTO = "guardar"
@@ -300,6 +300,8 @@ def borrar_audio(audio_abs, a, pol, a_papelera):
         sts = [os.stat(p) for p in grupo]
     except OSError:
         raise ApiError("El audio ya no está.")
+    if any(getattr(st, "st_file_attributes", 0) & CLOUD_ONLY for st in sts):  # uno del grupo solo en OneDrive
+        raise ApiError("nube")
     for p, st in zip(grupo, sts):
         motivo = papelera_motivo(p, st.st_size)
         if motivo:
@@ -332,12 +334,12 @@ def borrar_audio(audio_abs, a, pol, a_papelera):
 def fase_marca(audio_abs):
     """Una marca junto a un audio que sí está: «borrando» (la app se cerró a medio borrar: la marca sobra) o «borrado»
     (el usuario lo ha sacado de la papelera: se guarda, para no volver a borrarlo; quien llama cambia antes la política
-    y después quita la marca). None si no hay marca o no hay audio. Una marca que no es de la app cuenta como
-    «borrando» (sobra)."""
+    y después quita la marca). None si no hay marca, no hay audio o el fichero no es de la app (un «.audio.json» de
+    otro programa no se toca: se borraría en firme; revisión 2, P2)."""
     path = marca_de(audio_abs)
     if not os.path.isfile(path) or not os.path.isfile(audio_abs):
         return None
-    return (leer_marca(path) or {}).get("fase") or "borrando"
+    return (leer_marca(path) or {}).get("fase")
 
 
 def quitar_marca(audio_abs):
@@ -352,9 +354,18 @@ def entrada_sin_audio(marca_path, stem, rel_dir, st=None):
     """Lo que scan pone en la biblioteca para una reunión cuyo audio se mandó a la papelera: como la de un audio (la
     misma ruta, que ya no existe), con sin_audio, cuándo se borró y la duración que tenía. None si la marca no es de
     la app (otro programa con un «.audio.json») o no se puede leer: entonces no es una reunión."""
-    m = leer_marca(marca_path)
-    if m is None:
-        return None
+    try:
+        crudo = read_text(marca_path)
+    except OSError:  # no se puede leer ahora (solo en línea y sin conexión): sigue siendo la reunión (revisión 2, P3)
+        crudo = None
+    m = {}
+    if crudo is not None:
+        try:
+            m = json.loads(crudo)
+        except ValueError:
+            return None
+        if not isinstance(m, dict) or m.get("fase") not in FASES:
+            return None
     ext = str(m.get("ext") or ".wav").lower()
     if ext not in AUDIO_EXT:  # la marca se puede editar a mano: con otra cosa, la reunión se pinta como un WAV
         ext = ".wav"

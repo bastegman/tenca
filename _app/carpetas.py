@@ -381,7 +381,9 @@ def to_recycle_bin(paths, aviso_firme=False):
     flags = 0x40 | 0x10 | 0x4 | 0x400 | (0x4000 if aviso_firme else 0)  # ALLOWUNDO|NOCONFIRMATION|SILENT|NOERRORUI
     op = SHFILEOPSTRUCTW(None, 3, ctypes.cast(buf, ctypes.c_void_p), None, flags, False, None, None)  # (|WANTNUKE)
     r = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
-    if aviso_firme and op.fAnyOperationsAborted:  # Windows iba a borrarlo en firme y se le ha dicho que no
+    # Windows iba a borrarlo en firme y se le ha dicho que no (sin error: 0, o ERROR_CANCELLED); con un error de
+    # verdad (en uso…), lo de siempre
+    if aviso_firme and op.fAnyOperationsAborted and r in (0, 1223):
         raise ApiError("sin_papelera")
     if r != 0 or op.fAnyOperationsAborted:
         raise ApiError("No se pudo mandar a la papelera (¿archivo en uso?).")

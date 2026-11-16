@@ -67,6 +67,9 @@ class Conservar:
             return False, motivo
         if self._ocupada(a["path"]) or self._movs().get(a["path"]):
             return False, "ocupada"
+        no = self.library.audio_no.get(a["path"])
+        if no in ("sin_papelera", "grande"):  # ya se vio (o Windows preguntó y se le dijo que no): no se repite
+            return False, no  # hasta que se cambie su política o se vuelva a abrir la app (revisión 2, P3)
         return True, None
 
     def audio_repaso(self):
@@ -146,7 +149,9 @@ class Conservar:
                 marca = conservar.borrar_audio(abs_audio, a, pol, to_recycle_bin)
             except (ApiError, OSError) as e:
                 msg = getattr(e, "msg", None) or e.__class__.__name__
-                if msg in ("sin_papelera", "grande"):  # una unidad sin papelera o un audio que no cabe: se dice
+                if msg == "nube":  # uno de sus audios está solo en OneDrive: se espera, y se dice
+                    no[rel] = msg
+                elif msg in ("sin_papelera", "grande"):  # una unidad sin papelera o un audio que no cabe: se dice
                     if no.get(rel) != msg:
                         log(f"   {rel}: el audio no se manda a la papelera ({msg})")
                     no[rel] = msg

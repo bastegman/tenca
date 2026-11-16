@@ -479,7 +479,7 @@ function hoyPendHtml() {
   if (!d) return PEND.error ? `<div class="mp-nada">Mis pendientes: ${esc(PEND.error)}</div>` : '';
   const todas = d.tareas || [], abiertas = todas.filter(t => !PEND.hechas.has(t._k));
   // los resúmenes que OneDrive tiene «solo en línea» no se abren (se descargarían): se dice cuántos
-  const sinLeer = d.sin_leer ? ` · ${d.sin_leer} ${d.sin_leer === 1 ? 'resumen está' : 'resúmenes están'} solo en OneDrive: ábrelos para ver sus tareas` : '';
+  const sinLeer = d.sin_leer ? ` · ${d.sin_leer === 1 ? '1 resumen está solo en OneDrive: ábrelo' : `${d.sin_leer} resúmenes están solo en OneDrive: ábrelos`} para ver sus tareas` : '';
   if (!todas.length) return `<div class="mp-nada">${I.check}<span>Mis pendientes: ${d.sin_leer ? 'ninguna tarea abierta en lo que se puede leer' : 'ninguna tarea abierta en los resúmenes de tus reuniones'}${esc(sinLeer)}</span></div>`;
   // «Tuyas» si hay alguna (también recién marcada, con su «Deshacer»); si no, todas y sin los dos botones
   const tuyas = abiertas.filter(t => t.tuya).length, hayTuyas = todas.some(t => t.tuya);

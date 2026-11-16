@@ -30,7 +30,7 @@ ESCRIBIR_INTENTOS = 3  # marcar: si el resumen está abierto en otro programa (O
 # estar vacío. Las mismas líneas abiertas que cuenta plan.tareas_abiertas (test_pendientes lo comprueba).
 _TAREA = re.compile(r"^([ \t]*(?:[-*+]|\d+[.)])[ \t]+\[)([ xX])\][ \t]*(\S.*)$")  # el final, rstrip (lineal)
 # un minuto de la transcripción entre corchetes: [12:34], [1:02:10], [105:20], [12:34–13:10], [1:12, 3:40]
-_MINUTOS = re.compile(r"\[\s*(?:\d+:)?\d{1,3}:\d{2}(?:[^\]\n]*)\]")
+_MINUTOS = re.compile(r"\[\s*(?:\d+:)?\d{1,3}:\d{2}(?:[^\]\n]{0,60})\]")  # acotada: lineal (revisión 2, P3)
 _PRIMER_MINUTO = re.compile(r"\[\s*(?:(\d+):)?(\d{1,3}):(\d{2})")
 _CABECERA = re.compile(r"^[ \t]*#{1,6}[ \t]+(.*?)[ \t#]*$")
 CABECERAS_PASOS = ("proximos pasos", "next steps")  # normalizadas (engines.SUMMARY_HEADINGS["next"])
@@ -221,12 +221,14 @@ def _emparejar(hechas, tareas):
     return marcar
 
 
-def _misma_tarea(vieja, tareas, usadas, minuto_s=60):
-    """La tarea del resumen nuevo que es `vieja` con otro responsable, o None (ver conservar_hechas)."""
+def _misma_tarea(vieja, tareas, usadas, claves_viejas=(), minuto_s=60):
+    """La tarea del resumen nuevo que es `vieja` con otro responsable, o None (ver conservar_hechas). Nunca una que ya
+    estaba tal cual en el resumen viejo (otra tarea, abierta, de otra persona: revisión 2, P2)."""
     k = normalizar(vieja["tarea"])
     if len(k.split()) < 3:
         return None
     cand = [t for t in tareas if not t["hecha"] and t["i"] not in usadas and normalizar(t["tarea"]) == k
+            and t["clave"] not in claves_viejas
             and (vieja["segundo"] is None or t["segundo"] is None or abs(t["segundo"] - vieja["segundo"]) <= minuto_s)]
     return cand[0] if len(cand) == 1 else None
 
@@ -256,6 +258,7 @@ def conservar_hechas(viejo, nuevo):
         lineas[t["i"]] = _poner(lineas[t["i"]], t, True)
     en_el_nuevo, sobran = {t["clave"] for t in tareas}, []
     usadas = {t["i"] for t in marcadas}
+    claves_viejas = {t["clave"] for t in extraer(viejo)}
     for t in hechas:
         if t["clave"] not in en_el_nuevo:
             en_el_nuevo.add(t["clave"])  # (una vez aunque el viejo la tuviera repetida)
@@ -263,7 +266,7 @@ def conservar_hechas(viejo, nuevo):
             # regenerar, «Ana: enviar el acta» (revisión 1 de motor-lote2b, P1). Solo si la tarea, sin el responsable,
             # es la misma, tiene al menos tres palabras y una sola del nuevo encaja (y en el mismo minuto, si los dos
             # citan uno): nunca por parecido
-            otra = _misma_tarea(t, tareas, usadas)
+            otra = _misma_tarea(t, tareas, usadas, claves_viejas)
             if otra is not None:
                 usadas.add(otra["i"])
                 lineas[otra["i"]] = _poner(lineas[otra["i"]], otra, True)

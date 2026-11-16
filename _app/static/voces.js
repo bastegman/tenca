@@ -43,9 +43,9 @@ function renderVoicesBar(a) {
     const abierto = S.qhAbierto === a.path;
     // mientras se graba con el directo en la nube (punto 56): identificadas por bloques de 30 min; si la grabación ya
     // terminó y la identificación del resto no llegó a hacerse (se canceló o falló), se dice cómo terminarla
-    const grabando = typeof isLive === 'function' && isLive(a);
-    const parcial = !s.parcial ? '' : grabando || j ? ` · hasta el min ${Math.round(s.parcial / 60)} (el resto, al terminar)`
-      : ` · solo hasta el min ${Math.round(s.parcial / 60)}: «Volver a identificar» hace el resto`;
+    const grabando = (typeof isLive === 'function' && isLive(a)) || !!jobFor(a.path);  // (o el repaso final)
+    const parcial = !s.parcial ? '' : grabando ? ` · hasta el min ${Math.round(s.parcial / 60)} (el resto, al terminar)`
+      : ` · solo hasta el min ${Math.round(s.parcial / 60)}${on ? ': «Volver a identificar» hace el resto' : ''}`;
     html = `<span class="vz-st">${I.voice}Voces: ${s.n} ${s.n === 1 ? 'persona' : 'personas'} · ${s.known} reconocida${s.known === 1 ? '' : 's'}${Object.values(s.hablantes || {}).some(x => x.usuario && !x.provisional) ? ' · Tú' : ''}${parcial}</span>
       <button class="btn sm${sinNombre && !abierto ? ' primary' : ''}" type="button" data-act="qh-abrir" aria-expanded="${abierto}" aria-controls="qhBloque">${abierto ? 'Plegar' : sinNombre ? `Ponles nombre (${sinNombre})` : 'Quién habla'}</button>
       <span class="sp"></span>

@@ -138,7 +138,7 @@ class Voces:
         """GET /api/hablantes/muestra?path=&h=: {inicio, fin} para «Oír» esa voz en el bloque «Quién habla» (B8), de
         los tramos de su sidecar (no hace falta el .srt). La interfaz, sin esto, usa la frase mas larga de la
         transcripcion."""
-        abs_path = safe(q.get("path"), "file")
+        abs_path = safe(q.get("path"), "reunion")
         data = voices.read_sidecar(voices.sidecar_path(abs_path))
         m = muestra_de(data, q.get("h"))
         if m is None:
@@ -388,6 +388,11 @@ class Voces:
                 raise ApiError("Para guardar la huella hace falta marcar la casilla de consentimiento.")
             if not (path and h):
                 raise ApiError("Falta de qué reunión y hablante tomar la huella.")
+            # identificada solo en parte (por bloques mientras se grababa, punto 56): «h2» puede ser otra voz cuando
+            # se identifique entera; antes de poner el nombre, no después (revisión 2, P3)
+            if (voices.read_sidecar(voices.sidecar_path(safe(alias_of(path), "reunion"))) or {}).get("parcial"):
+                raise ApiError("Las voces de esta reunión están identificadas solo en parte: ponle nombre sin "
+                               "«Recordar» y guarda su huella cuando estén enteras.", 409)
         abs_path = None
         if path and not h:
             safe(path, "reunion")  # como siempre: una reunion que ya no existe se dice
