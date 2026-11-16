@@ -89,7 +89,8 @@ class HiloPrincipalTests(unittest.TestCase):
         exit_fn = mock.Mock()
         t0 = time.monotonic()
         apagado.esperar_salida(0.2, exit_fn=exit_fn)
-        self.assertGreaterEqual(time.monotonic() - t0, 0.19)
+        # el reloj de Windows avanza a saltos de ~15,6 ms: 0,2 s puede medirse como 0,187 (CI windows 3.11)
+        self.assertGreaterEqual(time.monotonic() - t0, 0.17)
         exit_fn.assert_called_once_with(0)
 
     def test_un_apagado_de_prueba_no_marca_el_proceso_y_arrancar_lo_limpia(self):
