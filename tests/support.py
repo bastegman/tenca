@@ -20,6 +20,7 @@ if APP not in sys.path:
 os.environ.setdefault("LOCALAPPDATA", tempfile.mkdtemp(prefix="notas-localappdata-"))  # DATA_DIR de los tests
 
 import server  # noqa: E402  (después de preparar sys.path)
+import carga  # noqa: E402
 import engines  # noqa: E402
 import live  # noqa: E402
 
@@ -97,9 +98,15 @@ class TempTree(unittest.TestCase):
         self._ctx.__enter__()
         self._complete = server.COMPLETE
         server.COMPLETE = server.Complete(os.path.join(self.data_dir, "completas.json"))
+        # lo ocupado que va el PC (carga.py) solo se mide en Windows: en la CI, con el runner cargado por los propios
+        # tests, el trabajo de fondo esperaria. Los tests que lo prueban lo parchean ellos (test_arranque_suave)
+        self._carga = (carga.ocupado, carga.poca_memoria, carga.memoria)
+        carga.ocupado, carga.poca_memoria = (lambda *a, **k: None), (lambda *a, **k: False)
+        carga.memoria = lambda: None
 
     def tearDown(self):
         server.COMPLETE = self._complete
+        carga.ocupado, carga.poca_memoria, carga.memoria = self._carga
         self._ctx.__exit__(None, None, None)
         import shutil
         shutil.rmtree(self.tmp, ignore_errors=True)

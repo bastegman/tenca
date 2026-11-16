@@ -29,6 +29,25 @@ de las demás.
 - Los apartados reescritos saldrán una vez en «También cambian» del próximo Release, y los dos con el título nuevo,
   como apartados nuevos. Los zips de los Releases anteriores llevan su README y su LEEME de entonces.
 
+### Arranque suave: el instalador no se congela y el trabajo de fondo cede (16/11/2026)
+
+En un portátil modesto, al instalar encima de la versión anterior, la ventana del instalador salía como «no
+responde» y, al pulsarla, Windows ofrecía cerrarla («Windows PowerShell is not responding»), lo que cortaba la
+instalación a medias.
+
+- **Instalador:** lo que tarda (cerrar la versión abierta, buscar Python, pip, comprobar las librerías y compilar los
+  dos tipos de Windows) corre en segundo plano y la ventana se sigue atendiendo. `instalar.log` apunta la hora de cada
+  paso y lo más largo que la ventana ha estado sin atender.
+- **Rehacer las huellas de voz tras actualizar:** cada huella en un proceso en reposo y con 1 hilo, una a una y con
+  10 s de pausa entre ellas; al arrancar espera 2 min y a que Tenca y el PC lleven 1 min tranquilos. Si el PC va justo
+  (menos de 1 GB de memoria libre o más del 60 % de la CPU de todo el PC), espera y lo dice en el log; si se acaba la
+  memoria mientras calcula, se corta y se repite después.
+- **Al arrancar:** el modelo de Whisper no se precarga con menos de 2,5 GB libres (se carga al empezar la reunión) y
+  la precarga de las transcripciones no abre las «solo en línea» de OneDrive.
+- **Diagnóstico:** «PC: N hilos de CPU · memoria X GB, libre Y GB».
+- **Desarrollo y CI:** `lookfeel-e2e` mide si la ventana del instalador deja de responder (`*.ventana_responde`, como
+  mucho 2,5 s seguidos); `tests/test_arranque_suave.py`.
+
 ### Sin notas de trabajo en el repositorio (16/11/2026)
 
 Punto 50 del review del 14/11/2026. No cambia nada en la app instalada.

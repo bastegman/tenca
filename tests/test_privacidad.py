@@ -19,6 +19,7 @@ from unittest import mock
 
 from support import (REPO, TempTree, bare_jobs, engines, server,  # noqa: F401  (support prepara sys.path)
                      srt_text, codigo_del_servidor)
+import carga  # noqa: E402
 import salidas  # noqa: E402
 from test_perfil import FakeRec, settings_store  # noqa: E402  (ayudantes, no tests)
 
@@ -685,8 +686,9 @@ class DiagnosticoTests(TempTree):
             f"no · {len(server.ROOT)} caracteres",
             "Datos: en otra carpeta", "Carpetas vinculadas: 1 · destinos de salida: 1", "",
             "server.log (últimas 30 líneas; lo que no es técnico va como <texto>):"])
+        # y la memoria del PC (arranque-suave, 16/11/2026: test_arranque_suave)
         self.assertEqual(lines[7:i - 1], ["Ajustes corregidos al arrancar: ninguno", self.app.despierto.estado(),
-                                          *server.fallos.diagnostico(server.DATA_DIR),
+                                          carga.diagnostico(), *server.fallos.diagnostico(server.DATA_DIR),
                                           "Informes técnicos de las últimas reuniones: ninguno todavía"])
         salida = [l.split(" ", 2)[2] if l[:4].isdigit() else l for l in lines[i + 1:]]  # sin la fecha y la hora
         self.assertEqual(salida, [esperado for _, esperado in self.LOG])

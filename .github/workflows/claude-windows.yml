@@ -44,6 +44,7 @@ on:
       - "_app/despierto.py"
       - "_app/fallos.py"
       - "_app/informe.py"
+      - "_app/carga.py"
       - "scripts/e2e/claude_windows.py"
       - ".github/workflows/claude-windows.yml"
 
