@@ -13,7 +13,7 @@ def masked(key):
     return (key[:4] + "…" + key[-4:]) if key and len(key) > 12 else ("••••" if key else "")
 
 
-KEY_LIKE = re.compile(r"\b(?:gsk|sk)[-_][A-Za-z0-9_-]{12,}")  # Groq (gsk_...) y OpenAI (sk-...)
+KEY_LIKE = re.compile(r"\b(?:gsk|sk)[-_][A-Za-z0-9_-]{12,}")  # claves con prefijo gsk_... y sk-...
 
 
 def scrub(text, keys=()):

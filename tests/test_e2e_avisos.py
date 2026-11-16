@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """E2E de los avisos de la franja del directo (B6, puntos 1-3) con la app de verdad: el servidor como lo
 arranca el acceso directo, la grabadora real con la tarjeta de sonido falsa de tests/fake_soundcard (el micro calla a
-los 6 s: FAKESC_MIC_MUDO), el directo en un Groq falso en 127.0.0.1 y la interfaz en Chromium (Playwright):
+los 6 s: FAKESC_MIC_MUDO), el directo en una API falsa en 127.0.0.1 y la interfaz en Chromium (Playwright):
 
 1. el micro se calla: la franja dice «El micro no recibe sonido desde hace …» (con el minuto acortado a 4 s,
    CHULETA_PRUEBAS_AVISOS) y la grabación sigue;
-2. lo último suena a portugués con la reunión en «Solo español» (el Groq falso responde language «portuguese»): la
+2. lo último suena a portugués con la reunión en «Solo español» (la API falsa responde language «portuguese»): la
    franja lo propone, «Cambiar» pasa la reunión a portugués al momento (las peticiones siguientes van con pt) y el
    aviso se va; en otra grabación, «No» lo quita y no vuelve;
 3. la llamada de Teams termina (CHULETA_PRUEBAS_TEAMS: el registro y la ventana de Teams, de mentira): «La llamada
@@ -46,7 +46,7 @@ TIEMPOS = {"AVISO_S": 4, "CONFIRMA_S": 1, "PARA_EN_S": 8, "CUBRE": 0.3, "CUBRE_M
 
 
 class GroqOye:
-    """Groq falso: /audio/transcriptions devuelve «Texto en <idioma pedido> n.º k» y, en language, `oye` (lo que
+    """API falsa: /audio/transcriptions devuelve «Texto en <idioma pedido> n.º k» y, en language, `oye` (lo que
     «suena», si se fija) o el idioma pedido (lo que hace una API que no detecta con el idioma fijado)."""
 
     def __init__(self):

@@ -21,7 +21,7 @@ grabaciones, transcripciones y notas se guardan en la carpeta de Tenca, `%USERPR
   móvil al PC por tu wifi (no pasa por internet); cada código vale 10 minutos y para un solo móvil, y solo funciona en
   una red que Windows tiene como privada (la de casa).
 - **Transcribir** mientras se habla o al terminar: en tu PC (faster-whisper; es lo que viene por defecto) o en la
-  nube, con el proveedor que elijas (Azure OpenAI, Groq, OpenAI o cualquier API compatible con OpenAI). En la nube el
+  nube, con el proveedor que elijas (Azure OpenAI, OpenAI o cualquier API compatible con OpenAI). En la nube el
   directo va casi en streaming: trozos de 3–6 s cortados en las pausas, solo con la voz, al ritmo que permite el cupo
   del proveedor (y con claves de respaldo de otras cuentas del mismo proveedor, si las añades); con «Modo seguir» y, si quieres, traducción al español o al inglés en una
   columna («Traducir al ▾», recordado por reunión; no se guarda). El idioma de la reunión se cambia en pleno directo y
@@ -108,7 +108,7 @@ grabaciones, transcripciones y notas se guardan en la carpeta de Tenca, `%USERPR
    Code: la app te guía paso a paso, «Abrir PowerShell», instalar, escribir `claude` y entrar con tu cuenta en el
    navegador, con el inicio de sesión de tu empresa si es la suya, y «Probar»; no ve ni guarda tus credenciales, y
    también encuentra la copia de Claude Code de VS Code con su sesión) o
-   **API externa** (Azure OpenAI, Groq, OpenAI o cualquier API compatible con OpenAI: transcripción rápida en la nube
+   **API externa** (Azure OpenAI, OpenAI o cualquier API compatible con OpenAI: transcripción rápida en la nube
    y resumen, con tu API key; con la primera key, la nube pasa a ser lo predeterminado para la cola y para el
    directo). Las dos últimas avisan de que el contenido de la reunión sale del PC: el texto, a Anthropic con la
    cuenta de Claude; el audio y el texto, al proveedor de la API. En algunas reuniones eso puede ser un bloqueante:
@@ -359,12 +359,14 @@ El detalle de cada pantalla. `LEEME.txt`, el que va en el zip, cabe en una panta
   consentimiento es responsabilidad tuya). Si no activas la opción no se descarga ni se guarda
   nada.
 
-### Si usas Groq: límites de su plan gratuito
+### Si tu API tiene un cupo
 
-Orientativos; los vigentes, en `console.groq.com/settings/limits`.
-
-- Transcripción: unas 2 horas de audio por hora y 8 horas de audio al día.
-- Resumen: unas 7 reuniones de 1 hora al día.
+- Si tu plan limita las peticiones o los tokens por minuto, Tenca va a su ritmo y, cuando el proveedor pide esperar
+  poco, espera. Con claves de otras cuentas del mismo proveedor (Ajustes › Avanzado › «La nube, en detalle», «Claves
+  adicionales»), pasa a la siguiente cuando una se queda sin cupo.
+- Si se acaba el cupo del día: en el directo, la grabación sigue y lo que falte se intenta al terminar (y el repaso
+  final, si está activado, repasa la grabación entera); una transcripción de la cola se para con «… pide esperar N
+  min» y se vuelve a lanzar después con «Reintentar»; el resumen se vuelve a pedir más tarde con «Resumir».
 
 ### Si algo falla
 
@@ -572,7 +574,7 @@ seguridad están activadas.
 ```
 .venv/bin/python scripts/directo_bench.py synth --lang es --out /tmp/es.wav   # audio con `say` (macOS) y pausas
 .venv/bin/python scripts/directo_bench.py run /tmp/es.wav --latency 1.0       # chunker + ritmo con reloj falso
-.venv/bin/python scripts/directo_bench.py run /tmp/es.wav --real              # Groq de verdad (GROQ_API_KEY)
+.venv/bin/python scripts/directo_bench.py run /tmp/es.wav --real              # la API de verdad (clave: ver --help)
 ```
 
 Imprime la distribución de tamaños de trozo, cuánto silencio se manda, la latencia (fin del audio del trozo → texto
@@ -586,7 +588,7 @@ La VAD es la de faster-whisper si está instalada; si no, una por energía.
 .venv/bin/python scripts/rendimiento_bench.py red biblioteca --json despues.json
 ```
 
-Mide lo que limita la transcripción por nuestro lado: el coste de abrir una conexión con `api.groq.com` en cada
+Mide lo que limita la transcripción por nuestro lado: el coste de abrir una conexión con la API en la nube en cada
 petición frente a reutilizarla (sin clave: la API responde 401 y basta para medir DNS + TCP + TLS), el arranque en
 frío del proceso de Whisper frente a tenerlo ya cargado (y su memoria), una hora de audio sintético (decodificar,
 silencios, FLAC y el tiempo total con una API falsa) y una biblioteca de 1.000 reuniones (`scan()`,
@@ -597,7 +599,7 @@ Ajustes relacionados (en `settings.json`, por `/api/settings`): `worker_keepaliv
 local sigue cargado tras el último trabajo; 30 por defecto, 0 = 5 min como antes) y `worker_preload` (al arrancar,
 cargar el modelo local del directo si ya está descargado; activado). En el directo en la nube, `server.log` y la
 cabecera del directo desglosan la latencia de cada trozo por fases (preparación, cupo, red, inferencia si el
-servidor la declara, pintado), para saber si el cuello está en Groq, en la red o en este lado.
+servidor la declara, pintado), para saber si el cuello está en el proveedor, en la red o en este lado.
 
 ### Generar el zip instalable
 

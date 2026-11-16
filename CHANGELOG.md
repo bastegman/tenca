@@ -25,6 +25,25 @@ está en este repositorio. «Desarrollo y CI» es para quien mantiene el reposit
 - **Desarrollo y CI:** `scripts/nube_trozos_bench.py` (la app de verdad contra un proveedor simulado con límite por
   minuto: peticiones por hora de audio, 429 y tiempo hasta el texto); `tests/test_nube_trozos.py`.
 
+### Ningún proveedor de la nube por delante de los demás (16/11/2026)
+
+Tenca funciona con cualquier API compatible con OpenAI, y la documentación y la app ya no ponen a ninguna por delante
+de las demás.
+
+- README, LEEME y este CHANGELOG hablan de «tu API» o «el proveedor que elijas». En lugar de los límites del plan
+  gratuito de un proveedor, el README explica qué hace Tenca si tu API tiene un cupo.
+- Los avisos de cupo, esperas y límites (en el directo, el repaso y el resumen) dicen el nombre del proveedor que
+  tienes elegido. Antes, el resumen y la transcripción en la nube nombraban siempre al mismo aunque usaras otro. Con
+  una API propia, los avisos y los errores de la nube (clave no válida, petición rechazada…) dicen «tu API».
+- La lista de «API externa» no cambia y quien ya usa un proveedor no tiene que tocar nada.
+- **Nuevo test**, en `NotasInternasTests`: falla si el nombre que se ha quitado vuelve a aparecer fuera de la tabla
+  de proveedores (`engines.PROVIDERS` y `CHAT_URLS`) y de los identificadores: en el README, los LEEME, este
+  CHANGELOG, `.github/`, `design/`, los ficheros de la raíz o cualquiera de `_app/` (en los `.py`, en los textos, los
+  comentarios y los docstrings). Los tests y los scripts de desarrollo no cuentan: sus datos de prueba configuran ese
+  proveedor.
+- Los apartados reescritos saldrán una vez en «También cambian» del próximo Release, y los dos con el título nuevo,
+  como apartados nuevos. Los zips de los Releases anteriores llevan su README y su LEEME de entonces.
+
 ### Arranque suave: el instalador no se congela y el trabajo de fondo cede (16/11/2026)
 
 En un portátil modesto, al instalar encima de la versión anterior, la ventana del instalador salía como «no
@@ -171,7 +190,7 @@ Rama `enganches`: lo que las ramas anteriores de esta revisión dejaron preparad
   la interfaz lo deducía y no veía todas las llamadas).
 - **«Oír» una voz** suena con unos segundos en que solo habla ella, de lo que separó «Quién habla», aunque la
   transcripción no tenga tiempos.
-- **El aviso del resumen dice quién lo hizo** («por Groq», «por tu cuenta de Claude»…), que queda en su cabecera.
+- **El aviso del resumen dice quién lo hizo** («por OpenAI», «por tu cuenta de Claude»…), que queda en su cabecera.
 
 ### «Quién habla» con otro modelo de huellas, medido en reuniones largas, en español y con audio de Teams (15/11/2026)
 
@@ -391,17 +410,18 @@ Rediseño B6, puntos 1-3. Rama `directo-avisos`. En la cabecera del directo, con
   trozo con small y 195 ms con medium, medido); en la nube, el campo `language` de la respuesta, sin peticiones de más
   (si la API devuelve el idioma que se le pidió, no se propone nada).
 
-### Groq vuelve a transcribir con unos ajustes de antes (10/11/2026)
+### La API externa vuelve a transcribir con unos ajustes de antes (10/11/2026)
 
 - Con unos ajustes en los que el proveedor de la nube no es ninguno de los que hay (vacío o de una versión anterior),
-  «Sin Groq por defecto» hacía que el motor lo rechazara. El directo pasaba entonces, sin decirlo, a Whisper en el PC
-  y se quedaba descargando o cargando el modelo, y al terminar no salía nada. Hasta el 09/11 eso era Groq, y vuelve a
-  serlo: al arrancar, ese proveedor pasa a Groq (lo dice el log) y el motor también lo trata como Groq. Solo «Probar»
-  del asistente con «API externa» y sin proveedor elegido sigue sin mandar nada a nadie.
+  el cambio del 09/11 (una instalación nueva no sugiere ningún proveedor) hacía que el motor lo rechazara. El directo
+  pasaba entonces, sin decirlo, a Whisper en el PC y se quedaba descargando o cargando el modelo, y al terminar no
+  salía nada. Hasta el 09/11 eso iba al proveedor que traen los ajustes de fábrica (`cloud.provider`), y vuelve a ir:
+  al arrancar, ese proveedor pasa al de fábrica (lo dice el log) y el motor también lo trata así. Solo «Probar» del
+  asistente con «API externa» y sin proveedor elegido sigue sin mandar nada a nadie.
 - En ese mismo caso, Ajustes › Procesado enseñaba «Azure OpenAI» (el primero de la lista) y «Guardar» lo dejaba en
-  Azure sin endpoint. Unos ajustes así (Azure sin endpoint ni deployment y con una clave de Groq) vuelven a Groq al
-  arrancar.
-- Una instalación nueva sigue sin sugerir ni preseleccionar Groq.
+  Azure sin endpoint. Unos ajustes así (Azure sin endpoint ni deployment y con una clave «gsk_…», que no es de Azure)
+  vuelven al de fábrica al arrancar.
+- Una instalación nueva sigue sin sugerir ni preseleccionar ningún proveedor.
 
 ### Memoria con audios largos (09/11/2026)
 
@@ -431,24 +451,24 @@ sin memoria y la app enseñó la traza de ONNX dos veces, una como «No se pudo 
   comprometida de «Quién habla» con este commit y con `fe29522`; falla si no baja o pasa de 1.200 MB
   (`scripts/e2e/voces_memoria.py`).
 
-### Sin Groq por defecto en una instalación nueva (09/11/2026)
+### Una instalación nueva no sugiere ningún proveedor de la nube (09/11/2026)
 
-A quien instala por primera vez no se le sugiere un servicio concreto. Rama `sin-groq-por-defecto`.
+A quien instala por primera vez no se le sugiere un servicio concreto.
 
 - Por defecto, «Solo en este PC» (ya lo era: `procesado_de` sin clave es local), y ahora nada lo empuja hacia la nube:
-  la portada ya no dice «Conecta Groq» ni «Conecta la nube para ir mucho más rápido»; el asistente y Ajustes ›
-  Procesado describen «API externa» sin nombrar a ningún proveedor.
+  la portada ya no invita a conectar un proveedor concreto ni dice «Conecta la nube para ir mucho más rápido»; el
+  asistente y Ajustes › Procesado describen «API externa» sin nombrar a ningún proveedor.
 - Al elegir «API externa» en una instalación nueva no hay proveedor preseleccionado: «Elige el proveedor…», con la
   lista por orden alfabético y la API de tu empresa al final; sin elegir, no se sigue ni se prueba. El servidor dice
   si ya hay uno elegido (`cloud.elegido`: «API externa» elegida, o una clave, una URL propia o una de Azure guardadas)
-  y no guarda un proveedor vacío. Las ayudas del cupo gratuito de Groq salen solo si usas Groq.
-- Groq sigue en «API externa», con el aviso de que el audio sale del PC. Quien ya lo usa no nota nada: su
-  configuración no cambia (sin migración ni avisos nuevos); `cloud.provider` sigue siendo "groq" por defecto en los
-  ajustes, para no cambiar a nadie que lo use sin haberlo guardado nunca.
-- README y LEEME: «Solo en este PC» como lo que viene por defecto y los proveedores en orden alfabético; los límites
-  del plan gratuito de Groq, solo «si usas Groq». Tests: `tests/test_sin_groq.py` (servidor y una instalación nueva en
-  Chromium, en ui-smoke; y, desde la integración, un settings.json con Groq como lo dejaba la versión anterior, igual
-  al arrancar y después de «Guardar» en Ajustes sin tocar nada, con su clave y la adicional).
+  y no guarda un proveedor vacío. Las ayudas del cupo de un proveedor salen solo si lo usas.
+- Todos siguen en «API externa», con el aviso de que el audio sale del PC. Quien ya usa uno no nota nada: su
+  configuración no cambia (sin migración ni avisos nuevos); `cloud.provider` sigue teniendo su valor por defecto en
+  los ajustes, para no cambiar a nadie que lo use sin haberlo guardado nunca.
+- README y LEEME: «Solo en este PC» como lo que viene por defecto y los proveedores en orden alfabético. Tests: los de
+  una instalación nueva (el servidor y la interfaz en Chromium, en ui-smoke; y, desde la integración, un settings.json
+  con un proveedor como lo dejaba la versión anterior, igual al arrancar y después de «Guardar» en Ajustes sin tocar
+  nada, con su clave y la adicional).
 
 ### Subir audio desde el móvil con un código QR (09/11/2026)
 
@@ -530,7 +550,7 @@ Con cuatro decisiones de diseño por defecto (las de `_app/movil.py`). Rama `qr-
   (abierta en Edge) no se puede, y también lo dice.
 - Tests: `test_idioma_directo.py` (sesiones con reloj falso: cambio entre trozos, con un trozo en vuelo en la nube y
   en local, dos seguidos, el trozo que rehace falla, corregidas a mano, traducción), `test_ocultar_captura.py`, y de
-  punta a punta: `test_e2e_idioma.py` (grabando de verdad contra un Groq falso, en ui-smoke), el cambio de idioma con
+  punta a punta: `test_e2e_idioma.py` (grabando de verdad contra una API falsa, en ui-smoke), el cambio de idioma con
   el Whisper medium de verdad en `test_e2e_procesado.py`, `test_ocultar_captura_windows.py` (la ventana real con
   WebView2: la marca y capturas con y sin ella, en windows-real) y el aviso real con la marca en
   `test_reunion_windows.py`; en `test_ui_smoke.py`, la nota de la tarjeta y el interruptor de Ajustes.
@@ -559,7 +579,7 @@ futuras y en un diccionario personal reversible. Rama `aprender-correcciones`, c
   original» lo quita todo. El diccionario está en Ajustes › Proyectos: se ve, se cambia en la propia fila y se quita;
   sigue al proyecto si se renombra.
 - Tests: `tests/test_aprender.py` y `tests/test_ui_aprender.py` (en ui-smoke, Ubuntu y Windows; la regla aplicada al
-  transcribir, contra el Groq falso).
+  transcribir, contra la API falsa).
 
 ### Subir audio (09/11/2026)
 
@@ -1076,9 +1096,9 @@ Lo que se pedía: que funcione con una cuenta de Claude de empresa, con SSO, y c
 Lo que se pedía (06/11/2026): la configuración era difícil y mala de seguir.
 - **La línea del modo.** El diálogo Grabar, la cabecera del directo, la Cola y el chip «EN VIVO» dicen lo mismo y con
   las mismas palabras: «Se transcribe en este PC (Normal) y al terminar la resume Claude con tu cuenta», «Se transcribe
-  en este PC (Normal). Sin resumen con IA» o «Se transcribe con Groq y al terminar la resume Groq». Cada modelo tiene
-  un solo nombre (Rápido, Normal, Preciso, Máxima). Los modelos del directo y «Rehacer con este modelo» quedan detrás
-  de «Cambiar».
+  en este PC (Normal). Sin resumen con IA» o «Se transcribe con OpenAI y al terminar la resume OpenAI». Cada modelo
+  tiene un solo nombre (Rápido, Normal, Preciso, Máxima). Los modelos del directo y «Rehacer con este modelo» quedan
+  detrás de «Cambiar».
 - **«Preparando la transcripción».** Mientras se descarga o se carga el modelo del directo, la cabecera lo dice con
   barra, %, MB y tiempo, y que la grabación sigue sin perder nada. El hueco del texto ya no dice «Escuchando…» ni la
   Cola «al día» con 0:00 transcrito. En Grabar, si el modelo aún no está en el PC, lo avisa con su tamaño y
@@ -1098,8 +1118,8 @@ Lo que se pedía (06/11/2026): la configuración era difícil y mala de seguir.
   tarjeta dice lo que hay ahora (dónde se transcribe, quién resume y cuándo se probó por última vez) con «Probar» y
   «Cambiar…» (el asistente). Debajo sigue el cambio rápido con «Aplicar ahora». Lo técnico de la nube (modelo del
   directo, otras claves, trozos, paralelismo) pasa a Avanzado y solo sale con la API; «repasar la grabación entera» y
-  el cupo de Groq, en Grabar, también solo con la API. Voces queda tal cual. Ajustes se abre en la última sección vista
-  (o en la que toca: falta la clave → Procesado).
+  el cupo del proveedor, en Grabar, también solo con la API. Voces queda tal cual. Ajustes se abre en la última sección
+  vista (o en la que toca: falta la clave → Procesado).
 - **Errores en una frase con qué hacer** (`explicar.py`): Claude Code sin sesión, sin instalar, sin respuesta o con el
   plan en su límite de uso; una pieza de la instalación que falta («No module named…»); un proxy que contesta en lugar
   de la API. Los de la nube y la descarga de modelos ya venían en una frase (`connection_error`, `cloud_http_error`): se
@@ -1107,8 +1127,8 @@ Lo que se pedía (06/11/2026): la configuración era difícil y mala de seguir.
   técnico sigue en `server.log`.
 
 ### Transcribir con los tres modos: descarga de Whisper con progreso y la verdad sobre el motor (07/11/2026)
-El problema (06/11/2026): con Groq «fallaba la conexión», con «Con tu cuenta de Claude» no transcribía, al grabar
-«Modelo» parecía seguir en Groq y «Descargando modelo medium» no acababa.
+El problema (06/11/2026): con la API externa «fallaba la conexión», con «Con tu cuenta de Claude» no transcribía, al
+grabar «Modelo» parecía seguir en la API y «Descargando modelo medium» no acababa.
 - **Whisper se descarga con progreso de verdad.** Antes lo bajaba faster-whisper dentro del proceso de Whisper la
   primera vez que hacía falta: un único «Descargando modelo medium (solo la primera vez)…» durante minutos (medium son
   1.531 MB), una hora de tope por intento sin detectar que se había parado, y desde un proceso sin los certificados de
@@ -1120,9 +1140,9 @@ El problema (06/11/2026): con Groq «fallaba la conexión», con «Con tu cuenta
 - **Ajustes › Dónde se procesan tus reuniones** dice si lo elegido está aplicado o no, con un botón «Aplicar ahora»
   junto a las opciones, y al cerrar Ajustes sin aplicarlo avisa de que sigue la opción de antes (antes había que bajar
   hasta «Guardar»: elegir la cuenta de Claude, pulsar «Comprobar» y cerrar dejaba la API externa sin decirlo, y el
-  directo seguía en Groq). Un clic de prueba no cambia nada; si hay transcripciones en la nube en marcha, lo dice antes
-  de aplicar. Con «Solo en este PC» y «Con tu cuenta de Claude» enseña los modelos de Whisper del PC con su estado y
-  «Descargar», «Cancelar» o «Reintentar», deja claro que Claude no transcribe (solo resume) y, al aplicar, empieza a
+  directo seguía en la nube). Un clic de prueba no cambia nada; si hay transcripciones en la nube en marcha, lo dice
+  antes de aplicar. Con «Solo en este PC» y «Con tu cuenta de Claude» enseña los modelos de Whisper del PC con su estado
+  y «Descargar», «Cancelar» o «Reintentar», deja claro que Claude no transcribe (solo resume) y, al aplicar, empieza a
   bajar el modelo del directo, no en mitad de la primera reunión (salvo que se haya cancelado en Ajustes).
 - **Transcribir desde la cola en este PC volvía a funcionar solo con un PyAV antiguo.** faster-whisper 1.2.1 (su
   última versión) abre el audio con `av.open(…, metadata_errors="ignore")`, y PyAV 19 (29/09/2026, lo que instala hoy
@@ -1134,7 +1154,7 @@ El problema (06/11/2026): con Groq «fallaba la conexión», con «Con tu cuenta
   tocado: pintados con el modo de antes, después de «Probar conexión» devolvían el directo a Whisper en el PC. Esos
   selectores se repintan al cambiar de modo.
 - **«Modelo» dice dónde se transcribe**: junto al directo y en el diálogo de grabar sale «en este PC · Whisper
-  medium» o «en la nube · Groq» y, con la cuenta de Claude, que Claude solo hace el resumen. Si el último directo de
+  medium» o «en la nube · OpenAI» y, con la cuenta de Claude, que Claude solo hace el resumen. Si el último directo de
   una grabación falló, la cabecera dice por qué en lugar de «está parada».
 - Descargas: una respuesta vacía o un proxy que no reanuda y corta ya no reintentan sin fin (los reintentos cuentan
   desde lo más lejos que se ha llegado); «Descargar» justo después de «Cancelar» sigue con la misma descarga. El audio
@@ -1145,7 +1165,7 @@ El problema (06/11/2026): con Groq «fallaba la conexión», con «Con tu cuenta
 - Desarrollo y CI: `tests/test_fix_transcripcion.py` (descargas contra un servidor HTTP local que corta, se para,
   ignora `Range`, devuelve 403, HTML o bytes dañados) y la E2E `e2e-procesado.yml` en Windows: elige cada modo en
   Ajustes, descarga y carga Whisper medium de verdad con su progreso, transcribe en directo y desde la cola, y comprueba
-  lo que enseña «Modelo»; Groq contra un falso local y Claude Code con uno falso en el PATH (nunca claves reales).
+  lo que enseña «Modelo»; la API contra una falsa local y Claude Code con uno falso en el PATH (nunca claves reales).
 
 ### Quién habla: poner nombre ya no te convierte en «Tú» (07/11/2026)
 - Poner nombre a un hablante dice quién es ese hablante en esta reunión: una persona que ya se llama así (sin
@@ -1185,7 +1205,7 @@ El problema (06/11/2026): con Groq «fallaba la conexión», con «Con tu cuenta
 - Ajustes empieza por una elección: **Solo en este PC** (Whisper local, nada sale del ordenador, sin resumen con IA),
   **Con tu cuenta de Claude** (transcripción local y resumen con Claude usando la suscripción del usuario, personal o
   de empresa, a través de Claude Code: paso a paso dentro de la app y botón «Comprobar») o **API externa** (lo de
-  siempre: Groq, OpenAI, Azure OpenAI o una API compatible). Las dos últimas llevan su aviso de que el contenido de la
+  siempre: OpenAI, Azure OpenAI o una API compatible). Las dos últimas llevan su aviso de que el contenido de la
   reunión sale del PC (`procesado` en `settings.json`; una instalación anterior con API key sigue en «API externa» y
   sin key pasa a «Solo en este PC»). Decisión de producto: una sola versión, pública, con las tres alternativas y los
   avisos, en vez de una versión «solo local» y otra con nube.
@@ -1207,8 +1227,8 @@ El problema (06/11/2026): con Groq «fallaba la conexión», con «Con tu cuenta
   resumen automático se puede apagar también con la cuenta de Claude, y su aviso dice que es automático; la entrada
   se escribe desde un hilo propio (una transcripción larga no se pierde con Python anterior a 3.13.10); `claude` se
   lanza en una carpeta vacía y sin `ANTHROPIC_API_KEY` en el entorno (el gasto va a la cuenta, no a la API); el
-  permiso de «Resumir» es por destino (el de Groq no vale para Anthropic); un `"agente": null` en `settings.json` no da
-  el fichero por roto; Inicio invita a elegir dónde se procesa si nadie lo ha hecho.
+  permiso de «Resumir» es por destino (el de la API externa no vale para Anthropic); un `"agente": null` en
+  `settings.json` no da el fichero por roto; Inicio invita a elegir dónde se procesa si nadie lo ha hecho.
 
 ### Invitar al autor a un café (02/11/2026)
 - En Ajustes › Acerca de, en el README y en el LEEME hay un enlace discreto de PayPal para invitar al autor a un
@@ -1398,17 +1418,17 @@ Lo que falló en la primera prueba de la versión del 01/11/2026 en un portátil
   y antes de sustituir el fichero se fuerza a disco (`fsync`).
 
 ### Directo
-- **Claves adicionales por proveedor** (P1-05). Cada clave adicional es del proveedor con el que se guardó (las de
-  Groq siguen en `cloud.extra_keys`; las demás, en `extra_keys_openai`, `extra_keys_azure` y `extra_keys_custom`,
-  cifradas igual) y solo se usa con él: al cambiar de proveedor ya no se mandan a otro servicio. Ajustes enseña las
-  del proveedor elegido y dice de quién son las demás.
+- **Claves adicionales por proveedor** (P1-05). Cada clave adicional es del proveedor con el que se guardó (las del
+  proveedor de fábrica siguen en `cloud.extra_keys`; las demás, en `extra_keys_openai`, `extra_keys_azure` y
+  `extra_keys_custom`, cifradas igual) y solo se usa con él: al cambiar de proveedor ya no se mandan a otro servicio.
+  Ajustes enseña las del proveedor elegido y dice de quién son las demás.
 - **«Otra (compatible)», con su modelo del directo** (P1-15): un campo libre en Ajustes; vacío, el directo usa el
   modelo de la cola. Antes pedía siempre `whisper-large-v3-turbo`, y una pasarela sin ese modelo rechazaba cada trozo.
 - **Ponerse al día sin atascarse** (P1-14). Si el directo en la nube va con retraso (más de dos ventanas pendientes),
   junta lo pendiente en una petición de hasta 10 min (un WAV de 19,2 MB) y se pone al día; al terminar, lo que quede
   sale en trozos de como mucho 10 min. Nunca se manda más de 25 MB, ni más peticiones por minuto de las que declare el
-  proveedor (`x-ratelimit-limit-requests`, en OpenAI, Azure o una pasarela; en Groq el límite es por día). Antes el
-  retraso crecía sin tope y al final se subía todo de una vez (error 413).
+  proveedor (`x-ratelimit-limit-requests`, en OpenAI, Azure o una pasarela; con cupo diario, el límite es por día).
+  Antes el retraso crecía sin tope y al final se subía todo de una vez (error 413).
 - **Un trozo que falla no tumba la sesión** (P1-16). En la nube se salta y se anota, también al ponerse al día y el
   último; si el directo acaba sin texto o con un error y la grabación ya terminó, se encola igual el repaso final (y
   con él los destinos y el resumen). El directo hace 2 intentos por trozo, con esperas de como mucho 30 s.
@@ -1425,11 +1445,11 @@ Lo que falló en la primera prueba de la versión del 01/11/2026 en un portátil
 - El cupo se lleva por clave y por modelo: el directo con `whisper-large-v3-turbo` y el repaso final con
   `whisper-large-v3` no se descuentan uno al otro (P2-23).
 - **Traducción**: solo traduce lo dicho en los últimos 30 s, así que activada a mitad de reunión no empieza por el
-  minuto 0 (P2-21); enseña el modelo y el proveedor reales (`openai/gpt-oss-20b` en Groq, `gpt-4o-mini` en OpenAI, el
-  modelo del resumen en una pasarela propia) y, sin servicio de chat (Azure), sale desactivada (P2-24). Al terminar el
-  directo, la última traducción tarda como mucho 10 s en total, esperas incluidas (antes podía retener el final del
-  directo varios minutos); si tras esperar al límite por minuto no quedaría tiempo para pedirla, ya no espera en balde
-  (P2-22).
+  minuto 0 (P2-21); enseña el modelo y el proveedor reales (`gpt-4o-mini` en OpenAI; en una pasarela propia, el
+  modelo del resumen o, si no hay, `openai/gpt-oss-20b`, que es también el del proveedor de fábrica) y, sin servicio de
+  chat (Azure), sale desactivada (P2-24). Al terminar el directo, la última traducción tarda como mucho 10 s en total,
+  esperas incluidas (antes podía retener el final del directo varios minutos); si tras esperar al límite por minuto no
+  quedaría tiempo para pedirla, ya no espera en balde (P2-22).
 - Con Azure OpenAI, la pantalla del resumen dice que el resumen aún no funciona ahí (con Azure solo se transcribe), en
   vez de mandar a «Configurar la nube» (P2-25).
 
@@ -1681,8 +1701,8 @@ Lo que falló en la primera prueba de la versión del 01/11/2026 en un portátil
   persona. Los avisos de privacidad hablan de «la política de tu empresa y el acuerdo con tu cliente, si lo hay».
 - La etiqueta «Workstream» de la interfaz pasa a «Tema». Los ficheros `.md` siguen usando las claves `proyecto`
   y `workstream`, así que las reuniones existentes no cambian.
-- Los textos de la interfaz nombran al proveedor configurado («Hecho con IA en Groq/OpenAI/…») en vez de dar
-  por hecho Groq.
+- Los textos de la interfaz nombran al proveedor configurado («Hecho con IA en OpenAI/…») en vez de dar por hecho
+  uno.
 - El idioma por defecto en instalaciones nuevas es «Detectar». La opción «Español + inglés» sigue ahí y los
   ajustes ya guardados no cambian.
 - `requirements.txt`, `LICENSE` (MIT), `README.md` y este fichero.
@@ -1752,10 +1772,10 @@ Lo que falló en la primera prueba de la versión del 01/11/2026 en un portátil
   ajeno, o uno nuestro cambiado en el destino, se deja como está, se anota en `server.log` y se avisa en Ajustes (ver
   «Perfil y destinos»).
 - **Rendimiento, con medición antes/después** (`scripts/rendimiento_bench.py`, documentado en el README):
-  - Las peticiones a Groq/OpenAI (directo, repaso final, cola, resumen y traducción) van por una `requests.Session`
+  - Las peticiones a la API (directo, repaso final, cola, resumen y traducción) van por una `requests.Session`
     por hilo con keep-alive (`engines.Http`), con timeouts por fase (10 s para conectar y el de lectura de cada
     petición) y sin reintentos en el adaptador (los decide el `KeyPool`). Antes cada petición abría conexión
-    nueva (DNS + TCP + TLS): medido contra `api.groq.com` sin clave, 86 → 57 ms por petición (p50; p95 108 → 61),
+    nueva (DNS + TCP + TLS): medido contra una API en la nube sin clave, 86 → 57 ms por petición (p50; p95 108 → 61),
     que en el directo se paga cada 3-6 s.
   - El proceso de Whisper en local sigue cargado `worker_keepalive_min` minutos tras el último trabajo (30 por
     defecto; 0 = 5 min, como antes) y, al arrancar la app, se precarga el modelo local del directo si ya está
@@ -1766,35 +1786,35 @@ Lo que falló en la primera prueba de la versión del 01/11/2026 en un portátil
   - La latencia de cada trozo del directo en la nube se desglosa por fases en `server.log` y en la cabecera del
     directo («texto a los 1,8 s · red 1,1 s · cupo 0,3 s»): preparación, espera por cupo, red (conexión + subida +
     inferencia; la inferencia aparte si el servidor manda `*-processing-ms`) y pintado. Así se ve si el cuello
-    está en Groq, en la red o en este lado.
+    está en el proveedor, en la red o en este lado.
   - La transcripción en la nube de un archivo escribe el FLAC de cada parte justo antes de subirla, en vez de
     todas antes de la primera subida: la primera subida empieza ~0,7 s antes en una hora de audio (el total no
     cambia: lo que manda es decodificar, 4,2 s por hora, y la API).
-- **Directo en la nube casi en streaming** (`_app/live.py`, `_app/engines.py`, `_app/static/directo.js`): con Groq el
-  directo manda trozos de 3–6 s en vez de 8–15: corta en la primera pausa de la voz a partir de 3 s y, si nadie calla,
-  a los 6 s con 0,5 s de solape que se deduplica por tiempos; solo se envía la voz (los silencios de los extremos se
-  recortan y una ventana sin voz no se manda ni cuenta). El modelo del directo es configurable (con Groq,
-  `cloud.live_model`, por defecto `whisper-large-v3-turbo`; con «Otra (compatible)», ver «Directo»); el repaso final
-  sigue con `cloud.model`. Se mide la latencia de cada trozo (fin del audio → texto escrito) y se enseña la mediana y
-  el p95 de la sesión. Lo local (20–45 s) y «ponerse al día» (120–300 s) no cambian.
-- **Cupo y ritmo del plan gratuito de Groq**: por clave se guardan `x-ratelimit-remaining-requests`,
+- **Directo en la nube casi en streaming** (`_app/live.py`, `_app/engines.py`, `_app/static/directo.js`): el directo
+  en la nube manda trozos de 3–6 s en vez de 8–15: corta en la primera pausa de la voz a partir de 3 s y, si nadie
+  calla, a los 6 s con 0,5 s de solape que se deduplica por tiempos; solo se envía la voz (los silencios de los extremos
+  se recortan y una ventana sin voz no se manda ni cuenta). El modelo del directo es configurable (con el proveedor de
+  fábrica, `cloud.live_model`, de entrada `whisper-large-v3-turbo`; con «Otra (compatible)», ver «Directo»); el repaso
+  final sigue con `cloud.model`. Se mide la latencia de cada trozo (fin del audio → texto escrito) y se enseña la
+  mediana y el p95 de la sesión. Lo local (20–45 s) y «ponerse al día» (120–300 s) no cambian.
+- **Cupo y ritmo de un plan con cupo por día**: por clave se guardan `x-ratelimit-remaining-requests`,
   `x-ratelimit-reset-requests` y el último `retry-after` (la primera vez se anotan en `server.log` todas las
   cabeceras `x-ratelimit-*`), nunca más de una petición cada 3 s por clave (20/min) y la ventana del directo crece
   según lo que queda del día: ≥600 peticiones → 3–6 s; 300–600 → 6–10 s; <300 → 10–15 s; <60 → el directo se pausa
   con aviso (la grabación sigue, lo que falte se transcribe al terminar en trozos grandes y el repaso final se hace
-  igual). La cabecera del directo y Ajustes enseñan «Groq: quedan N peticiones hoy · se renuevan en …».
+  igual). La cabecera del directo y Ajustes enseñan «<proveedor>: quedan N peticiones hoy · se renuevan en …».
 - **Claves adicionales** (`cloud.extra_keys`, cifradas como la API key; desde la auditoría, cada proveedor tiene las
-  suyas: ver «Directo»): cuando a la clave activa le quedan menos de 20 peticiones del día, o Groq responde 429 con
+  suyas: ver «Directo»): cuando a la clave activa le quedan menos de 20 peticiones del día, o la API responde 429 con
   `retry-after` > 60 s, se pasa a la siguiente; el resumen, la traducción y el repaso final usan la misma rotación. En
   Ajustes → nube, «Claves adicionales (opcional)» con el aviso de que cada clave es de una cuenta distinta y el audio
   y el texto se procesan bajo esa cuenta. Las claves no se escriben nunca en el log ni salen en claro por la API.
 - **Seguir la reunión**: el último trozo llegado queda resaltado y el texto baja solo; «Modo seguir» (letra grande,
   para leer de reojo); y, por reunión, «Traducir al español» (apagado por defecto): cada 10–15 s manda lo último dicho
-  al modelo de chat del proveedor (`openai/gpt-oss-20b` en Groq; ver «Directo») y lo pinta en una columna lateral (una
+  al modelo de chat del proveedor (p. ej. `openai/gpt-oss-20b`; ver «Directo») y lo pinta en una columna lateral (una
   ayuda para seguir la reunión; no se guarda). API: `POST /api/live/traducir`; el estado del directo (`directo` en
   `/api/jobs`) lleva cupo, ventana, latencia y traducción.
 - `scripts/directo_bench.py`: audio sintético con `say` (español y portugués, con pausas) y reproducción de un WAV
-  por el chunker con un transcriptor falso de latencia configurable (`--real` usa Groq con `GROQ_API_KEY`).
+  por el chunker con un transcriptor falso de latencia configurable (`--real` usa la API de verdad: ver `--help`).
   `tests/test_directo.py` y `tests/test_directo_frontend.py`.
 - **Reunión en curso al grabar** (`_app/calendario.py`, `_app/static/reunion.js`): al pulsar Grabar (o Ctrl+Alt+R) la
   app sugiere el nombre, el tema de vocabulario y los participantes a partir de dos fuentes locales: el título de la

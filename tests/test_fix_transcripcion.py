@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Transcribir en un PC con Windows con los tres modos (07/11/2026): «Descargando modelo medium» sin
 progreso y sin terminar (S4), el modo de Claude sin transcribir (S2: transcribe Whisper en el PC, así que es S4),
-«Modelo» que parecía Groq (S3) y los fallos de conexión con Groq dichos a medias (S1).
+«Modelo» que parecía la API (S3) y los fallos de conexión con la API dichos a medias (S1).
 
 - WhisperModels: descarga de verdad (requests) contra un servidor HTTP local que sirve con Range y falla a propósito:
   progreso, reanudar, servidor que ignora Range, huella mal, 403, página HTML, conexión parada, sin espacio, cancelar,

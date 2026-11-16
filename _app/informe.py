@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Informe tecnico por reunion, solo numeros (punto 32 del review del 14/11/2026).
 
-Varias investigaciones se quedaron sin cerrar por falta de datos de la reunion que fue mal (fix-groq, «Groq va lento»):
+Varias investigaciones se quedaron sin cerrar por falta de datos de la reunion que fue mal («la nube va lenta»):
 las medidas estaban en el log y en el estado del directo mientras duraba. Ahora cada reunion deja, junto al audio,
 <audio>.informe.json (va con ella al moverla o borrarla: biblioteca.SIDE_EXTS), con una seccion por fase:
 - grabacion (grabadora propia): segundos, audio perdido por fuente, eco (retardo, atenuacion, tiempo atenuado);

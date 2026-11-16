@@ -38,7 +38,7 @@ class MezclaDeTresTests(unittest.TestCase):
         for palabra in ("¿no?", "let's", "vamos"):  # una frase en cada idioma
             self.assertIn(palabra, frase)
         self.assertNotEqual(frase, engines.style_for("es-en"))
-        # cabe en el prompt de la nube junto a un vocabulario normal (Groq: <= 896 bytes)
+        # cabe en el prompt de la nube junto a un vocabulario normal (alguna API: <= 896 bytes)
         self.assertLess(len(frase.encode("utf-8")), engines.CLOUD_PROMPT_BYTES // 3)
 
     def test_la_nube_detecta_con_la_frase_mezclada(self):
@@ -202,7 +202,7 @@ class PartesPorIdiomaTests(unittest.TestCase):
 
 
 class RepasoPorIdiomaTests(unittest.TestCase):
-    """CloudEngine.transcribe con el Groq de los tests (el _post falso): cada parte, con el idioma de su tramo."""
+    """CloudEngine.transcribe con la API de los tests (el _post falso): cada parte, con el idioma de su tramo."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="tenca-lote1-")

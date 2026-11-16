@@ -34,8 +34,8 @@ class Cancelada(Exception):
 
 
 class Prueba(threading.Thread):
-    """modo: local | agente | api. nombres: {"transcribe": "en este PC" | "con Groq", "resume": "Claude (tu cuenta)" |
-    "Groq", "proveedor": "Groq" | None}. hacer: funciones del servidor:
+    """modo: local | agente | api. nombres: {"transcribe": "en este PC" | "con <proveedor>", "resume": "Claude (tu
+    cuenta)" | "<proveedor>", "proveedor": "<proveedor>" | None}. hacer: funciones del servidor:
       modelos(report, cancelled)                     deja descargados los modelos de Whisper que hacen falta
       grabar(segundos, report, cancelled)            -> (wav, hay_voz, nota): nota si el micro no se pudo usar
       silencio()                                     -> wav de 1 s de silencio

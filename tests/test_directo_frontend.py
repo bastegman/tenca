@@ -74,8 +74,13 @@ class DirectoHelpersTests(unittest.TestCase):
                           "others_remaining:1800}))")
         self.assertIn("clave 2/3", out)
         self.assertIn("+1800 en otras claves", out)
-        out = self.run_js("console.log(directoQuotaText({daily:true, remaining:0, blocked_for:5400, keys:1}))")
-        self.assertIn("Groq pide esperar 1 h 30 min", out)
+        out = self.run_js("console.log(directoQuotaText({daily:true, remaining:0, blocked_for:5400, keys:1}, "
+                          "'OpenAI'))")
+        self.assertIn("OpenAI pide esperar 1 h 30 min", out)  # el proveedor elegido (j.directo.provider)
+        out = self.run_js("console.log(directoQuotaText({daily:true, remaining:7, keys:1}, 'OpenAI'))")
+        self.assertIn("OpenAI: quedan 7 peticiones hoy", out)
+        out = self.run_js("console.log(directoQuotaText({daily:true, remaining:null, keys:1}))")
+        self.assertEqual(out, "Tu proveedor: cupo sin medir aún")  # sin nombre, ninguno fijo
 
     def test_latency_text(self):
         out = self.run_js("console.log(directoLatencyText({n:0}))")
@@ -85,7 +90,7 @@ class DirectoHelpersTests(unittest.TestCase):
         self.assertIn("3,2 s", out)
         self.assertNotRegex(out, re.compile(r"\d\.\d"))  # coma decimal, no punto
         self.assertNotIn("red", out)
-        # por fases: cuanto es red (y Groq, si lo declara) y cuanto cupo; el resto es de este lado
+        # por fases: cuanto es red (y proveedor, si lo declara) y cuanto cupo; el resto es de este lado
         out = self.run_js("console.log(directoLatencyText({n:5, p50:1.8, p95:3.2, phases:{net:{p50:1.1, p95:2.0}, "
                           "infer:{p50:0.8, p95:1.1}, wait:{p50:0.3, p95:1.0}}}))")
         self.assertIn("red 1,1 s (inferencia 0,8 s)", out)

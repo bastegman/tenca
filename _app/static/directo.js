@@ -1,4 +1,4 @@
-/* Directo en la nube (Groq): cupo y latencia en la cabecera del directo, «modo seguir» (letra grande y el texto
+/* Directo en la nube: cupo y latencia en la cabecera del directo, «modo seguir» (letra grande y el texto
    siempre abajo), traduccion al espanol o al ingles por reunion en una columna lateral y, en Ajustes, el
    modelo del directo y las claves adicionales. Todo sobre j.directo (lo publica live.py en /api/jobs), /api/config y
    /api/live/traducir.
@@ -79,13 +79,15 @@ function directoFmtWait(seg) {
   return `${seg} s`;
 }
 
-function directoQuotaText(q) {
+/* cupo del día de la clave activa; prov: como se llama el proveedor (su label; sin él, «Tu proveedor») */
+function directoQuotaText(q, prov) {
   if (!q || !q.daily) return '';
+  const p = prov || 'Tu proveedor';
   let t;
-  if (q.blocked_for > 0) t = `Groq pide esperar ${directoFmtWait(q.blocked_for)}`;
-  else if (q.remaining == null) t = 'Groq: cupo sin medir aún';
+  if (q.blocked_for > 0) t = `${p} pide esperar ${directoFmtWait(q.blocked_for)}`;
+  else if (q.remaining == null) t = `${p}: cupo sin medir aún`;
   else {
-    t = `Groq: quedan ${q.remaining} peticiones hoy`;
+    t = `${p}: quedan ${q.remaining} peticiones hoy`;
     if (q.reset_in > 0) t += ` · se renuevan en ${directoFmtWait(q.reset_in)}`;
   }
   if (q.keys > 1) {
@@ -101,7 +103,7 @@ const DIRECTO_TRAD_TO = [['es', 'español'], ['en', 'inglés']];
 function directoTradTo(d) { return d && d.translate_to === 'en' ? 'en' : 'es'; }
 function directoTradNombre(to) { return (DIRECTO_TRAD_TO.find(([v]) => v === to) || DIRECTO_TRAD_TO[0])[1]; }
 
-/* traduccion del directo: con que modelo y en que proveedor de verdad («gpt-oss-20b en Groq», «gpt-4o-mini en OpenAI») */
+/* traduccion del directo: con que modelo y en que proveedor de verdad («gpt-4o-mini en OpenAI») */
 function directoTradLabel(d) {
   const m = String((d && d.translate_model) || '').replace(/^openai\/(?=gpt-oss)/, '');
   const p = (d && d.provider) || '';
@@ -112,7 +114,7 @@ function directoLatencyText(lat) {
   if (!lat || !lat.n) return 'midiendo…';
   const f = x => String(Math.round((+x || 0) * 10) / 10).replace('.', ',');
   let t = `texto a los ${f(lat.p50)} s (p95 ${f(lat.p95)} s)`;
-  const ph = lat.phases || {};  // por fases: cuanto es red/Groq (y cupo) y cuanto queda de este lado
+  const ph = lat.phases || {};  // por fases: cuanto es red/proveedor (y cupo) y cuanto queda de este lado
   if (ph.net) t += ` · red ${f(ph.net.p50)} s` + (ph.infer ? ` (inferencia ${f(ph.infer.p50)} s)` : '');
   if (ph.wait && ph.wait.p50 >= 0.05) t += ` · cupo ${f(ph.wait.p50)} s`;
   return t;
@@ -128,7 +130,7 @@ function renderDirectoBar(a, j) {
     el.dataset.sig = '';
     return;
   }
-  const quota = directoQuotaText(d.quota);
+  const quota = directoQuotaText(d.quota, d.provider);
   const lat = directoLatencyText(d.latency);
   const tradOk = d.translate_ok !== false, tradLabel = directoTradLabel(d);  // sin chat (Azure): la casilla, apagada
   const to = directoTradTo(d);
@@ -141,7 +143,7 @@ function renderDirectoBar(a, j) {
   el.dataset.sig = sig;
   el.innerHTML = `<div class="directo-bar">
     ${d.paused ? '<span class="pill err">Directo en pausa por cupo</span>' : ''}
-    ${quota ? `<span class="db-item" title="Cupo gratuito de Groq: peticiones por día y por cuenta">${esc(quota)}</span>` : ''}
+    ${quota ? `<span class="db-item" title="${esc(`Cupo de ${d.provider || 'tu proveedor'}: peticiones por día y por cuenta`)}">${esc(quota)}</span>` : ''}
     ${d.pace ? `<span class="db-item" title="Tamaño de los trozos de audio que se mandan: más largos cuando queda menos cupo">trozos de ${d.pace[0]}–${d.pace[1]} s</span>` : ''}
     <span class="db-item" title="Del final de cada trozo de audio al texto en pantalla (mediana y percentil 95 de esta sesión)">${esc(lat)}</span>
     <span class="sp"></span>
@@ -213,7 +215,7 @@ function onDirectoJobs(prev) {
   const paused = !!(d && d.paused);
   if (paused && S.directo.pausedFor !== j.id) {  // una vez por pausa
     S.directo.pausedFor = j.id;
-    toast(esc(j.stage || 'Directo en pausa por falta de cupo en Groq'), 'err');
+    toast(esc(j.stage || `Directo en pausa por falta de cupo en ${d.provider || 'tu proveedor'}`), 'err');
   } else if (!paused && S.directo.pausedFor === j.id) S.directo.pausedFor = null;
 }
 
@@ -301,7 +303,7 @@ function directoOwnerText(p, rows) {
 function directoSettingsHtml(c) {
   const lm = c.live_model || 'whisper-large-v3-turbo';
   const models = [['whisper-large-v3-turbo', 'whisper-large-v3-turbo · más rápido por trozo'], ['whisper-large-v3', 'whisper-large-v3 · más preciso, algo más lento']];
-  const quota = c.quota ? directoQuotaText(c.quota) : '';
+  const quota = c.quota ? directoQuotaText(c.quota, directoProvName(c.provider)) : '';
   return `<div id="dkModel"><label>Modelo del directo</label>
       <select id="cLiveModel">${models.map(([v, l]) => `<option value="${v}"${v === lm ? ' selected' : ''}>${l}</option>`).join('')}</select>
       <div class="help">El directo manda trozos de 3–6 s; el repaso final al terminar usa el modelo de arriba.</div></div>
@@ -336,7 +338,7 @@ function bindDirectoSettings(d) {
   };
   const sync = () => {
     add.disabled = !cur || $$('[data-xkey]', rows).length >= 10;  // sin proveedor elegido, no hay de quién
-    if (model) model.classList.toggle('hidden', cur !== 'groq');  // la lista de modelos es la de Whisper en Groq
+    if (model) model.classList.toggle('hidden', cur !== 'groq');  // la lista de modelos es la del proveedor por defecto
     if (modelC) modelC.classList.toggle('hidden', cur !== 'custom');  // una pasarela propia: el suyo (o el de arriba)
     if (owner) { stash(); owner.textContent = directoOwnerText(cur, state); }
   };

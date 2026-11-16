@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """E2E del idioma y la traducción en pleno directo (ítems 12 y 13a) con la app de verdad: el servidor
 como lo arranca el acceso directo, la grabadora real con la tarjeta de sonido falsa de tests/fake_soundcard, el
-directo en un Groq falso en 127.0.0.1 que escribe en el texto el idioma que le piden («Texto en pt») y traduce según
+directo en una API falsa en 127.0.0.1 que escribe en el texto el idioma que le piden («Texto en pt») y traduce según
 el prompt («EN: …», «ES: …»), y la interfaz en Chromium (Playwright):
 
 1. graba en inglés («Solo inglés»): el texto sale «en en»;
@@ -40,7 +40,7 @@ NOMBRES = {"pt": "portuguese", "en": "english", "es": "spanish"}
 
 
 class GroqIdiomas:
-    """Groq falso: /audio/transcriptions devuelve «Texto en <idioma pedido> n.º k» (verbose_json, con las cabeceras de
+    """API falsa: /audio/transcriptions devuelve «Texto en <idioma pedido> n.º k» (verbose_json, con las cabeceras de
     cupo) y /chat/completions traduce según el prompt del sistema (inglés: «EN: …»; español: «ES: …»)."""
 
     def __init__(self):
@@ -198,7 +198,7 @@ class IdiomaEnDirectoE2E(unittest.TestCase):
                 return time.time()
             time.sleep(0.25)
         self.foto("x-" + re.sub(r"\W+", "-", que)[:40])
-        self.fail(f"{que}: no en {s} s. Texto: {self.texto()[-600:]!r}; Groq: {self.groq.peticiones[-6:]}")
+        self.fail(f"{que}: no en {s} s. Texto: {self.texto()[-600:]!r}; API: {self.groq.peticiones[-6:]}")
 
     def test_idioma_y_traduccion_en_pleno_directo(self):
         pg = self.pg
@@ -266,7 +266,7 @@ class IdiomaEnDirectoE2E(unittest.TestCase):
         self.esperar(lambda: not any(j.get("live") and j["status"] == "running" for j in self.api("/api/jobs")["jobs"]),
                      60, "el directo termina")
         self.assertEqual(self.errores, [])
-        print(f"   peticiones a Groq: {len(self.groq.peticiones)} "
+        print(f"   peticiones a la API: {len(self.groq.peticiones)} "
               f"({sum(1 for p in self.groq.peticiones if p[0] == 'tx')} de transcripción)", flush=True)
 
     def test_corrigiendo_y_cambiando_el_idioma_no_se_pierde_nada(self):

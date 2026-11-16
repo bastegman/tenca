@@ -1,6 +1,6 @@
 /* Dónde se transcribe, a la vista (07/11/2026). Con «Con tu cuenta de Claude» elegido no se transcribía, al grabar
-   parecía que seguía usando Groq y solo se veía «Descargando modelo medium». Aquí:
-   - el motor de cada transcripción con su sitio: «en este PC · Whisper medium» o «en la nube · Groq»;
+   parecía que seguía usando la API y solo se veía «Descargando modelo medium». Aquí:
+   - el motor de cada transcripción con su sitio: «en este PC · Whisper medium» o «en la nube · <proveedor>»;
    - en Ajustes, los modelos de Whisper de este PC con su descarga (MB y %, o el error con lo que hacer);
    - con «Solo en este PC» y «Con tu cuenta de Claude» transcribe Whisper en el PC; Claude solo resume.
    Sobre /api/modelos y /api/config. Sin dependencias: su CSS va aquí para no tocar app.css. */

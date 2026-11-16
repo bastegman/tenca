@@ -6,7 +6,7 @@
     python scripts/rendimiento_bench.py --json antes.json --minutes 60 --audios 1000
 
 Medidas (cada una imprime su tabla y, con --json, se guarda para comparar antes/despues):
-  red         coste de abrir conexion con api.groq.com en cada peticion frente a reutilizarla (keep-alive).
+  red         coste de abrir conexion con la API en la nube (GROQ_URL) en cada peticion frente a reutilizarla.
               Sin clave: la API responde 401 y eso basta para medir DNS + TCP + TLS. Necesita red.
   worker      arranque en frio del proceso de Whisper (proceso + carga del modelo) frente a una peticion con el
               modelo ya cargado, y la memoria (RSS) que ocupa. Necesita faster-whisper; usa los modelos ya
@@ -30,6 +30,7 @@ import tempfile
 import threading
 import time
 import wave
+from urllib.parse import urlparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -77,7 +78,8 @@ def wav_silence_1s():
 
 def bench_red(reps):
     import requests
-    section(f"red: {reps} peticiones a api.groq.com sin clave (401), conexion nueva frente a reutilizada")
+    section(f"red: {reps} peticiones a {urlparse(GROQ_URL).hostname} sin clave (401), conexion nueva frente a "
+            "reutilizada")
     body = wav_silence_1s()
     data = {"model": "whisper-large-v3-turbo", "response_format": "verbose_json"}
 
@@ -217,7 +219,7 @@ def synth_hour(path, minutes, rate=48000, channels=2):
 
 
 class FakeCloud:
-    """CloudEngine con la peticion sustituida: tarda api_s por parte (lo que tarda Groq con 10 min), sin red."""
+    """CloudEngine con la peticion sustituida: tarda api_s por parte (lo que tarda la API con 10 min), sin red."""
 
     def __init__(self, engines, tmp, api_s):
         self.api_s = api_s

@@ -250,7 +250,7 @@ _VOICES_LOCK = threading.Lock()
 
 def proveedor_resumen(st):
     """Quien hace el resumen, para la cabecera del .resumen.md (proveedor:): la interfaz lo dice encima del resumen
-    («Resumen hecho con IA por Groq…», «…por tu cuenta de Claude…») sin adivinarlo por el nombre del modelo (B5)."""
+    («Resumen hecho con IA por OpenAI…», «…por tu cuenta de Claude…») sin adivinarlo por el nombre del modelo (B5)."""
     if procesado_de(st) == "agente":
         cls, _ = agente_de(st)
         return "tu cuenta de Claude" if cls.tipo == "claude" else f"tu cuenta de {cls.label}"
@@ -276,7 +276,7 @@ class Jobs:
         self.cloud = engines.CloudEngine(os.path.join(DATA_DIR, "tmp"), log=log)
         if self.cloud.purge_tmp():  # trozos de audio de una sesion que se corto (apagado, actualizacion, cuelgue)
             log("   borrados los trozos de audio temporales que dejó la sesión anterior")
-        self.summarizer = engines.Summarizer(keys=self.cloud.keys)  # en la nube (Groq); mismas claves y cupo
+        self.summarizer = engines.Summarizer(keys=self.cloud.keys)  # en la nube; mismas claves y cupo
         self.summarizer_agente = None  # con el agente del PC (procesado "agente"): se crea al primer uso
         self.queues["resumen"] = queue.Queue()
         self.queues["voces"] = queue.Queue()  # quien habla: un subproceso de prioridad baja, de uno en uno
@@ -439,7 +439,7 @@ class Jobs:
             except engines.EngineError as e:
                 preset, cae = "medium", True  # sin API key: en local
                 # y se dice: hasta fix-lento caia en silencio a Whisper en el PC (medium, ~1 GB y la CPU ocupada
-                # durante toda la reunion) y se veia como «la nube va lenta» o «cargando» (fix-groq, 10/11/2026)
+                # durante toda la reunion) y se veia como «la nube va lenta» o «cargando» (10/11/2026)
                 log(f"   directo: la nube no está lista ({e}); se transcribe en este PC con {preset}")
         abs_path = _con_audio(rel)
         if self.active_for(rel):
@@ -467,7 +467,7 @@ class Jobs:
 
     def _final_pass(self, job):
         """Al terminar un directo en la nube se repasa la grabacion entera de una vez: Whisper ve
-        mucho mas contexto que en trozos de 8-15 s y el texto queda mejor (1 h ~ 2 min en Groq).
+        mucho mas contexto que en trozos de 8-15 s y el texto queda mejor (1 h ~ 2 min en la nube).
         Mientras tanto se sigue viendo el del directo. No se hace si lo corregiste a mano."""
         st = self.settings.get()
         if not st.get("live_final_pass", True) or job.preset != "nube" or job.recorded < 30:
@@ -832,7 +832,7 @@ class Jobs:
 
     def auto_summary(self, rel):
         """Al terminar de transcribir: resumen automatico si es una reunion reciente (las antiguas se
-        resumen a mano, para no gastar de golpe el cupo diario de Groq). El resumen manda el texto, las notas y el
+        resumen a mano, para no gastar de golpe el cupo diario del proveedor). El resumen manda el texto, las notas y el
         contexto al proveedor de la nube: si el texto no se transcribio entero en la nube (_tx_in_cloud), solo con el
         consentimiento de Ajustes (summary_auto_local). A mano, siempre. Con el agente del PC (procesado "agente") el
         consentimiento es haber elegido esa opcion, con su aviso: todo lo transcrito en local se resume."""
