@@ -962,7 +962,7 @@ class Jobs:
                 elif j.status == "running" and getattr(j, "fondo", False):  # el repaso retomado (quiza en pausa):
                     # se queda el texto del directo (_run), como con uno que ya no se puede hacer, y con el los
                     # destinos y el resumen ya (los de la cola, al volver a abrir)
-                    j.cancel, j.cancel_motivo = True, "la nube se ha desactivado en Ajustes"
+                    j.cancel_motivo, j.cancel = "la nube se ha desactivado en Ajustes", True  # el motivo, antes
         for j in cambiados:
             self._cloud_text().set(j.path, False)
             log(f"   directo {j.name}: modelo medium (la nube se ha desactivado en Ajustes)")

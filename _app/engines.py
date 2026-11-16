@@ -1527,13 +1527,14 @@ class KeyPool:
             self.active[slot] = chosen
             return chosen
 
-    def reserve(self, key, family, model=None, per_minute=False, dry=False):
+    def reserve(self, key, family, model=None, per_minute=False, max_wait=None):
         """Reserva un hueco para una peticion con esa clave y devuelve los segundos que hay que esperar antes de
         mandarla (ritmo por minuto y, tras un 429 corto, el retry-after que pidio el servicio). Con varias
         peticiones a la vez cada una recibe el hueco siguiente. per_minute: el proveedor declara su limite por minuto
         en x-ratelimit-limit-requests (OpenAI, Azure, una pasarela; en DAILY_PROVIDERS es por dia): no se pasa de el
         (un hueco de 60/limite s, como mucho RPM_MAX_SPACING) y, si no queda ninguna y se renueva en menos de un
-        minuto, se espera. dry: solo dice la espera, sin quedarse el hueco."""
+        minuto, se espera. max_wait: si la espera pasa de ahi, la dice sin quedarse el hueco (en la misma llamada:
+        entre mirar y reservar no se cuela otra)."""
         with self.lock:
             st, now = self._st(key, family, model), self.clock()
             spacing = RATE_SPACING.get(family, 0.0)
@@ -1542,7 +1543,7 @@ class KeyPool:
             slot = max(now, st["last_request"] + spacing, st["not_before"])
             if per_minute and st["remaining"] == 0 and st["reset_at"] and st["reset_at"] - now <= 60:
                 slot = max(slot, st["reset_at"])  # el minuto se renueva enseguida (un cupo por dia no se espera)
-            if not dry:
+            if max_wait is None or slot - now <= max_wait:
                 st["last_request"] = slot
             return slot - now
 
@@ -1863,9 +1864,9 @@ class CloudEngine:
                     break
                 # mas de max_wait (el directo): sale ya, sin quedarse un hueco que no va a usar (revision 2, P3-3:
                 # retrasaba la peticion siguiente de la cola)
-                if self.keys.reserve(key, family, qm, per_minute=not daily_quota(cfg), dry=True) > max_wait:
+                otra = self.keys.reserve(key, family, qm, per_minute=not daily_quota(cfg), max_wait=max_wait)
+                if otra > max_wait:
                     break
-                otra = self.keys.reserve(key, family, qm, per_minute=not daily_quota(cfg))
                 tm["wait"] += otra
                 self._wait(otra, cancelled)
             try:
@@ -1987,10 +1988,12 @@ class CloudEngine:
                         if lang:
                             langs.append(lang)
                         hechas[0] += 1
-                        with comun["lock"]:  # en pausa, la etapa sigue diciendo «En pausa…» (revision 2, P3-1)
-                            pausa = comun["n"] > 0
-                        report(stage=None if pausa else f"Transcribiendo en la nube ({hechas[0]}/{n} partes)…",
-                               frac=0.12 + 0.88 * hechas[0] / n)
+                        # en pausa, la etapa sigue diciendo «En pausa…» (revision 2, P3-1); bajo el lock, como la
+                        # de _ceder: si no, una parte que entra en pausa justo entonces quedaba pisada (revision 3)
+                        with comun["lock"]:
+                            report(stage=None if comun["n"] > 0
+                                   else f"Transcribiendo en la nube ({hechas[0]}/{n} partes)…",
+                                   frac=0.12 + 0.88 * hechas[0] / n)
                 except BaseException:
                     abort.set()
                     for f in futures:
@@ -2011,7 +2014,8 @@ class CloudEngine:
         Devuelve los segundos que ha esperado esta parte. comun: lo que comparten las partes en paralelo (lock, cuantas
         estan en pausa y desde cuando): la ultima en volver dice report(pausa=segundos de pared con alguna en pausa) y
         la etapa de antes (reanudar(), lo que lleve hecho entonces); antes cada una decia su espera y la misma pausa
-        se descontaba tantas veces como partes esperaban (revision 2, P2-1)."""
+        se descontaba tantas veces como partes esperaban (revision 2, P2-1). Es una aproximacion: si otras partes
+        siguen subiendo durante la pausa, ese rato tambien se descuenta (acotado por la subida mas lenta en vuelo)."""
         comun = comun if comun is not None else {"lock": threading.Lock(), "n": 0, "t0": 0.0}
         dicho, t0 = None, time.monotonic()
         try:
@@ -2021,14 +2025,14 @@ class CloudEngine:
                     break
                 if cancelled():
                     raise Cancelled()
-                if dicho is None:
-                    with comun["lock"]:
-                        if comun["n"] == 0:
-                            comun["t0"] = t0
-                        comun["n"] += 1
                 if motivo != dicho:
-                    report(stage=cls.PAUSAS.get(motivo, cls.PAUSAS["usuario"]))
-                    dicho = motivo
+                    with comun["lock"]:
+                        if dicho is None:
+                            if comun["n"] == 0:
+                                comun["t0"] = t0
+                            comun["n"] += 1
+                        dicho = motivo  # antes del report: si fallara, el finally descuenta igual
+                        report(stage=cls.PAUSAS.get(motivo, cls.PAUSAS["usuario"]))
                 time.sleep(paso)
         finally:
             if dicho is not None:

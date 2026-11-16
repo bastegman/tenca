@@ -15,6 +15,7 @@ import os
 import queue
 import threading
 import time
+import types
 import unittest
 from unittest import mock
 
@@ -130,19 +131,16 @@ class CupoTests(TempTree):
         self.assertEqual(len(envios), 3)  # la primera, la segunda y el reintento de la primera
         self.assertTrue(all(t >= el_429[0] + 0.95 for t in envios[1:]), [t - el_429[0] for t in envios[1:]])
 
-
-# ----------------------------------------------------------------------------- 3: el repaso retomado no hace esperar
-
-class HuecoFantasmaTests(CupoTests):
     def test_mirar_el_hueco_no_se_lo_queda(self):
         pool = engines.KeyPool()
         pool.clock = lambda: 1000.0
         k = "gsk_pruebas_00000000000000"
         pool.reserve(k, "whisper")
-        espera = pool.reserve(k, "whisper", dry=True)
+        espera = pool.reserve(k, "whisper", max_wait=0.0)  # pasa de max_wait: no se lo queda
         self.assertGreater(espera, 0)
-        self.assertEqual(pool.reserve(k, "whisper", dry=True), espera)
-        self.assertEqual(pool.reserve(k, "whisper"), espera)
+        self.assertEqual(pool.reserve(k, "whisper", max_wait=0.0), espera)
+        self.assertEqual(pool.reserve(k, "whisper", max_wait=espera), espera)  # cabe: se lo queda
+        self.assertGreater(pool.reserve(k, "whisper"), espera)
 
     def test_la_que_sale_sin_esperar_no_se_queda_un_hueco(self):
         """Revision 2, P3-3: tras un 429 de otra peticion mientras esta esperaba, con mas de max_wait por delante (el
@@ -164,6 +162,41 @@ class HuecoFantasmaTests(CupoTests):
             cloud._post(self.CFG, self.parte, "es", "", lambda **kw: None, lambda: False, max_wait=5.0)
         self.assertEqual(cloud.keys._st(k, "whisper", "m")["last_request"], st["last"])
 
+    def test_las_que_esperaban_no_salen_todas_a_la_vez(self):
+        """Revision 1, P1-1: al vencer el Retry-After, las que esperaban (y el reintento de la del 429) salen con el
+        ritmo de siempre, no todas en el mismo instante (otra vez 429 cada una)."""
+        cloud = engines.CloudEngine(os.path.join(self.data_dir, "tmp"))
+        envios, lock = [], threading.Lock()
+        el_429 = []
+
+        def post(url, timeout, headers=None, data=None, files=None):
+            with lock:
+                envios.append(time.time())
+                primera = len(envios) == 1
+            if primera:
+                time.sleep(0.1)  # las otras ya han reservado su hueco
+                el_429.append(time.time())
+                return Resp(429, {"retry-after": "1"})
+            return Resp(200)
+        hilos = []
+        with mock.patch.object(engines.HTTP, "post", post), \
+                mock.patch.dict(engines.RATE_SPACING, {"whisper": 0.3}):
+            for k in range(3):
+                h = threading.Thread(target=cloud._post, args=(self.CFG, self.parte, "es", "", lambda **k: None,
+                                                               lambda: False))
+                h.start()
+                hilos.append(h)
+                time.sleep(0.03)
+            for h in hilos:
+                h.join(15)
+        tras = sorted(t for t in envios[1:])
+        self.assertEqual(len(tras), 3)  # las dos que esperaban y el reintento
+        self.assertTrue(all(t >= el_429[0] + 0.95 for t in tras), [t - el_429[0] for t in tras])
+        huecos = [b - a for a, b in zip(tras, tras[1:])]
+        self.assertTrue(all(g >= 0.25 for g in huecos), huecos)  # con el ritmo de siempre (0,3 s), no en rafaga
+
+
+# ----------------------------------------------------------------------------- 3: el repaso retomado no hace esperar
 
 class FondoTests(LiveJobs):
     """El repaso retomado al arrancar va en la cola «fondo» y se aparta mientras haya algo del usuario en la nube."""
@@ -237,18 +270,20 @@ class FondoTests(LiveJobs):
         directo = self.live_job()
         directo.status = "running"
         jobs.list += [fondo, directo]
-        with mock.patch.object(trabajos, "CEDER_DIRECTO_S", 0.3):
+        reloj = [100.0]
+        falso = types.SimpleNamespace(monotonic=lambda: reloj[0], time=time.time, sleep=time.sleep)
+        with mock.patch.object(trabajos, "CEDER_DIRECTO_S", 0.3), mock.patch.object(trabajos, "time", falso):
             self.assertEqual(jobs._ceder_fondo(fondo), "directo")
-            time.sleep(0.1)
+            reloj[0] += 0.1
             self.assertEqual(jobs._ceder_fondo(fondo), "directo")  # 0,1 s cedidos
             directo.status = "done"
             self.assertIsNone(jobs._ceder_fondo(fondo))
-            time.sleep(0.5)  # sin directo: no cuenta
+            reloj[0] += 0.5  # sin directo: no cuenta
             directo.status = "running"
             self.assertEqual(jobs._ceder_fondo(fondo), "directo")
-            time.sleep(0.1)
+            reloj[0] += 0.1
             self.assertEqual(jobs._ceder_fondo(fondo), "directo")  # 0,2 s
-            time.sleep(0.15)
+            reloj[0] += 0.15
             self.assertIsNone(jobs._ceder_fondo(fondo))  # 0,35 s: se acabo
 
     def retomado(self, jobs):
@@ -374,41 +409,6 @@ class FondoTests(LiveJobs):
         fin_a = max(i for i, x in enumerate(orden) if x[0] == "r.wav")
         self.assertLess(fin_b, fin_a, orden)
         self.assertIn(("r.wav", "pausa"), orden)
-
-
-class RafagaTrasUn429Tests(CupoTests):
-    def test_las_que_esperaban_no_salen_todas_a_la_vez(self):
-        """Revision 1, P1-1: al vencer el Retry-After, las que esperaban (y el reintento de la del 429) salen con el
-        ritmo de siempre, no todas en el mismo instante (otra vez 429 cada una)."""
-        cloud = engines.CloudEngine(os.path.join(self.data_dir, "tmp"))
-        envios, lock = [], threading.Lock()
-        el_429 = []
-
-        def post(url, timeout, headers=None, data=None, files=None):
-            with lock:
-                envios.append(time.time())
-                primera = len(envios) == 1
-            if primera:
-                time.sleep(0.1)  # las otras ya han reservado su hueco
-                el_429.append(time.time())
-                return Resp(429, {"retry-after": "1"})
-            return Resp(200)
-        hilos = []
-        with mock.patch.object(engines.HTTP, "post", post), \
-                mock.patch.dict(engines.RATE_SPACING, {"whisper": 0.3}):
-            for k in range(3):
-                h = threading.Thread(target=cloud._post, args=(self.CFG, self.parte, "es", "", lambda **k: None,
-                                                               lambda: False))
-                h.start()
-                hilos.append(h)
-                time.sleep(0.03)
-            for h in hilos:
-                h.join(15)
-        tras = sorted(t for t in envios[1:])
-        self.assertEqual(len(tras), 3)  # las dos que esperaban y el reintento
-        self.assertTrue(all(t >= el_429[0] + 0.95 for t in tras), [t - el_429[0] for t in tras])
-        huecos = [b - a for a, b in zip(tras, tras[1:])]
-        self.assertTrue(all(g >= 0.25 for g in huecos), huecos)  # con el ritmo de siempre (0,3 s), no en rafaga
 
 
 class CederEnCloudEngineTests(TempTree):
