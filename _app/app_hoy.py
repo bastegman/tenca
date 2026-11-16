@@ -70,7 +70,8 @@ class Hoy:
         # mientras dure la llamada se lee la reunión (Teams y, si está activado, Outlook) para sugerir
         if self.vigia.tic(app, recording, st if detect else dict(st, rec_aviso=False),
                           lambda: calendario.reunion_actual(st, self._vocab_terms()),
-                          PORT, APP_DIR, creationflags=engines.NO_WINDOW):
+                          PORT, APP_DIR, creationflags=engines.NO_WINDOW,
+                          tema_plan=(lambda: self.tema_del_plan(st)) if hasattr(self, "tema_del_plan") else None):
             notified = app  # el aviso flotante sustituye al toast de Windows en esa llamada
             log(f"   reunión detectada ({app}): aviso flotante abierto")
         if detect and app and not recording and notified != app:

@@ -373,6 +373,82 @@ class SuggestTests(unittest.TestCase):
         s = calendario.suggest({"subject": "SAP con Luis Pérez"}, VOCABS)  # empate a 3: gana el tema concreto
         self.assertEqual(s["vocab"], "Alfa/Vocabulario/Migración.txt")
 
+    # un proyecto con muchas listas en su carpeta, como las de un cliente con un workstream por área (16/11/2026)
+    GAMMA = [{"id": f"Gamma/Vocabulario/{n}.txt", "project": "Gamma", "name": n, "terms": t} for n, t in (
+        ("Business processes", ["order to cash", "maestro de materiales"]),
+        ("HR and people", ["Workday", "nómina"]),
+        ("Legacy (AS400)", ["AS400", "RPG", "iSeries"]),
+        ("TSA y legal", ["TSA", "LTSA", "exit plan"]),
+        ("General", ["Steerco", "PMO"]))]
+
+    def test_el_nombre_de_la_lista_cuenta_por_palabras(self):
+        """El nombre de la lista ya no tiene que salir entero en el asunto: sus palabras cuentan sueltas (y con un
+        término de la lista llegan al umbral). Antes «AS400 decommissioning» y «TSA review» no daban nada."""
+        def tema(asunto):
+            return calendario.suggest({"subject": asunto}, self.GAMMA)["vocab"].split("/")[-1]
+        self.assertEqual(tema("AS400 decommissioning"), "Legacy (AS400).txt")
+        self.assertEqual(tema("TSA review"), "TSA y legal.txt")
+        self.assertEqual(tema("Legal y TSA: exit plan"), "TSA y legal.txt")  # todas sus palabras, en otro orden
+        self.assertEqual(tema("HR and people weekly"), "HR and people.txt")
+        self.assertEqual(tema("Business processes"), "Business processes.txt")
+        self.assertEqual(tema("HR sync"), "")  # una palabra del nombre sola no basta (sigue el umbral)
+        self.assertEqual(tema("People HR review"), "HR and people.txt")  # todas sus palabras
+        self.assertEqual(tema("people hr review"), "")  # una sigla de dos letras cuenta solo en mayúsculas
+        self.assertEqual(calendario.suggest({"subject": "Review it, BI"}, [  # «it» no es «IT»; «BI» sí
+            {"id": "a", "project": "Delta", "name": "IT", "terms": []},
+            {"id": "b", "project": "Delta", "name": "BI", "terms": []}])["vocab"], "b")
+        self.assertEqual(tema("Revisión de procesos"), "")  # «de», «y», «and»… no cuentan
+        self.assertEqual(calendario._palabras_nombre("TSA y legal"), ["tsa", "legal"])
+        self.assertEqual(calendario._palabras_nombre("HR and people"), ["hr", "people"])
+        self.assertEqual(calendario._palabras_nombre("General"), [])
+
+    def test_solo_el_proyecto_en_el_asunto_va_a_su_general(self):
+        """El nombre del proyecto suma a todas sus listas a la vez: si es lo único que coincide, la General del
+        proyecto, y no la primera por orden alfabético (antes, «Business processes» para cualquier reunión de Gamma)."""
+        s = calendario.suggest({"subject": "Gamma - comité de dirección"}, self.GAMMA)
+        self.assertEqual(s["vocab"], "Gamma/Vocabulario/General.txt")
+        # si una lista coincide por lo suyo, gana la concreta
+        s = calendario.suggest({"subject": "Gamma - plan de RPG"}, self.GAMMA)
+        self.assertEqual(s["vocab"], "Gamma/Vocabulario/Legacy (AS400).txt")
+        # sin General en el proyecto, la primera de sus listas, como antes
+        sin_general = [v for v in self.GAMMA if v["name"] != "General"]
+        s = calendario.suggest({"subject": "Gamma - comité de dirección"}, sin_general)
+        self.assertEqual(s["vocab"], "Gamma/Vocabulario/Business processes.txt")
+
+    def test_el_proyecto_que_nombra_el_asunto_manda_en_el_empate(self):
+        """Revisión 1, P1-1: con las palabras del nombre de la lista sumando, una lista de OTRO proyecto podía empatar
+        por lo suyo y ganar al proyecto que nombra el asunto («Alfa - plan de cutover» se iba a Gamma)."""
+        gamma = self.GAMMA + [{"id": "Gamma/Vocabulario/Cutover plan.txt", "project": "Gamma", "name": "Cutover plan",
+                               "terms": ["cutover", "rollback"]}]
+        s = calendario.suggest({"subject": "Alfa - plan de cutover"}, VOCABS + gamma)
+        self.assertEqual(s["vocab"], "Alfa/Vocabulario/Migración.txt")
+        s = calendario.suggest({"subject": "Cutover plan: rollback"}, VOCABS + gamma)  # sin proyecto: la de Gamma
+        self.assertEqual(s["vocab"], "Gamma/Vocabulario/Cutover plan.txt")
+
+    def test_el_nombre_entero_gana_a_uno_con_una_palabra_generica(self):
+        """Revisión 1, P2-3: «Network team» suma 2 con «network» («team» no cuenta), lo mismo que «Network» entero; a
+        igual puntuación, el nombre que sale tal cual."""
+        listas = [{"id": "Beta/Vocabulario/Network team.txt", "project": "Beta", "name": "Network team", "terms": []},
+                  {"id": "Gamma/Vocabulario/Network.txt", "project": "Gamma", "name": "Network", "terms": []}]
+        self.assertEqual(calendario.suggest({"subject": "Network review"}, listas)["vocab"],
+                         "Gamma/Vocabulario/Network.txt")
+        self.assertEqual(calendario.suggest({"subject": "Network team weekly"}, listas)["vocab"],
+                         "Beta/Vocabulario/Network team.txt")
+
+    def test_las_cifras_del_nombre_cuentan(self):
+        """Revisión 2, P2-1: «Wave 1» quedaba en «wave» (las cifras no contaban) y esa palabra sola valía por el nombre
+        entero: «Wave 3 planning» iba a «Wave 1». Ahora pide también la cifra, como palabra entera («1» no es «10»)."""
+        olas = [{"id": f"Gamma/Vocabulario/{n}.txt", "project": "Gamma", "name": n, "terms": []}
+                for n in ("Wave 1", "Wave 2", "General")]
+        self.assertEqual(calendario._palabras_nombre("Wave 1"), ["wave", "1"])
+        self.assertEqual(calendario.suggest({"subject": "Wave 3 planning"}, olas)["vocab"], "")
+        self.assertEqual(calendario.suggest({"subject": "Wave readiness"}, olas)["vocab"], "")
+        self.assertEqual(calendario.suggest({"subject": "Wave 10 kickoff"}, olas)["vocab"], "")
+        self.assertEqual(calendario.suggest({"subject": "Wave 2 go/no-go"}, olas)["vocab"],
+                         "Gamma/Vocabulario/Wave 2.txt")
+        self.assertEqual(calendario.suggest({"subject": "Go-live wave 1"}, olas)["vocab"],
+                         "Gamma/Vocabulario/Wave 1.txt")
+
     def test_sin_reunion_ni_listas(self):
         self.assertEqual(calendario.suggest({}, [])["name"], "")
         self.assertEqual(calendario.suggest(None, None)["participants"], [])
@@ -441,7 +517,7 @@ class _AvisoHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         n = int(self.headers.get("Content-Length") or 0)
         self.server.posts.append((self.path, json.loads(self.rfile.read(n) or b"{}")))
-        body = b'{"ok": true}'
+        body = json.dumps(getattr(self.server, "respuesta", {"ok": True})).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -508,6 +584,39 @@ class AvisoCerrarTests(unittest.TestCase):
         aviso.Aviso.cerrar_x(a)
         self.assertEqual((a.resultado, a.root.destruida, self.srv.posts), ("cerrar", True, []))
 
+    def test_cambiar_pide_la_tarjeta_y_cierra(self):
+        """«Cambiar», junto al proyecto (16/11/2026): POST /api/rec/elegir {origen: aviso} y el aviso se
+        cierra con «elegir»; la app abre la tarjeta de Grabar. Con la petición en camino, ni Grabar ni otro clic."""
+        a = self.doble("")
+        a.subs = []
+        a.sub = lambda texto, color=None: a.subs.append(texto)
+        for m in ("_sin_cambiar", "_elegir", "_error", "grabar"):
+            setattr(a, m, getattr(aviso.Aviso, m).__get__(a))
+        aviso.Aviso.elegir(a)
+        aviso.Aviso.elegir(a)  # doble clic: una sola petición
+        fin = time.time() + 10
+        while a.resultado is None and time.time() < fin:
+            time.sleep(0.05)
+        self.assertEqual(self.srv.posts, [("/api/rec/elegir", {"origen": "aviso"})])
+        self.assertEqual((a.resultado, a.root.destruida), ("elegir", True))
+        self.assertEqual(a.subs, ["Abriendo la tarjeta de grabar…"])
+
+    def test_cambiar_sin_ventana_propia_lo_dice(self):
+        """Revisión 1, P2-2: sin ventana propia (Edge) la app no puede ponerse delante sola: el aviso dice dónde está
+        la tarjeta antes de cerrarse."""
+        self.srv.respuesta = {"ok": True, "abierta": True, "tarjeta": 1}
+        a = self.doble("")
+        a.subs = []
+        a.sub = lambda texto, color=None: a.subs.append(texto)
+        for m in ("_sin_cambiar", "_elegir", "_error"):
+            setattr(a, m, getattr(aviso.Aviso, m).__get__(a))
+        aviso.Aviso.elegir(a)
+        fin = time.time() + 10
+        while a.resultado is None and time.time() < fin:
+            time.sleep(0.05)
+        self.assertEqual(a.resultado, "elegir")
+        self.assertEqual(a.subs, ["Abriendo la tarjeta de grabar…", f"La tarjeta está abierta en {aviso.APP_NAME}"])
+
 
 class FakeProc:
     def __init__(self, cmd, **kw):
@@ -556,6 +665,20 @@ class VigiaTests(unittest.TestCase):
         self.assertTrue(v.tic("Teams", False, st, self.lectura, 8765, "/app"))  # llamada nueva: otra vez
         self.assertEqual(len(FakeProc.spawned), 2)
 
+    def test_el_aviso_dice_el_proyecto_con_que_grabara(self):
+        """16/11/2026: el aviso decía el tema de la sugerencia por título, pero su «Grabar» graba con el plan
+        (la misma reunión grabada antes, el proyecto fijo de Ajustes, la última grabación…). Con tema_plan, el del
+        plan; si falla, el de la sugerencia, como antes; "" (sin proyecto) no se tapa con la sugerencia."""
+        def tema_de(tema_plan):
+            FakeProc.spawned = []
+            calendario.Vigia().tic("Teams", False, {}, self.lectura, 8765, "/app", tema_plan=tema_plan)
+            cmd = FakeProc.spawned[0].cmd
+            return cmd[cmd.index("--tema") + 1], cmd[cmd.index("--vocab") + 1]
+        self.assertEqual(tema_de(lambda: "Beta › General"), ("Beta › General", "Alfa/Vocabulario/Migración.txt"))
+        self.assertEqual(tema_de(lambda: ""), ("", "Alfa/Vocabulario/Migración.txt"))
+        self.assertEqual(tema_de(lambda: 1 / 0), ("Alfa · Migración", "Alfa/Vocabulario/Migración.txt"))
+        self.assertEqual(tema_de(None), ("Alfa · Migración", "Alfa/Vocabulario/Migración.txt"))
+
     def test_ajuste_apagado_y_lectura_que_falla(self):
         v = calendario.Vigia()
         self.assertFalse(v.tic("Teams", False, {"rec_aviso": False}, self.lectura, 8765, "/app"))
@@ -581,6 +704,76 @@ class VigiaTests(unittest.TestCase):
         v.sugerencia(leer)
         self.assertEqual(len(n), 2)
         self.assertEqual(calendario.Vigia().sugerencia(lambda: 1 / 0), {})
+
+
+class ElegirAlEmpezarTests(unittest.TestCase):
+    """16/11/2026: el aviso flotante dice el proyecto › lista del plan (con el que grabará) y su «Cambiar»
+    pide la tarjeta de Grabar (POST /api/rec/elegir → `tarjeta` en /api/rec/status, que la interfaz abre una vez)."""
+
+    def setUp(self):
+        FakeProc.spawned = []
+        self.tmp = tempfile.mkdtemp(prefix="tenca-elegir-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        a = self.a = server.App.__new__(server.App)
+        a.settings = server.Store(os.path.join(self.tmp, "settings.json"), server.DEFAULT_SETTINGS)
+        a.rec, a.monitor, a.meeting, a.meeting_prev, a.vigia = None, None, None, None, calendario.Vigia()
+        a.parada_auto, a._vocab_terms = None, lambda: []
+        a.__dict__["_cortes"] = type("Cortes", (), {"estado": lambda self: []})()
+        a._siguiente_pub = lambda: None
+        self.mostradas = []
+        a.mostrar = lambda b: (self.mostradas.append(b), {"ok": True})[1]
+        for p in (unittest.mock.patch.object(calendario.subprocess, "Popen", FakeProc),
+                  unittest.mock.patch.object(server, "mic_meeting_app", lambda: "Teams"),
+                  unittest.mock.patch.object(server, "notify", lambda t, b: None),
+                  unittest.mock.patch.object(calendario, "reunion_actual", lambda *x, **k: {"sugerencia": {
+                      "name": "Comité", "vocab": "Alfa/Vocabulario/General.txt", "vocab_label": "Alfa · General"}})):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_el_aviso_lleva_el_proyecto_del_plan(self):
+        planes = []
+        self.a.plan_grabar = lambda pedido, st=None, **k: (planes.append(pedido), {"proyecto": {
+            "vocab": "Beta/Vocabulario/Redes.txt", "texto": "Beta › Redes"}})[1]
+        n = self.a._meeting_step(None)
+        self.a._meeting_step(n)  # dos lecturas seguidas: se abre
+        self.assertEqual(len(FakeProc.spawned), 1)
+        cmd = FakeProc.spawned[0].cmd
+        self.assertEqual(cmd[cmd.index("--tema") + 1], "Beta › Redes")
+        self.assertEqual(cmd[cmd.index("--vocab") + 1], "Alfa/Vocabulario/General.txt")  # lo que manda «Grabar»
+        self.assertEqual(planes, [{}])  # el plan de Ctrl+Alt+R: sin nada elegido
+        self.a.plan_grabar = lambda pedido, st=None, **k: {"proyecto": {"vocab": "", "texto": "Sin proyecto"}}
+        self.assertEqual(self.a.tema_del_plan(), "")  # sin proyecto: «Pulsa Grabar para tomar notas»
+
+    def test_cambiar_pide_la_tarjeta_una_vez(self):
+        self.assertNotIn("tarjeta", self.a.rec_status({}))
+        r = self.a.rec_elegir({"origen": "aviso"})
+        self.assertEqual((r["tarjeta"], self.mostradas), (1, [{}]))  # sin interfaz abierta: se trae la ventana
+        self.assertEqual(self.a.rec_status({})["tarjeta"], 1)
+        self.a.rec_status({"ui": "1"})  # la interfaz sondea: sin ventana propia (Edge), no se abre otro Edge
+        with unittest.mock.patch("app_grabar.WINDOW", None):
+            self.assertEqual(self.a.rec_elegir({"origen": "aviso"})["abierta"], True)
+        self.assertEqual((self.a.rec_status({})["tarjeta"], len(self.mostradas)), (2, 1))
+        with unittest.mock.patch("app_grabar.WINDOW", object()):  # con ventana propia, siempre se trae delante
+            self.assertEqual(self.a.rec_elegir({})["tarjeta"], 3)
+        self.assertEqual(len(self.mostradas), 2)
+        self.a.rec_elegir({"vista": 3})  # la atendió la interfaz: ninguna otra página la vuelve a abrir
+        self.assertNotIn("tarjeta", self.a.rec_status({}))
+        self.a.rec_elegir({"vista": 99})  # una que no es la de ahora no borra nada
+        self.a.rec_elegir({})
+        self.assertEqual(self.a.rec_status({})["tarjeta"], 4)
+        self.a.tarjeta_pedida["at"] -= self.a.TARJETA_S + 1  # pasados 30 s, tampoco
+        self.assertNotIn("tarjeta", self.a.rec_status({}))
+        # revisión 1, P3-4: si se empieza a grabar antes de que la interfaz la abra, no reaparece al parar
+        self.a.rec_elegir({})
+        self.a.fin_llamada = type("Fin", (), {"quedan": lambda self, t: None})()
+        # (la ruta, dentro de la raíz: en Windows el temporal está en C: y el repo de la CI en D:, y relpath falla)
+        self.a.rec = type("Rec", (), {"alive": lambda self: True, "path": os.path.join(server.ROOT, "x.wav"),
+                                      "started": 0, "status": {}, "sin_estado_s": lambda self: None})()
+        self.assertNotIn("tarjeta", self.a.rec_status({}))
+        self.a.rec = None
+        self.assertNotIn("tarjeta", self.a.rec_status({}))
+        self.a.rec = type("Rec", (), {"alive": lambda self: True})()
+        self.assertEqual(self.a.rec_elegir({}), {"ok": False, "recording": True})  # grabando: nada que elegir
 
 
 class StubApp:
