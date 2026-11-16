@@ -252,6 +252,7 @@ function New-InstallerWindow {
         $tm.Interval = 200
         $tm.Add_Tick({ $g = $script:latido.Elapsed.TotalSeconds; if ($g -gt $script:hueco) { $script:hueco = $g }; $script:latido.Restart() })
         $script:ui.timer = $tm
+        Open-Fondo  # el runspace de Invoke-Fondo, antes de ensenar la ventana (abrirlo en frio tarda)
         $f.Show()
         $f.Activate()
         [System.Windows.Forms.Application]::DoEvents()
@@ -344,10 +345,7 @@ function Invoke-Fondo([string]$codigo, [hashtable]$vars = @{}, [string[]]$funcio
     # cada linea aqui y se dice al llegar (pip, winget). Devuelve lo que devuelva $codigo; si falla, $null (al log).
     # Sin ventana (consola, CI) hace lo mismo: un solo camino
     $script:fondoLineas = @()
-    if (-not $script:fondo) {
-        $script:fondo = [runspacefactory]::CreateRunspace()
-        $script:fondo.Open()
-    }
+    Open-Fondo
     $q = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
     $pre = 'param($salida, $vars) foreach ($k in $vars.Keys) { Set-Variable -Name $k -Value $vars[$k] }' + "`n" +
            'function Say($text, $color = "Gray") { $salida.Enqueue("$color`t$text") }' + "`n"
@@ -371,6 +369,12 @@ function Invoke-Fondo([string]$codigo, [hashtable]$vars = @{}, [string[]]$funcio
     if (-not $r -or $r.Count -eq 0) { return $null }
     return $r[$r.Count - 1]
 }
+function Open-Fondo {
+    if (-not $script:fondo) {
+        $script:fondo = [runspacefactory]::CreateRunspace()
+        $script:fondo.Open()
+    }
+}
 function Read-Fondo($q) {
     $l = $null
     while ($q.TryDequeue([ref]$l)) {
@@ -381,20 +385,26 @@ function Read-Fondo($q) {
 }
 # un programa con su salida linea a linea (pip, winget): se dice al llegar; devuelve rc
 $CodigoExe = @'
+$global:LASTEXITCODE = $null
 & $exe @argv 2>&1 | ForEach-Object { Say "    $_" }
 [pscustomobject]@{ rc = $LASTEXITCODE }
 '@
 # un programa con su salida guardada (comprobar una libreria): rc y out
 $CodigoSalida = @'
+$global:LASTEXITCODE = $null
 $o = $(if ($conErr) { & $exe @argv 2>&1 } else { & $exe @argv 2>$null })
 [pscustomobject]@{ rc = $LASTEXITCODE; out = @($o | ForEach-Object { "$_" }) }
 '@
 
 function Find-Python {
     # devuelve la ruta de un python.exe que funcione, de 3.10 a 3.13 y probando primero el mas nuevo;
-    # si solo hay uno mas nuevo (3.14+) lo devuelve con aviso: pip dira si aun no hay librerias para el
+    # si solo hay uno mas nuevo (3.14+) lo devuelve con aviso: pip dira si aun no hay librerias para el.
+    # Al actualizar, primero el de la instalacion anterior ($Previo, su python.txt): ya tiene las librerias (otro
+    # Python mas nuevo las instalaria todas de nuevo) y no hay que probar los demas (cada prueba es un proceso: en el
+    # runner de la CI, 23 s para llegar al que vale)
     $probe = "import sys; print(sys.executable); print(sys.version_info[0] * 100 + sys.version_info[1])"
     $tries = @(@("py", "-3.13"), @("py", "-3.12"), @("py", "-3.11"), @("py", "-3.10"), @("py", "-3"), @("python"), @("python3"))
+    if ($Previo) { $tries = @(, @($Previo)) + $tries }
     foreach ($dir in @("$env:LOCALAPPDATA\Programs\Python", "$env:ProgramFiles\Python*", "${env:ProgramFiles(x86)}\Python*")) {
         Get-ChildItem -Path $dir -Filter python.exe -Recurse -Depth 1 -ErrorAction SilentlyContinue |
             Sort-Object FullName -Descending | ForEach-Object { $tries += , @($_.FullName) }
@@ -433,8 +443,11 @@ function Get-ApiHeaders($post) {
 }
 
 function Find-PythonFondo {
-    # Find-Python en segundo plano: prueba varios python.exe (cada uno, un proceso nuevo que el antivirus revisa)
-    return "$((Invoke-Fondo '[pscustomobject]@{ v = (Find-Python) }' @{ MaxPy = $MaxPy } @("Find-Python")).v)"
+    # Find-Python en segundo plano: prueba varios python.exe (cada uno, un proceso nuevo que el antivirus revisa).
+    # Con el python.txt de la instalacion que se actualiza ($app ya es la de destino), ese primero
+    $previo = ""
+    try { $previo = "$(Get-Content -LiteralPath (Join-Path $app 'python.txt') -TotalCount 1 -Encoding UTF8 -ErrorAction Stop)".Trim().TrimStart([char]0xFEFF) } catch {}
+    return "$((Invoke-Fondo '[pscustomobject]@{ v = (Find-Python) }' @{ MaxPy = $MaxPy; Previo = $previo } @("Find-Python")).v)"
 }
 # Python 3.13 con winget, solo para este usuario (si no hay ningun Python)
 $WingetPython = @("install", "-e", "--id", "Python.Python.3.13", "--scope", "user", "--silent", "--accept-package-agreements",

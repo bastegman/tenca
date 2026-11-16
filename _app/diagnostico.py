@@ -66,6 +66,7 @@ DIAG_LINES = (
     "   en lo que faltaba no hay voz: se da por completa",
     "   se mantiene el texto del directo",
     "   no se pudo escribir la transcripción todavía ({c})",
+    "   voces: el PC tiene poca memoria libre; se espera (como mucho {n} min)",  # antes de la de {e}, que se la comeria
     "   voces: {e}",
     "   {t}: documento escrito en {n} destino(s)⟦ · sin tocar: {t}⟧",
     # repaso final pendiente al apagar (fix-directo) y destinos de salida al apagar o borrar (fix-perfil)

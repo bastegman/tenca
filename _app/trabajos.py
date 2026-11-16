@@ -180,6 +180,10 @@ def preload_model(st, cached=None):
 # se precarga y el modelo se carga al empezar la reunion (2-6 s). En un portatil de 8 GB con Teams y Outlook abiertos,
 # sumarlo al arranque lo llevaba a tirar del disco (incidencia del 16/11/2026)
 PRECARGA_MIN_LIBRE = int(2.5 * carga.GB)
+# «Quién habla» al terminar una reunion ocupa 0,3-0,8 GB (2 h 13: 0,83): con menos de 1 GB libre espera un poco (al
+# colgar una llamada el PC suele liberar memoria) y luego sigue igual, en reposo
+VOCES_MIN_LIBRE = 1 * carga.GB
+VOCES_ESPERA_MAX_S = 300.0
 
 
 def live_cloud_cfg(st):
@@ -1257,6 +1261,25 @@ class Jobs:
         self.voice_vectors.setdefault(rel, {})[h] = vec
         return vec, m.get("segundos")
 
+    def _esperar_memoria(self, job, min_libre=None, tope=None, paso=2.0):
+        """Antes de identificar las voces de una reunion: con poca memoria libre en el PC, espera (como mucho `tope`,
+        o hasta que se cancele el trabajo) y lo dice en la cola y en el log. Fuera de Windows no se sabe: no espera."""
+        min_libre = VOCES_MIN_LIBRE if min_libre is None else min_libre
+        tope = VOCES_ESPERA_MAX_S if tope is None else tope
+        if not carga.poca_memoria(min_libre):
+            return False
+        antes, fin = job.stage, time.monotonic() + tope
+        job.stage = "Esperando a que el PC tenga memoria libre…"
+        log(f"   voces: el PC tiene poca memoria libre; se espera (como mucho {int(tope // 60)} min)")
+        try:
+            while time.monotonic() < fin and carga.poca_memoria(min_libre):
+                if job.cancel:
+                    raise engines.Cancelled()
+                time.sleep(paso)
+        finally:
+            job.stage = antes
+        return True
+
     def speakers_for(self, abs_path, data=None):
         """Sidecar con las frases casadas con el .srt ACTUAL (barato) y los nombres resueltos; None si no hay."""
         data = data or voices.read_sidecar(voices.sidecar_path(abs_path))
@@ -1359,6 +1382,7 @@ class Jobs:
             # identificacion anterior ya no son de esos hablantes y «Recordar» guardaria la voz de otro
             self.voice_vectors.pop(job.path, None)
             n = self._participant_hint(abs_path, old)
+            self._esperar_memoria(job)
             res = self._voices_subprocess(job, ["--diarize", abs_path, "--out", side,
                                                 *(["--participantes", str(n)] if n else []), *rejilla])
             huellas = res.get("huellas") or {}

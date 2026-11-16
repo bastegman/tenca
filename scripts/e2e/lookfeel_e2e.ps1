@@ -166,6 +166,14 @@ function Run-Installer($dir, $label, $timeoutMin, $sondear = $true) {
     $txt = "lo mas largo seguido sin responder: {0:N1} s" -f $peor
     if ($sondear -and $vista) { Check "$label.ventana_responde" ($peor -lt 2.5) $txt }
     else { Note "$label.ventana_responde" $(if ($vista) { $txt } else { "sin ventana WinForms" }) }
+    if ($sondear -and $vista -and $p.HasExited) {
+        # y lo que dice el propio instalador (su latido: un temporizador de la ventana; mide la cola de mensajes, que
+        # es lo que mira Windows para darla por colgada). La "a" con tilde de "mas" no se escribe aqui: este script
+        # no lleva BOM y PowerShell 5.1 lo lee como ANSI
+        $m = [regex]::Match((Last-Run-Log), "ventana: lo m\S{1,2}s largo sin atenderla, ([\d.,]+) s")
+        $hueco = $(if ($m.Success) { [double]($m.Groups[1].Value -replace ",", ".") } else { $null })
+        Check "$label.ventana_latido" ($null -ne $hueco -and $hueco -lt 2.5) $(if ($m.Success) { $m.Value } else { "sin la linea del latido en instalar.log" })
+    }
     if (-not $p.HasExited) {
         Check "$label.termina" $false "INSTALAR.bat no termino en $timeoutMin min (se mata)"
         Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*instalar.ps1*" -or $_.CommandLine -like "*INSTALAR.bat*" } |

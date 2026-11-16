@@ -116,8 +116,27 @@ class RehacerSuaveTests(RehacerBase):
         self.app.rehacer_huellas()
         corta = self.llamadas[0]["cancel"]
         self.assertFalse(corta())
-        with mock.patch.object(carga, "poca_memoria", return_value=True):
+        with mock.patch.object(carga, "poca_memoria", return_value=True) as pm:
             self.assertTrue(corta())
+        # con un umbral menor que el de empezar: el propio proceso (~0,26 GB) no lo corta (revision 1, P1-1)
+        self.assertEqual(pm.call_args.args, (app_voces.REHACER_CORTE_LIBRE,))
+        self.assertLessEqual(app_voces.REHACER_CORTE_LIBRE + int(0.26 * carga.GB), app_voces.REHACER_MIN_LIBRE_TRAS)
+        self.assertLess(app_voces.REHACER_MIN_LIBRE_TRAS, app_voces.REHACER_MIN_LIBRE)
+
+    def test_un_pc_que_vive_con_poca_memoria_acaba_rehaciendo(self):
+        """Tras REHACER_MEMORIA_MAX_S esperando memoria en la tanda, basta con REHACER_MIN_LIBRE_TRAS (revision 1,
+        P1-1: antes la espera por memoria no tenia tope y esas personas no se reconocian nunca)."""
+        pedidas = []
+
+        def ocupado(min_libre=carga.MIN_LIBRE, **k):
+            pedidas.append(min_libre)
+            return "memoria" if min_libre > app_voces.REHACER_MIN_LIBRE_TRAS else None
+        with mock.patch.object(carga, "ocupado", ocupado), mock.patch.object(app_voces, "REHACER_MEMORIA_MAX_S", 0.2), \
+                mock.patch.object(app_voces, "log"):
+            res = self.app.rehacer_huellas()
+        self.assertEqual(res["rehechas"], 2)
+        self.assertEqual(pedidas[0], app_voces.REHACER_MIN_LIBRE)
+        self.assertEqual(pedidas[-1], app_voces.REHACER_MIN_LIBRE_TRAS)
 
     def test_con_el_pc_ocupado_espera_y_lo_dice(self):
         estados = iter(["cpu", "memoria", None, None, None, None, None, None, None, None])
@@ -149,6 +168,19 @@ class RehacerSuaveTests(RehacerBase):
                 mock.patch.object(app_voces, "REHACER_CPU_MAX_S", 0.2):
             res = self.app.rehacer_huellas()
         self.assertEqual(res["rehechas"], 2)
+
+    def test_el_tope_de_cpu_es_de_la_tanda(self):
+        """Vencido una vez, el resto de la tanda ya no espera a la CPU (revision 1, P2-1: era por espera, y cada huella
+        espera dos veces). Sigue mirando la memoria."""
+        with mock.patch.object(carga, "ocupado", lambda *a, **k: "cpu"), \
+                mock.patch.object(app_voces, "REHACER_CPU_MAX_S", 0.5), \
+                mock.patch.object(carga, "poca_memoria", return_value=False) as pm:
+            t0 = time.monotonic()
+            res = self.app.rehacer_huellas()
+            dura = time.monotonic() - t0
+        self.assertEqual(res["rehechas"], 2)
+        self.assertLess(dura, 1.5)  # una sola espera de 0,5 s; antes, una por cada una de las ~5 esperas de la tanda
+        self.assertTrue(pm.called)
 
     def test_pausa_entre_huellas(self):
         momentos = []
@@ -252,6 +284,51 @@ class SubprocesoEnReposoTests(TempTree):
         elif trabajos.shutil.which("nice"):
             self.assertEqual(fondo[:3], ["nice", "-n", "19"])
             self.assertNotIn("nice", recordar)
+
+
+class VocesConMemoriaTests(TempTree):
+    """«Quién habla» al terminar una reunion (0,3-0,8 GB): con poca memoria libre espera un poco antes de empezar."""
+
+    def job(self):
+        return types.SimpleNamespace(stage="Preparando…", cancel=False, name="r.wav")
+
+    def test_espera_a_que_haya_memoria_y_lo_dice(self):
+        jobs, job = bare_jobs([]), self.job()
+        estados = iter([True, True, False])
+        vistos = []
+        with mock.patch.object(carga, "poca_memoria", lambda *a: next(estados)), \
+                mock.patch.object(trabajos, "log") as log, \
+                mock.patch.object(trabajos.time, "sleep", lambda s: vistos.append(job.stage)):
+            self.assertTrue(jobs._esperar_memoria(job))
+        self.assertEqual(vistos, ["Esperando a que el PC tenga memoria libre…"])
+        self.assertEqual(job.stage, "Preparando…")
+        linea = log.call_args.args[0]
+        self.assertEqual(linea, "   voces: el PC tiene poca memoria libre; se espera (como mucho 5 min)")
+        self.assertEqual(diagnostico.diag_line(linea), linea)
+
+    def test_con_memoria_no_espera_y_con_tope_sigue(self):
+        jobs, job = bare_jobs([]), self.job()
+        with mock.patch.object(carga, "poca_memoria", return_value=False):
+            self.assertFalse(jobs._esperar_memoria(job))
+        t0 = time.monotonic()
+        with mock.patch.object(carga, "poca_memoria", return_value=True), mock.patch.object(trabajos, "log"):
+            self.assertTrue(jobs._esperar_memoria(job, tope=0.3, paso=0.05))
+        self.assertLess(time.monotonic() - t0, 2)
+
+    def test_cancelar_mientras_espera(self):
+        jobs, job = bare_jobs([]), self.job()
+        job.cancel = True
+        with mock.patch.object(carga, "poca_memoria", return_value=True), mock.patch.object(trabajos, "log"), \
+                self.assertRaises(trabajos.engines.Cancelled):
+            jobs._esperar_memoria(job, paso=0.01)
+        self.assertEqual(job.stage, "Preparando…")
+
+    def test_run_voices_lo_pide_antes_del_subproceso(self):
+        with open(os.path.join(APP, "trabajos.py"), encoding="utf-8") as f:
+            src = f.read()
+        cuerpo = src[src.index("    def _run_voices(self, job):"):]
+        self.assertLess(cuerpo.index("self._esperar_memoria(job)"),
+                        cuerpo.index('self._voices_subprocess(job, ["--diarize"'))
 
 
 # ----------------------------------------------------------------------------- precargas del arranque
@@ -361,6 +438,24 @@ class InstaladorNoSeCongelaTests(unittest.TestCase):
             self.assertRegex(self.ps1, r'Invoke-Fondo \$CodigoSalida @\{ exe = \$py; argv = @\("-c", "import '
                              + re.escape(mod))
 
+    def test_el_runspace_se_abre_antes_de_ensenar_la_ventana(self):
+        w = _funcion(self.ps1, "New-InstallerWindow")
+        self.assertLess(w.index("Open-Fondo"), w.index("$f.Show()"))
+        self.assertLess(w.index("$script:latido.Restart()"), w.index("$tm.Start()"))
+        for nombre in ("$CodigoExe = @'", "$CodigoSalida = @'"):  # un programa que no arranca no hereda el rc de otro
+            i = self.ps1.index(nombre)
+            self.assertEqual(self.ps1[i:].split("\n")[1], "$global:LASTEXITCODE = $null")
+
+    def test_al_actualizar_prueba_primero_el_python_de_antes(self):
+        """El python.txt de la instalacion que se actualiza, el primero: tiene las librerias (otro mas nuevo las
+        instalaria todas otra vez) y no hace falta probar los demas (en el runner, 23 s)."""
+        fp = _funcion(self.ps1, "Find-Python")
+        self.assertLess(fp.index("if ($Previo) { $tries = @(, @($Previo)) + $tries }"),
+                        fp.index("foreach ($t in $tries)"))
+        fondo = _funcion(self.ps1, "Find-PythonFondo")
+        self.assertIn("(Join-Path $app 'python.txt')", fondo)
+        self.assertIn("@{ MaxPy = $MaxPy; Previo = $previo }", fondo)
+
     def test_el_log_dice_la_hora_de_cada_paso_y_lo_mas_largo_sin_atender(self):
         self.assertIn('Log-File ("> $text  [" + (Get-Date -Format "HH:mm:ss") + "]")', _funcion(self.ps1, "Step"))
         self.assertIn("ventana: lo más largo sin atenderla", _funcion(self.ps1, "Finish-Ui"))
@@ -373,6 +468,14 @@ class InstaladorNoSeCongelaTests(unittest.TestCase):
         self.assertIn("[E2E.Sonda]::Responde($h, 500)", run)
         self.assertIn('Check "$label.ventana_responde" ($peor -lt 2.5)', run)
         self.assertIn('Run-Installer $vExtr "v.chuleta_instalador" 20 $false', e2e)  # el de la Chuleta de antes, no
+        self.assertIn('Check "$label.ventana_latido" ($null -ne $hueco -and $hueco -lt 2.5)', run)
+
+    def test_voces_memoria_se_lanza_con_estos_cambios(self):
+        with open(os.path.join(os.path.dirname(APP), ".github", "workflows", "voces-memoria.yml"),
+                  encoding="utf-8") as f:
+            yml = f.read()
+        for p in ("_app/app_voces.py", "_app/carga.py", "_app/trabajos.py"):
+            self.assertIn(f'"{p}"', yml)
 
 
 @unittest.skipUnless(sys.platform == "win32", "solo Windows (PowerShell 5.1)")
@@ -405,6 +508,16 @@ class InvokeFondoWindowsTests(unittest.TestCase):
             "Write-Output ('RC=' + $r.rc); Write-Output ('D=' + ($script:dichas -join ';'))")
         self.assertIn("RC=3", out)
         self.assertIn("D=Gray|    hola", out)
+
+    def test_find_python_con_el_de_antes(self):
+        from test_desinstalar import run_ps_functions
+        py = sys.executable.replace("'", "''")
+        out = run_ps_functions(os.path.join(APP, "instalar.ps1"), ["Find-Python"],
+                               f"function Say($t, $c) {{ }}; $MaxPy = 399; $Previo = '{py}'; "
+                               "Write-Output ('P=' + (Find-Python))")
+        m = re.search(r"P=(.*)", out)
+        self.assertTrue(m, out)
+        self.assertEqual(os.path.normcase(m.group(1).strip()), os.path.normcase(sys.executable))
 
     def test_una_funcion_enviada_y_un_fallo(self):
         out = self.ps("$r = Invoke-Fondo '[pscustomobject]@{ v = [bool](Test-Grabadora) }' @{} @('Test-Grabadora'); "

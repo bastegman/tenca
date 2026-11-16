@@ -29,8 +29,15 @@ REHACER_ESPERA_S = 120.0  # al arrancar, antes de nada: que pase lo pesado del a
 REHACER_CALMA_S = 60.0  # y, despues, tanto tiempo seguido sin nada de Tenca en marcha y con el PC tranquilo
 REHACER_PAUSA_S = 10.0  # entre una huella y la siguiente: a sorbos, nunca seguido
 REHACER_HILOS = 1  # hilos de onnxruntime para cada huella (voices.hilos() da 2-4: para quien espera, no para el fondo)
-REHACER_CPU_MAX_S = 1200.0  # si la CPU del PC no baja en 20 min, se sigue igual (en reposo y con 1 hilo cede sola);
-# con poca memoria libre no: se espera lo que haga falta
+REHACER_CPU_MAX_S = 1200.0  # si la CPU del PC no baja en 20 min, el resto de la tanda ya no la mira (en reposo y con
+# 1 hilo cede sola)
+# memoria libre: para empezar una huella, 1,5 GB; si en la tanda ya se lleva media hora esperando memoria (un PC que
+# vive con poca), basta con 0,9 GB. Mientras calcula, por debajo de 0,6 GB se corta (y se repite en otra vuelta): con
+# el mismo umbral para empezar y para cortar, el propio proceso (~0,26 GB) se cortaba a si mismo (revision 1)
+REHACER_MIN_LIBRE = int(1.5 * carga.GB)
+REHACER_MIN_LIBRE_TRAS = int(0.9 * carga.GB)
+REHACER_MEMORIA_MAX_S = 1800.0
+REHACER_CORTE_LIBRE = int(0.6 * carga.GB)
 _ahora, _dormir = time.monotonic, time.sleep  # (los tests de la espera los cambian por un reloj falso)
 REHACER_PASO_S = 15.0  # mientras se graba (o hay un directo, una llamada o se identifican voces): se mira cada tanto
 REHACER_DESCARGA_S = 1800.0  # lo que se espera a la descarga de los modelos de voces antes de dejarlo para otra vez
@@ -171,6 +178,8 @@ class Voces:
         if not lock.acquire(blocking=False):
             return None
         try:
+            # lo ya esperado en esta tanda (CPU que no baja, memoria que no llega): vale para todas sus huellas
+            self._rehacer_tanda = {"cpu_desde": None, "cpu_vencida": False, "mem_desde": None}
             if espera:
                 time.sleep(espera)
             if calma and self.jobs.voices_on() and self.jobs.voices.pendientes():
@@ -240,7 +249,8 @@ class Voces:
             try:  # si empieza una grabacion (o algo de _rehacer_ocupado) o se acaba la memoria mientras se calcula,
                 # se corta; en reposo y con 1 hilo: con el PC ocupado, Windows no le da turno
                 vec, secs = self.jobs.speaker_vector(rel, h, cancel=lambda: cancelled() or bool(
-                    self._rehacer_ocupado()) or carga.poca_memoria(), reposo=True, hilos=REHACER_HILOS)
+                    self._rehacer_ocupado()) or carga.poca_memoria(REHACER_CORTE_LIBRE), reposo=True,
+                    hilos=REHACER_HILOS)
             except engines.Cancelled:
                 cortadas.append(rel)
                 raise
@@ -305,18 +315,26 @@ class Voces:
         actividad»): lo que acaba de terminar suele encadenar algo (una transcripcion, sus voces, el resumen)."""
         self._rehacer_tranquilo(cancelled or (lambda: bool(getattr(self.jobs, "closing", False))), segundos)
 
+    def _tanda(self):
+        t = getattr(self, "_rehacer_tanda", None)
+        if t is None:
+            t = self._rehacer_tanda = {"cpu_desde": None, "cpu_vencida": False, "mem_desde": None}
+        return t
+
     def _rehacer_tranquilo(self, cancelled, segundos):
-        dicho, desde, cpu_desde = None, None, None
+        dicho, desde, t = None, None, self._tanda()
         while not cancelled():
             motivo = self._rehacer_ocupado()
             pc = None if motivo else self._rehacer_pc()
             ahora = _ahora()
-            if pc == "cpu":  # una CPU que nunca baja (otro programa a tope) no lo deja para siempre
-                cpu_desde = ahora if cpu_desde is None else cpu_desde
-                if ahora - cpu_desde >= REHACER_CPU_MAX_S:
-                    pc = None
+            if pc == "cpu":  # una CPU que nunca baja (otro programa a tope) no deja la tanda para siempre
+                t["cpu_desde"] = ahora if t["cpu_desde"] is None else t["cpu_desde"]
+                if t["cpu_vencida"] or ahora - t["cpu_desde"] >= REHACER_CPU_MAX_S:
+                    t["cpu_vencida"], pc = True, None
             else:
-                cpu_desde = None
+                t["cpu_desde"] = None
+            if pc == "memoria" and t["mem_desde"] is None:  # desde cuando se espera memoria en esta tanda
+                t["mem_desde"] = ahora
             if not motivo and not pc:
                 desde = ahora if desde is None else desde
                 if ahora - desde >= segundos:
@@ -331,11 +349,18 @@ class Voces:
                     dicho = motivo or pc
             _dormir(REHACER_PASO_S)
 
-    @staticmethod
-    def _rehacer_pc():
-        """"memoria" (poca libre), "cpu" (todo el PC ocupado) o None: carga.ocupado (fuera de Windows, siempre None)."""
+    def _rehacer_pc(self):
+        """"memoria" (poca libre), "cpu" (todo el PC ocupado) o None: carga.ocupado (fuera de Windows, siempre None).
+        La memoria que hace falta: REHACER_MIN_LIBRE o, tras REHACER_MEMORIA_MAX_S esperandola en la tanda, menos.
+        Con la CPU ya vencida en la tanda, solo la memoria."""
+        t = self._tanda()
+        libre = REHACER_MIN_LIBRE
+        if t["mem_desde"] is not None and _ahora() - t["mem_desde"] >= REHACER_MEMORIA_MAX_S:
+            libre = REHACER_MIN_LIBRE_TRAS
         try:
-            return carga.ocupado()
+            if t["cpu_vencida"]:
+                return "memoria" if carga.poca_memoria(libre) else None
+            return carga.ocupado(min_libre=libre)
         except Exception:
             return None
 
