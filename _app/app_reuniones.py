@@ -9,6 +9,7 @@ import sys
 import time
 import webbrowser
 
+import carga
 import engines
 import fallos
 import informe
@@ -111,6 +112,7 @@ class Reuniones:
                 # puntos 5, 30, 33 y 32 del review del 14/11/2026: solo nombres de ajustes, estados y numeros
                 "Ajustes corregidos al arrancar: " + (", ".join(corregidos) or "ninguno"),
                 self.despierto.estado() if hasattr(self, "despierto") else "PC despierto: sin datos",
+                carga.diagnostico(),  # hilos de CPU y memoria libre: un portatil justo se ve aqui (16/11/2026)
                 *fallos.diagnostico(DATA_DIR), *informe.diagnostico(3),
                 "", f"server.log (últimas 30 líneas; lo que no es técnico va como {DIAG_FREE}):",
                 *map(diag_line, lines)]

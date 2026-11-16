@@ -17,6 +17,7 @@ import threading
 import time
 import uuid
 
+import carga
 import conservar
 import engines
 import explicar
@@ -175,6 +176,12 @@ def preload_model(st, cached=None):
     return None
 
 
+# precargar el modelo de Whisper al arrancar ocupa 0,5-1,6 GB: con menos libre que esto (el modelo y 1 GB de margen) no
+# se precarga y el modelo se carga al empezar la reunion (2-6 s). En un portatil de 8 GB con Teams y Outlook abiertos,
+# sumarlo al arranque lo llevaba a tirar del disco (incidencia del 16/11/2026)
+PRECARGA_MIN_LIBRE = int(2.5 * carga.GB)
+
+
 def live_cloud_cfg(st):
     """Ajustes de la nube para el directo: los de cloud y el modelo del resumen (la traduccion lo usa con una
     pasarela propia). _run_live los vuelve a leer en cada trozo, no una copia del arranque."""
@@ -311,6 +318,11 @@ class Jobs:
         if not pick:
             return None
         which, model = pick
+        mem = carga.memoria()
+        if mem and mem[1] < PRECARGA_MIN_LIBRE:
+            log(f"no se precarga {model}: el PC tiene {mem[1] / carga.GB:.1f} GB de memoria libre (se carga al "
+                "empezar la reunión)")
+            return None
         w = self.live_worker if which == "live" else self.local.worker
         t0 = time.time()
         try:
@@ -1225,9 +1237,10 @@ class Jobs:
                 pass
             borrar_pcm_voces(p.pid)
 
-    def speaker_vector(self, rel, h, cancel=None):
+    def speaker_vector(self, rel, h, cancel=None, reposo=False, hilos=None):
         """Huella de un hablante de una reunion: de la memoria del servidor o recalculada en un subproceso (cancel():
-        cortarlo, engines.Cancelled)."""
+        cortarlo, engines.Cancelled). Para «Recordar», con el usuario esperando: por debajo de lo normal y con
+        voices.hilos(); para el trabajo de fondo (rehacer las huellas al actualizar), reposo=True y pocos hilos."""
         vec = (self.voice_vectors.get(rel) or {}).get(h)
         if vec:
             return vec, None
@@ -1237,7 +1250,7 @@ class Jobs:
             raise ApiError("Las voces de esta reunión están identificadas solo en parte: ponle nombre sin "
                            "«Recordar» y guarda su huella cuando estén enteras.", 409)
         args = ["--fingerprint", h, "--diarize", abs_path, "--out", voices.sidecar_path(abs_path)]
-        m = self._voices_subprocess(None, args, idle_timeout=600, cancel=cancel)
+        m = self._voices_subprocess(None, args, idle_timeout=600, cancel=cancel, reposo=reposo, hilos=hilos)
         vec = (m.get("huellas") or {}).get(h)
         if not vec:
             raise ApiError("No se pudo calcular la huella de ese hablante.")

@@ -9,6 +9,7 @@ import os
 import threading
 import time
 
+import carga
 import engines
 import voces_directo
 import voices
@@ -19,7 +20,18 @@ from rutas import DATA_DIR, alias_of, rel_of, safe
 
 
 MUESTRA_S = 5.0  # «Oír» una voz (B8): unos segundos de ella sola
-REHACER_ESPERA_S = 20.0  # al arrancar, antes de rehacer huellas: que no compita con el arranque
+# Rehacer las huellas es trabajo de fondo: nunca debe notarse (incidencia del 16/11/2026, «se pilló el portátil» al
+# actualizar en un portátil modesto). Al arrancar espera un rato y a que el PC lleve un tiempo tranquilo; cada huella va
+# en un proceso en reposo (IDLE_PRIORITY_CLASS) con 1 hilo, una a una y con pausa entre ellas, y se para si el PC va
+# justo (CPU de todo el PC o memoria libre: carga.py). Medido ese día (Mac, CAM++, reunión de 39 min): una huella son
+# ~3 s de CPU y 0,26 GB con 1 hilo; con 4, 2,1 s de pared y 4,5 s de CPU (más CPU para ganar 0,8 s)
+REHACER_ESPERA_S = 120.0  # al arrancar, antes de nada: que pase lo pesado del arranque (ventana, modelo del directo)
+REHACER_CALMA_S = 60.0  # y, despues, tanto tiempo seguido sin nada de Tenca en marcha y con el PC tranquilo
+REHACER_PAUSA_S = 10.0  # entre una huella y la siguiente: a sorbos, nunca seguido
+REHACER_HILOS = 1  # hilos de onnxruntime para cada huella (voices.hilos() da 2-4: para quien espera, no para el fondo)
+REHACER_CPU_MAX_S = 1200.0  # si la CPU del PC no baja en 20 min, se sigue igual (en reposo y con 1 hilo cede sola);
+# con poca memoria libre no: se espera lo que haga falta
+_ahora, _dormir = time.monotonic, time.sleep  # (los tests de la espera los cambian por un reloj falso)
 REHACER_PASO_S = 15.0  # mientras se graba (o hay un directo, una llamada o se identifican voces): se mira cada tanto
 REHACER_DESCARGA_S = 1800.0  # lo que se espera a la descarga de los modelos de voces antes de dejarlo para otra vez
 
@@ -146,20 +158,23 @@ class Voces:
         return dict(m, creado=(data or {}).get("creado"))
 
     # --- huellas de un modelo anterior (al actualizar): se rehacen con el de ahora desde el audio de sus reuniones
-    def rehacer_huellas(self, espera=0.0):
+    def rehacer_huellas(self, espera=0.0, calma=0.0):
         """Las huellas que voices.Voices._migrar dejo por rehacer (las del modelo anterior no se pueden comparar con
         las de ahora) se recalculan desde el audio de las reuniones en que se pulso «Recordar», en este hilo y una a
         una (voices.rehacer_huellas): cada persona conserva id, nombre, «Soy yo» y consentimiento, y vuelve a
         reconocerse por la voz. Nunca mientras se graba, hay un directo o una llamada o se identifican voces: espera
         (_rehacer_esperar). Con «Quién habla» apagado no hace nada (al activarlo, voices_toggle lo vuelve a pedir); sin
         los modelos, primero los baja. Lo que no encuentra o no puede calcular se queda para la proxima vez. La llaman
-        main() al arrancar (espera: que no compita con el arranque) y voices_toggle; dos a la vez, solo una."""
+        main() al arrancar (espera: que no compita con el arranque; calma: y que el PC lleve ese rato tranquilo) y
+        voices_toggle; dos a la vez, solo una. Cada huella, en reposo, con 1 hilo y con pausa (REHACER_*)."""
         lock = self.__dict__.setdefault("_rehacer_lock", threading.Lock())
         if not lock.acquire(blocking=False):
             return None
         try:
             if espera:
                 time.sleep(espera)
+            if calma and self.jobs.voices_on() and self.jobs.voices.pendientes():
+                self._rehacer_calma(calma)
             return self._rehacer_huellas()
         except Exception:  # en su hilo: nunca tumba nada; se intenta en el proximo arranque
             log_exc()
@@ -168,8 +183,8 @@ class Voces:
             lock.release()
 
     def rehacer_huellas_al_arrancar(self):
-        """main(): rehacer_huellas en su hilo, tras REHACER_ESPERA_S."""
-        return self.rehacer_huellas(REHACER_ESPERA_S)
+        """main(): rehacer_huellas en su hilo, tras REHACER_ESPERA_S y REHACER_CALMA_S tranquilo."""
+        return self.rehacer_huellas(REHACER_ESPERA_S, REHACER_CALMA_S)
 
     def _rehacer_huellas(self):
         if not self.jobs.voices_on():
@@ -214,6 +229,7 @@ class Voces:
             return list(por_nombre.get(nombre) or [])
 
         def calcular(audio, h, side):
+            self._rehacer_pausa(cancelled)  # entre huella y huella, un respiro (tambien antes de la primera)
             self._rehacer_esperar(cancelled)
             if cancelled() or not self.jobs.voices_on():  # apagando, o «Voces» desactivado entretanto: ni una mas
                 return None, None
@@ -221,9 +237,10 @@ class Voces:
             # se volvio a identificar, se esta identificando o el usuario ha corregido ese hablante: esta vez no
             if not self._rehacer_mismo(audio, h, side) or self.jobs.active_for(rel, kinds=("voces",)):
                 return None, None
-            try:  # si empieza una grabacion (o algo de _rehacer_ocupado) mientras se calcula, se corta
+            try:  # si empieza una grabacion (o algo de _rehacer_ocupado) o se acaba la memoria mientras se calcula,
+                # se corta; en reposo y con 1 hilo: con el PC ocupado, Windows no le da turno
                 vec, secs = self.jobs.speaker_vector(rel, h, cancel=lambda: cancelled() or bool(
-                    self._rehacer_ocupado()))
+                    self._rehacer_ocupado()) or carga.poca_memoria(), reposo=True, hilos=REHACER_HILOS)
             except engines.Cancelled:
                 cortadas.append(rel)
                 raise
@@ -280,16 +297,52 @@ class Voces:
         return None
 
     def _rehacer_esperar(self, cancelled):
-        """Espera a que no haya nada de _rehacer_ocupado (o a que se apague la app)."""
-        dicho = None
+        """Espera a que no haya nada de _rehacer_ocupado ni el PC vaya justo (_rehacer_pc), o a que se apague la app."""
+        self._rehacer_tranquilo(cancelled, 0.0)
+
+    def _rehacer_calma(self, segundos, cancelled=None):
+        """Al arrancar: espera a que Tenca y el PC lleven `segundos` seguidos tranquilos («tras un rato sin
+        actividad»): lo que acaba de terminar suele encadenar algo (una transcripcion, sus voces, el resumen)."""
+        self._rehacer_tranquilo(cancelled or (lambda: bool(getattr(self.jobs, "closing", False))), segundos)
+
+    def _rehacer_tranquilo(self, cancelled, segundos):
+        dicho, desde, cpu_desde = None, None, None
         while not cancelled():
             motivo = self._rehacer_ocupado()
-            if not motivo:
-                return
-            if motivo != dicho:
-                log(f"   huellas por rehacer: se espera a que termine lo que está en marcha ({motivo})")
-                dicho = motivo
-            time.sleep(REHACER_PASO_S)
+            pc = None if motivo else self._rehacer_pc()
+            ahora = _ahora()
+            if pc == "cpu":  # una CPU que nunca baja (otro programa a tope) no lo deja para siempre
+                cpu_desde = ahora if cpu_desde is None else cpu_desde
+                if ahora - cpu_desde >= REHACER_CPU_MAX_S:
+                    pc = None
+            else:
+                cpu_desde = None
+            if not motivo and not pc:
+                desde = ahora if desde is None else desde
+                if ahora - desde >= segundos:
+                    return
+            else:
+                desde = None
+                if (motivo or pc) != dicho:
+                    if motivo:
+                        log(f"   huellas por rehacer: se espera a que termine lo que está en marcha ({motivo})")
+                    else:
+                        log(f"   huellas por rehacer: el PC va justo ({pc}); se espera")
+                    dicho = motivo or pc
+            _dormir(REHACER_PASO_S)
+
+    @staticmethod
+    def _rehacer_pc():
+        """"memoria" (poca libre), "cpu" (todo el PC ocupado) o None: carga.ocupado (fuera de Windows, siempre None)."""
+        try:
+            return carga.ocupado()
+        except Exception:
+            return None
+
+    def _rehacer_pausa(self, cancelled):
+        fin = _ahora() + REHACER_PAUSA_S
+        while not cancelled() and _ahora() < fin:
+            _dormir(min(1.0, max(0.0, fin - _ahora())))
 
     def _speaker_check(self, abs_path, h, creado=None, data=None):
         """Antes de corregir un hablante: que exista, que no se esten identificando las voces de esa reunion (lo que
