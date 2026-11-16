@@ -8,12 +8,14 @@ es «Ahora no» (como en la app): no se vuelve a proponer esa reunión hasta la 
     python aviso.py --puerto 8765 [--titulo "Reunión semanal"] [--nombre "Reunión semanal"] [--vocab ID]
                     [--tema "Alfa · General"] [--segundos 20] [--ocultar-captura]
                     [--siguiente "Reunión semanal" --sub "10:00–11:00 · Pulsa Grabar para tomar notas"]
-                    [--estado fichero.json] [--auto-grabar-ms N]        (estos dos, para las pruebas)
+                    [--estado fichero.json] [--auto-grabar-ms N] [--auto-elegir-ms N]   (estos, para las pruebas)
 
 «Grabar» hace POST http://127.0.0.1:<puerto>/api/rec/toggle (cabeceras X-Audios: 1 y X-Chuleta-Token con el token de
 la sesión, que lee de sesion.token en la carpeta de datos; sin proxy) con el nombre y el tema sugeridos; si ya se
-estaba grabando no toca nada. Al salir escribe una línea JSON en stdout:
-{"resultado": "grabar" | "cerrar" | "tiempo" | "grabando" | "sin-servidor" | "error", ...}.
+estaba grabando no toca nada. «Cambiar», junto al proyecto, hace POST /api/rec/elegir: la app sale delante con la
+tarjeta de Grabar abierta, para elegir otro proyecto › lista antes de empezar. Al salir escribe una línea JSON en
+stdout:
+{"resultado": "grabar" | "elegir" | "cerrar" | "tiempo" | "grabando" | "sin-servidor" | "error", ...}.
 
 --ocultar-captura: como la ventana de la app (window.py, ajuste «Al compartir pantalla»), el aviso no sale en lo que
 ven los demás al compartir pantalla: aparece justo al empezar una llamada, con el nombre de la reunión y «Grabar».
@@ -30,10 +32,11 @@ import threading
 import urllib.error
 import urllib.request
 
-from common import TOKEN_HEADER, local_opener, read_token
+from common import APP_NAME, TOKEN_HEADER, local_opener, read_token
 
 WINDOWS = sys.platform == "win32"
-ANCHO, ALTO = 340, 64  # px a 96 ppp; se escala con el monitor
+# px a 96 ppp; se escala con el monitor. 380 de ancho (antes 340) para que quepan el proyecto y «Cambiar» (16/11/2026)
+ANCHO, ALTO = 380, 64
 # la paleta oscura de la marca (hoja 01b): panel grafito y el botón principal en Boldo claro con texto oscuro (9:1); el
 # punto rojo dice «grabar», como en la app
 C = {"fondo": "#18201c", "texto": "#e8ede9", "suave": "#a2aca5", "boton": "#7cc7a6", "boton_hover": "#a3dcc2",
@@ -127,6 +130,21 @@ def estilo_windows(root, x, y, ocultar=False):
             "afinidad": ocultar_de_capturas(hwnd) if ocultar else None}
 
 
+def ceder_primer_plano():
+    """Windows solo deja ponerse delante a quien tiene permiso: el aviso, que acaba de recibir el clic, se lo cede a
+    la app (ASFW_ANY, como instancia.allow_foreground) para que su ventana salga delante con la tarjeta de grabar y no
+    se quede parpadeando en la barra de tareas. Solo Windows."""
+    if not WINDOWS:
+        return False
+    try:
+        import ctypes
+        u = ctypes.windll.user32
+        u.AllowSetForegroundWindow.argtypes = [ctypes.c_ulong]
+        return bool(u.AllowSetForegroundWindow(0xFFFFFFFF))
+    except Exception:
+        return False
+
+
 def devolver_foco(anterior, propio):
     """Tk activa la ventana al mostrarla aunque lleve WS_EX_NOACTIVATE (ShowWindow(SW_SHOWNORMAL) no respeta ese
     estilo, que solo evita la activación por clic). Si nos hemos quedado con el foco, se devuelve a la ventana que lo
@@ -191,14 +209,31 @@ class Aviso:
         textos.pack(side="left", fill="both", expand=True)
         self.l_tit = tk.Label(textos, fg=C["texto"], bg=C["fondo"], font=f_tit, anchor="w")
         self.l_tit.pack(fill="x")
-        self.l_sub = tk.Label(textos, fg=C["suave"], bg=C["fondo"], font=f_sub, anchor="w")
-        self.l_sub.pack(fill="x")
+        fila = tk.Frame(textos, bg=C["fondo"])
+        fila.pack(fill="x")
+        self.l_sub = tk.Label(fila, fg=C["suave"], bg=C["fondo"], font=f_sub, anchor="w")
+        self.l_sub.pack(side="left")
         ancho_txt = int((ANCHO - 14 * 2 - 12 - 9 - 92 - 8 - 4 - 28) * s)  # lo que queda para el texto
+        # «Cambiar» junto al proyecto (16/11/2026): «Grabar» graba al momento con el de la línea de abajo;
+        # para elegir otro al empezar, la tarjeta de Grabar de la app (POST /api/rec/elegir). En «Ya ha empezado
+        # «X»» no: esa reunión se graba con su plan
+        self.cambiar_btn, ancho_sub = None, ancho_txt
         titulo, tema = limpiar_texto(args.titulo), limpiar_texto(args.tema)
+        if not getattr(args, "siguiente", ""):
+            f_link = tkfont.Font(family=fam, size=8, underline=True)
+            enlace = "Cambiar" if tema else "Elegir proyecto"  # sin proyecto, al lado de «Pulsa Grabar…»
+            self.cambiar_btn = tk.Label(fila, text=enlace, fg=C["boton"], bg=C["fondo"], font=f_link,
+                                        cursor="hand2")
+            self.cambiar_btn.pack(side="left", padx=(int(6 * s), 0))
+            self.cambiar_btn.bind("<Button-1>", lambda e: self.elegir())
+            self.cambiar_btn.bind("<Enter>", lambda e: self.cambiar_btn.configure(fg=C["boton_hover"]))
+            self.cambiar_btn.bind("<Leave>", lambda e: self.cambiar_btn.configure(fg=C["boton"]))
+            ancho_sub = max(int(60 * s), ancho_txt - f_link.measure(enlace) - int(6 * s))
         self.l_tit.configure(text=self._encajar(f_tit, titulo or "Llamada en curso", ancho_txt))
+        # con «Cambiar» al lado, el proyecto › lista sin «Tema:» delante: así cabe entero más a menudo
         sub = limpiar_texto(getattr(args, "sub", "")) or (
-            ("Tema: " + tema) if tema else "Pulsa Grabar para tomar notas")
-        self.sub(self._encajar(f_sub, sub, ancho_txt))
+            (tema if self.cambiar_btn is not None else "Tema: " + tema) if tema else "Pulsa Grabar para tomar notas")
+        self.sub(self._encajar(f_sub, sub, ancho_sub))
         for w in [self.grabar_btn] + partes:
             w.bind("<Button-1>", lambda e: self.grabar())
             w.bind("<Enter>", lambda e: self._hover(True))
@@ -240,12 +275,49 @@ class Aviso:
         with local_opener().open(req, timeout=timeout) as r:  # sin proxy; Host: 127.0.0.1:<puerto>, como exige
             return json.load(r)
 
+    def _sin_cambiar(self):
+        """Fuera «Cambiar»: lo que dice la línea de abajo ya no es el proyecto (empezando, grabando, un error)."""
+        if getattr(self, "cambiar_btn", None) is not None:
+            try:
+                self.cambiar_btn.pack_forget()
+            except Exception:
+                pass
+
     def grabar(self):
         if self.enviando or self.resultado:
             return
         self.enviando = True
+        self._sin_cambiar()
         self.sub("Empezando a grabar…")
         threading.Thread(target=self._post, daemon=True).start()
+
+    def elegir(self):
+        """«Cambiar»: abre la tarjeta de Grabar de la app con la reunión de ahora, para elegir el proyecto › lista (y lo
+        demás) antes de empezar; el aviso se cierra (16/11/2026)."""
+        if self.enviando or self.resultado:
+            return
+        self.enviando = True
+        self._sin_cambiar()
+        self.sub("Abriendo la tarjeta de grabar…")
+        threading.Thread(target=self._elegir, daemon=True).start()
+
+    def _elegir(self):
+        ceder_primer_plano()  # antes de pedirla: la ventana de la app sale delante
+        try:
+            r = self._pedir("/api/rec/elegir", {"origen": "aviso"})
+            if r.get("recording"):  # alguien se adelantó (Ctrl+Alt+R): ya no hay nada que elegir
+                return self.root.after(0, lambda: self.cerrar("grabando"))
+            self.datos = {"tarjeta": r.get("tarjeta")}
+            if r.get("abierta"):  # sin ventana propia (Edge): la app no puede ponerse delante sola; se dice
+                self.root.after(0, lambda: self.sub(f"La tarjeta está abierta en {APP_NAME}", C["ok"]))
+                return self.root.after(2500, lambda: self.cerrar("elegir"))
+            self.root.after(0, lambda: self.cerrar("elegir"))
+        except urllib.error.HTTPError as e:
+            msg = f"HTTP {e.code}"
+            self.root.after(0, lambda m=msg: self._error(m))
+        except Exception as e:
+            msg = f"No se pudo hablar con la app ({e.__class__.__name__})"
+            self.root.after(0, lambda m=msg: self._error(m))
 
     def _post(self):
         try:
@@ -292,12 +364,14 @@ class Aviso:
         self.root.after(0, lambda: self.cerrar("cerrar"))
 
     def _ok(self, r):
+        self._sin_cambiar()
         self.resultado = "grabar"
         self.datos = {"path": r.get("path"), "workstream": r.get("workstream")}
         self.sub("Grabando · Ctrl+Alt+R para parar", C["ok"])
         self.root.after(1200, lambda: self.cerrar("grabar"))
 
     def _error(self, msg):
+        self._sin_cambiar()
         self.resultado, self.datos = "error", {"error": msg}
         self.sub(self._encajar(self.f_sub, limpiar_texto(msg), int(220 * self.s)), C["err"])
         self.root.after(5000, lambda: self.cerrar("error"))
@@ -338,8 +412,10 @@ class Aviso:
             return [w.winfo_rootx() + w.winfo_width() // 2, w.winfo_rooty() + w.winfo_height() // 2]
         est = {"geometry": [r.winfo_rootx(), r.winfo_rooty(), r.winfo_width(), r.winfo_height()],
                "pedido": [self.x, self.y, self.w, self.h], "area_trabajo": self.area, "escala": self.s,
-               "botones": {"grabar": centro(self.grabar_btn), "cerrar": centro(self.cerrar_btn)},
-               "activa_antes": self.activa_antes, "activa_despues": ventana_activa(), **self.info}
+               "botones": dict({"grabar": centro(self.grabar_btn), "cerrar": centro(self.cerrar_btn)},
+                               **({"cambiar": centro(self.cambiar_btn)} if self.cambiar_btn is not None else {})),
+               "activa_antes": self.activa_antes, "activa_despues": ventana_activa(),
+               "sub": self.l_sub.cget("text"), **self.info}
         with open(self.args.estado, "w", encoding="utf-8") as f:
             json.dump(est, f)
 
@@ -358,6 +434,8 @@ class Aviso:
         root.after(2000, self.sondear)
         if a.auto_grabar_ms:
             root.after(a.auto_grabar_ms, self.grabar)
+        if getattr(a, "auto_elegir_ms", 0):
+            root.after(a.auto_elegir_ms, self.elegir)
         if a.estado:
             root.after(400, self.escribir_estado)
         root.mainloop()
@@ -374,6 +452,7 @@ def main(argv=None):
     p.add_argument("--segundos", type=float, default=20)
     p.add_argument("--estado", default="")
     p.add_argument("--auto-grabar-ms", dest="auto_grabar_ms", type=int, default=0)
+    p.add_argument("--auto-elegir-ms", dest="auto_elegir_ms", type=int, default=0)
     p.add_argument("--ocultar-captura", dest="ocultar_captura", action="store_true")
     p.add_argument("--siguiente", default="")
     p.add_argument("--sub", default="")

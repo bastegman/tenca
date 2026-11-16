@@ -2101,6 +2101,50 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         err, red = self.limpiar(errores, [r for r in red if "/api/rec/status" not in r and not r.startswith("fallo ")])
         self.assertEqual((err, red), ([], []))
 
+    def test_cambiar_del_aviso_abre_la_tarjeta_con_las_listas_por_proyecto(self):
+        """16/11/2026. «Cambiar» del aviso flotante (POST /api/rec/elegir): la interfaz abierta abre la
+        tarjeta de Grabar una sola vez y lo dice al servidor (otra página no la repite). En la tarjeta, Proyecto agrupa
+        las listas por proyecto con su nombre (la inicial lleva a la lista), y «Elegir otro proyecto» abre el
+        selector."""
+        pg, errores, red = self.pagina()
+        devs = {"mics": [], "outputs": [], "mic": "default", "sys": "all"}
+        pg.route("**/api/rec/devices*", lambda r: r.fulfill(json=devs))
+        pg.route("**/api/rec/monitor", lambda r: r.fulfill(json={"ok": True}))
+        nada = {"teams": None, "outlook": None, "reason": None, "sugerencia": {}}
+        pg.route("**/api/reunion/actual", lambda r: r.fulfill(json=nada))
+        with pg.expect_request(lambda q: "/api/rec/status?ui=1" in q.url, timeout=15000):
+            pg.goto(f"{self.base}/?t={self.token}", wait_until="networkidle")
+        pg.wait_for_selector("#main h1:has-text('Hoy')", timeout=15000)
+        # la app se quedó en una carpeta (revisión 1, P2-1): la tarjeta del aviso no la toma como «cambiada»
+        pg.evaluate("location.hash = '#/f/Proyecto'")
+        pg.wait_for_function("S.route.kind === 'f'", timeout=5000)
+        with pg.expect_request(lambda q: "/api/rec/status?ui=1" in q.url, timeout=5000):
+            pass  # ha sondeado hace nada: el servidor la da por abierta y no abre otro Edge
+        r = self.api_post("/api/rec/elegir", {"origen": "aviso"})
+        self.assertTrue(r.get("abierta"), r)
+        pg.wait_for_selector(".dialog.gr [data-fila='carpeta'] .gr-v code", timeout=10000)
+        self.assertNotIn("cambiad", pg.text_content(".gr-fila[data-fila='carpeta'] .gr-origen"))
+        grupos = pg.evaluate("[...document.querySelectorAll('#grProy optgroup')].map(g =>"
+                             " [g.label, [...g.children].map(o => o.textContent)])")
+        self.assertIn(["Proyecto", ["General"]], grupos)
+        self.assertEqual(pg.eval_on_selector("#grProy", "s => [...s.options].map(o => o.textContent)")[0],
+                         "Sin proyecto")
+        fin = time.time() + 5
+        while "tarjeta" in self.api_get("/api/rec/status") and time.time() < fin:
+            time.sleep(0.2)
+        self.assertNotIn("tarjeta", self.api_get("/api/rec/status"))  # atendida
+        pg.click("[data-gr-cambiar='vocab']")
+        pg.click("[data-panel='vocab'] [data-gr-ir='proyecto']")
+        self.assertEqual(pg.evaluate("document.activeElement.id"), "grProy")
+        pg.keyboard.press("Escape")
+        pg.keyboard.press("Escape")
+        pg.wait_for_selector("#modal.hidden", state="attached", timeout=5000)
+        time.sleep(2)  # otro sondeo: la misma petición no la vuelve a abrir
+        self.assertFalse(pg.is_visible(".dialog.gr"))
+        err, red = self.limpiar(errores, red)
+        self.assertEqual(err, [], (err, red))
+        self.assertEqual(red, [], red)
+
 
 if __name__ == "__main__":
     unittest.main()

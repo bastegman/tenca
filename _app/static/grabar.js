@@ -41,7 +41,8 @@ async function abrirGrabar(opts = {}) {
   if (!S.config) return toast('La app aún está arrancando: espera unos segundos y vuelve a probar.', 'err');
   if (S.rec.recording) return stopRec();
   const pedido = opts.seguir && G ? G.pedido : { cambios: {} };
-  if (!opts.seguir && S.route.kind === 'f') pedido.cambios.carpeta = S.route.path;  // desde una carpeta: ahí
+  // desde una carpeta: ahí (no desde «Cambiar» del aviso flotante: la vista de la app ahí es la de antes)
+  if (!opts.seguir && !opts.aviso && S.route.kind === 'f') pedido.cambios.carpeta = S.route.path;
   if (opts.vocab != null) pedido.vocab = opts.vocab;
   G = { pedido, plan: null, tocado: opts.seguir && G ? G.tocado : {}, recientes: [], seq: 0, abierto: null,
     pendiente: null, timer: null, devs: null, sugIdx: -1 };
@@ -152,7 +153,7 @@ function grPintar() {
   tag.className = 'gr-tag' + (p.nombre.archivo != null ? ' archivo'
     : p.nombre.origen === 'teams' || p.nombre.origen === 'outlook' ? ' de-reunion' : '');
   const sel = $('#grProy', d);
-  sel.innerHTML = `<option value="">Sin proyecto</option>${(S.vocab || []).map(v => `<option value="${esc(v.id)}">${esc(v.project)} › ${esc(v.name)}</option>`).join('')}`
+  sel.innerHTML = `<option value="">Sin proyecto</option>${grProyOpciones()}`
     + `<option value="__nuevo">Nuevo proyecto o workstream…</option>`
     + `<option value="${GR_CONECTAR}">Usar las listas de una carpeta…</option>`;
   sel.value = p.proyecto.vocab || '';
@@ -170,6 +171,28 @@ function grPintar() {
       + ` <a href="#" data-gr-sin-asist>Quitar</a>`;
   }
   grPintarFilas();
+}
+
+/* las opciones de Proyecto: un grupo por proyecto con el nombre de cada lista (16/11/2026). Con
+   «Proyecto › lista» en cada opción, las doce listas de un proyecto empezaban igual: la lista abierta era el nombre del
+   proyecto doce veces y teclear la inicial («E» de ERP) no llevaba a ninguna. Si dos proyectos tienen una lista que se
+   llama igual («General»), lleva su proyecto: cerrado, el <select> solo enseña la opción (debajo, la línea de
+   Vocabulario dice siempre las dos cosas) */
+function grProyOpciones() {
+  const grupos = new Map(), veces = {};
+  (S.vocab || []).forEach(v => {
+    veces[fold(v.name)] = (veces[fold(v.name)] || 0) + 1;
+    if (!grupos.has(v.project)) grupos.set(v.project, []);
+    grupos.get(v.project).push(v);
+  });
+  return [...grupos].map(([p, vs]) => `<optgroup label="${esc(p)}">${vs.map(v =>
+    `<option value="${esc(v.id)}">${esc(v.name)}${veces[fold(v.name)] > 1 ? ` · ${esc(p)}` : ''}</option>`).join('')}</optgroup>`).join('');
+}
+/* «Elegir otro proyecto»: el desplegable de Proyecto, abierto (showPicker; donde no lo hay, solo el foco) */
+function grAbrirProyecto() {
+  const sel = $('#grProy', G.d);
+  sel.focus();
+  try { sel.showPicker(); } catch { /* sin showPicker o sin gesto: queda el foco */ }
 }
 
 /* los asistentes, como los une el servidor (plan.unir_participantes / calendario.join_participants): con «; » si algún
@@ -385,7 +408,7 @@ function grClick(e) {
   if (ir) {
     const v = (S.vocab || []).find(x => x.id === G.plan?.proyecto?.vocab);
     const volver = () => grVolver({ vocab: S.vocabJustSaved || undefined });
-    if (ir.dataset.grIr === 'proyecto') { grCerrarPanel(); $('#grProy', G.d).focus(); }
+    if (ir.dataset.grIr === 'proyecto') { grCerrarPanel(); grAbrirProyecto(); }
     else if (ir.dataset.grIr === 'editar' && v) openVocabEditor(v, volver);
     else if (ir.dataset.grIr === 'nuevo') openVocabEditor(null, volver, v?.project || '');
     else if (ir.dataset.grIr === 'conectar') vocabConectar(volver);

@@ -451,7 +451,8 @@ async function pollRec() {
   const was = !!S.rec.recording;
   let ok = true;
   try {
-    S.rec = await api('/api/rec/status' + (recDialog ? '?monitor=1' : ''), undefined, LATIDO_MS);
+    // ui=1: la interfaz está abierta (el aviso flotante y los scripts también preguntan aquí; ver rec_elegir)
+    S.rec = await api('/api/rec/status?ui=1' + (recDialog ? '&monitor=1' : ''), undefined, LATIDO_MS);
     S.latido.fallos = 0;
   } catch (err) {
     ok = false;  // reiniciándose, colgado o caído: tras LATIDO_FALLOS seguidos se dice
@@ -469,6 +470,7 @@ async function pollRec() {
   renderRecBtn(); updateMeters(); renderMeetChip();
   renderDirectoAvisos();  // fuente callada y «paro en 30 s» (directo.js)
   renderSiguiente();  // «Ya ha empezado «X»» al parar (hoy.js)
+  tarjetaPedida();  // «Cambiar» del aviso flotante
   recTimer = setTimeout(pollRec, !ok ? 1500 : S.rec.recording || recDialog ? 300 : 1500);
 }
 /* empezo o paro la grabacion (tambien con Ctrl+Alt+R desde otro programa) */
@@ -481,7 +483,7 @@ function onRecChange() {
   }
   if (!S.rec.recording && S.rec.cortada) return;  // se ha cortado sola: no es «Grabación guardada» (avisarCortes)
   if (S.recLocal) { S.recLocal = false; return; }  // lo ha pedido esta misma pagina: ya avisa ella
-  if (S.rec.recording) toast(`● Grabando${S.rec.resumen ? ` · ${esc(S.rec.resumen)}` : ''} · <b>Ctrl+Alt+R</b> para parar · clic para verla y cambiar el idioma o el contexto`, '', () => go('a', S.rec.path));
+  if (S.rec.recording) toast(`● Grabando${S.rec.resumen ? ` · ${esc(S.rec.resumen)}` : ''} · <b>Ctrl+Alt+R</b> para parar · clic para verla y cambiar el proyecto, el idioma o el contexto`, '', () => go('a', S.rec.path));
   else toast(directoParadaTexto(S.rec) || '■ Grabación guardada · la transcripción termina sola');
 }
 
@@ -608,6 +610,20 @@ function openRec() {
   return abrirGrabar();
 }
 $('#btnRec').onclick = openRec;
+/* «Cambiar» del aviso flotante de Teams (16/11/2026): el servidor trae la ventana y pide la tarjeta de grabar
+   (`tarjeta` en /api/rec/status, un número por petición, durante 30 s). Se abre una sola vez, con la reunión de ahora,
+   para elegir el proyecto › lista antes de empezar. Con otro diálogo abierto no se pisa: se dice */
+function tarjetaPedida() {
+  const t = S.rec.tarjeta;
+  if (!t || S.rec.recording || t === S.tarjetaVista || !S.config) return;  // sin config aún: en el siguiente sondeo
+  S.tarjetaVista = t;
+  api('/api/rec/elegir', { vista: t }).catch(() => { });  // atendida: otra página (o esta al recargar) no la repite
+  if (!$('#modal').classList.contains('hidden')) {
+    if ($('#modal .dialog.gr')) return;  // ya está abierta
+    return toast('Cierra este diálogo y pulsa <b>● Grabar</b> para elegir el proyecto de la reunión');
+  }
+  abrirGrabar({ aviso: true });  // sin la carpeta de la vista: la app estaba donde la dejaste, no en esta reunión
+}
 /* «Subir audio» (09/11/2026): junto a Grabar, donde se busca cómo meter una reunión en la app. Abre el selector
    de archivos y, con lo elegido, la tarjeta de subir (grabar.js); desde una carpeta, sube ahí */
 $('#btnSubir').onclick = () => {
