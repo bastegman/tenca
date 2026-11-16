@@ -648,6 +648,41 @@ class Revision2ConservarTests(Base):
         self.assertTrue(a and a["sin_audio"])
 
 
+class Revision3ConservarTests(Base):
+    """Revisión 3 de motor-lote2b, punto 17 (R1)."""
+
+    _directo = Revision2ConservarTests._directo
+
+    def test_el_hueco_se_apunta_al_saltarse_el_trozo(self):
+        """R1: el trozo saltado se apunta en ese momento (live.run llama a opts["hueco"]), no al salir del directo."""
+        import test_directo_auditoria as da
+        visto = []
+        r = da.run_session([(0.0, 3.4), (4.0, 7.6), (8.2, 13.0)], 13.0, fail_on=(1,),
+                           opts_extra={"hueco": lambda: visto.append(True)})
+        self.assertIn("HTTP 500", r.job.live_error)
+        self.assertEqual(visto, [True])  # una vez, y dentro de live.run (run_session no lo llama)
+        r = da.run_session([(0.0, 3.4), (4.0, 7.6), (8.2, 13.0)], 13.0, opts_extra={"hueco": lambda: visto.append(1)})
+        self.assertEqual(visto, [True])  # sin trozos saltados, nada
+
+    def test_si_la_app_muere_a_mitad_del_directo_el_hueco_ya_esta_apuntado(self):
+        """R1: la app se cierra o se cae con el directo en marcha (no pasa por sus except): el hueco ya está en
+        texto_con_huecos.json y el audio no va a la papelera."""
+        rel, p = self.reunion(pol="borrar")
+
+        class Muere(BaseException):
+            pass
+
+        def salta_y_muere(job, path, opts, write, log):
+            job.live_error = "HTTP 500"
+            opts["hueco"]()
+            raise Muere()
+        with self.assertRaises(Muere):
+            self._directo(rel, p, salta_y_muere)
+        self.assertIn(rel, conservar.Huecos(conservar.huecos().path))  # releído del disco (al volver a abrir)
+        self.assertEqual(self.a.audio_repaso(), 0)
+        self.assertTrue(os.path.isfile(p))
+
+
 class GrabarTests(Base):
     def test_la_tarjeta_y_rec_start(self):
         p = grabar_plan.resolver({}, [], pedido={"cambios": {"conservar": "borrar"}})
@@ -1126,6 +1161,24 @@ class Revision2VocesTests(VocesDirectoTests):
         with mock.patch.object(voices, "_sherpa"), mock.patch.object(voices, "models_ready", return_value=True):
             r = voices.diarize(np.zeros(0, np.int16), self.data_dir, consolidar=False, rejilla=True)
         self.assertEqual(r["tramos"], [])
+
+
+class Revision3VocesTests(VocesDirectoTests):
+    """Revisión 3 de motor-lote2b, punto 56 (R2)."""
+
+    def test_quien_hablo_poco_antes_del_corte_conserva_su_nombre(self):
+        """R2: alguien que llegó al final de la primera media hora (20 s de voz) y al que le pusiste nombre lo
+        conserva aunque luego hable diez minutos; los 4 s de otro sobre los 30 min de Ana siguen sin dar nombre."""
+        old = {"hablantes": {"h1": {"persona": "p-ana", "origen": "manual"},
+                             "h2": {"persona": "p-pepe", "origen": "manual"}},
+               "tramos": [{"inicio": 0, "fin": 1780, "h": "h1"}, {"inicio": 1780, "fin": 1800, "h": "h2"}],
+               "parcial": {"hasta": 1800}}
+        nuevo = {"hablantes": {"h1": {"segundos": 1780}, "h3": {"segundos": 620}},
+                 "tramos": [{"inicio": 0, "fin": 1780, "h": "h1"}, {"inicio": 1780, "fin": 1800, "h": "h3"},
+                            {"inicio": 1800, "fin": 2400, "h": "h3"}]}
+        voices.carry_manual(old, nuevo, known={"p-ana": "Ana", "p-pepe": "Pepe"}, hasta=1800)
+        self.assertEqual(nuevo["hablantes"]["h1"].get("persona"), "p-ana")
+        self.assertEqual(nuevo["hablantes"]["h3"].get("persona"), "p-pepe")
 
 
 def engines_error(msg):

@@ -951,6 +951,9 @@ def run(job, path, opts, write, log):
                         # siguiente vuelta entra en pausa. Tambien un fallo inesperado (una respuesta rara del proxy)
                         err = str(e) if isinstance(e, engines.EngineError) else f"{e.__class__.__name__}: {e}"
                         new, job.live_error = [], err
+                        hueco = opts.get("hueco")  # apuntado ya, no al terminar: si el proceso muere, queda dicho
+                        if hueco:  # (una escritura por reunion: si ya estaba apuntado, no se reescribe)
+                            hueco()
                         if err != st.get("last_error"):
                             st["last_error"] = err
                             log(f"   trozo sin transcribir ({err}); se sigue con el siguiente")

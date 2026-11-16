@@ -611,7 +611,10 @@ class Jobs:
                 "tmp_dir": os.path.join(DATA_DIR, "tmp"), "resume": resume, "summarizer": self.summarizer,
                 # idiomas propuestos que ya rechazaste en esta grabación (B6): no se vuelven a proponer, tampoco si el
                 # directo se para y se reanuda
-                "rechazos": self.__dict__.setdefault("rechazos_idioma", {}).setdefault(job.path, set())}
+                "rechazos": self.__dict__.setdefault("rechazos_idioma", {}).setdefault(job.path, set()),
+                # un trozo de la nube saltado se apunta en ese momento (punto 17): si la app se cierra o se cae a mitad
+                # del directo, al volver se sabe que el texto tiene huecos (revisión 3 de motor-lote2b, R1)
+                "hueco": lambda: self._huecos_del_directo(job)}
         job.opts = opts  # live.run los lee en cada trozo: si cambias tema, idioma o contexto, vale desde el siguiente
         job.out = LiveOutputs(abs_path)
         if resume:  # lo que ya estaba escrito no se reescribe: lo nuevo se anade detras

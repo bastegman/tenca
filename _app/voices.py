@@ -1443,15 +1443,18 @@ def carry_manual(old, new, usuario=None, known=None, hasta=None):
         mine = mask(new["tramos"], h)
         if corte is not None:
             mine[corte:] = False
-            # con lo de antes del corte: al menos HEREDAR_MIN_S de voz ahí (unos segundos no bastan para dar un nombre
-            # a quien habla 20 min después), y nunca encima de una huella que lo reconoce como otra persona
-            # (revisión 2 de motor-lote2b, P2)
-            if int(mine.sum()) * step < HEREDAR_MIN_S:
-                continue
         total = int(mine.sum())
         if not total:
             continue
         best, cover = max(((k, int((mine & m).sum())) for k, m in old_masks.items()), key=lambda x: x[1])
+        if corte is not None:
+            # con lo de antes del corte: al menos HEREDAR_MIN_S de voz en común con el antiguo (unos segundos no dan el
+            # nombre de Ana a quien habla 20 min después: revisión 2, P2) o, si el antiguo habló menos, la mitad de
+            # la suya (quien llegó al final de la primera media hora conserva su nombre: revisión 3, R2); y nunca
+            # encima de una huella que lo reconoce como otra persona
+            suya = int(old_masks[best][:corte].sum())
+            if cover * step < min(HEREDAR_MIN_S, 0.5 * suya * step):
+                continue
         if cover / total >= 0.5:
             pid = olds[best].get("persona")
             if pid and known is not None and pid not in known:

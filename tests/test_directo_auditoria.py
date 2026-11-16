@@ -109,7 +109,7 @@ class OddCloud(FakeCloud):
 
 
 def run_session(spans, total, latency=0.8, remaining=None, translate=False, fail_on=(), cfg=None, cfg_fn=None,
-                cloud_cls=FakeCloud, summ=None, pre=0.6):
+                cloud_cls=FakeCloud, summ=None, pre=0.6, opts_extra=None):
     """Una sesion de live.run con el reloj falso de test_directo (la grabacion crece mientras el directo duerme).
     pre: segundos ya grabados cuando arranca el directo (con mas de 300 s, empieza poniendose al dia)."""
     tmp = tempfile.mkdtemp(prefix="notas-aud-run-")
@@ -125,6 +125,7 @@ def run_session(spans, total, latency=0.8, remaining=None, translate=False, fail
                 "resume": [], "summarizer": summ}
         if cfg_fn is not None:
             opts["cloud_cfg_fn"] = lambda: cfg_fn(rec)
+        opts.update(opts_extra or {})
         logs = []
         fake_time = types.SimpleNamespace(time=rec.time, sleep=rec.sleep)
         with mock.patch.object(live, "time", fake_time), mock.patch.object(live, "speech", energy_vad):
