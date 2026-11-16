@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Directo en la nube: chunker (pausas, voz continua, silencio, fusion), cupo y ritmo por clave (KeyPool),
-rotacion de claves, cabeceras de Groq, dedupe del solape, latencia, traduccion y una sesion entera de live.run con
+rotacion de claves, cabeceras de cupo, dedupe del solape, latencia, traduccion y una sesion entera de live.run con
 un reloj falso y una grabacion que crece. Todo con dobles: sin red, sin faster-whisper (la VAD es por energia)."""
 import json
 import os
@@ -127,11 +127,12 @@ class LatencyTests(unittest.TestCase):
         self.assertEqual(live.fmt_wait(11520), "3 h 12 min")
         self.assertEqual(live.fmt_wait(1500), "25 min")
         self.assertEqual(live.fmt_wait(40), "40 s")
-        msg = live.pause_message({"remaining": 42, "reset_in": 3600, "blocked_for": 0})
-        self.assertIn("quedan 42 peticiones de Groq hoy", msg)
+        msg = live.pause_message({"remaining": 42, "reset_in": 3600, "blocked_for": 0}, "OpenAI")
+        self.assertIn("quedan 42 peticiones de OpenAI hoy", msg)  # el proveedor elegido, nunca uno fijo
         self.assertIn("1 h 00 min", msg)
         self.assertIn("repaso final", msg)
-        self.assertIn("Groq pide esperar 2 min", live.pause_message({"blocked_for": 120}))
+        self.assertIn("OpenAI pide esperar 2 min", live.pause_message({"blocked_for": 120}, "OpenAI"))
+        self.assertIn("sin cupo en tu API.", live.pause_message({}, "tu API"))
 
 
 # ----------------------------------------------------------------------------- cupo y claves
@@ -152,7 +153,7 @@ def pool(log=None, t=1000.0):
 
 CFG2 = {"provider": "groq", "api_key": "gsk_primera_0000000000", "extra_keys": ["gsk_segunda_1111111111"]}
 K1, K2 = CFG2["api_key"], CFG2["extra_keys"][0]
-TURBO = "whisper-large-v3-turbo"  # el modelo de Groq que usa una cfg sin "model" (y el del directo): su cupo es suyo
+TURBO = "whisper-large-v3-turbo"  # el modelo por defecto de una cfg sin "model" (y el del directo): su cupo es suyo
 
 
 class DurationTests(unittest.TestCase):
@@ -354,7 +355,7 @@ class CloudPostTests(unittest.TestCase):
         self.assertIsNone(engines.CloudEngine.live_model({"provider": "openai",
                                                           "live_model": "whisper-large-v3-turbo"}))
         self.assertIsNone(engines.CloudEngine.live_model({"provider": "custom"}))
-        # «Otra (compatible)»: su propio campo; el live_model de Groq (que se guarda con turbo por defecto) no cuenta
+        # «Otra (compatible)»: su propio campo; el live_model del de por defecto (con turbo por defecto) no cuenta
         self.assertIsNone(engines.CloudEngine.live_model({"provider": "custom", "live_model": "x"}))
         self.assertEqual(engines.CloudEngine.live_model({"provider": "custom", "live_model_custom": " x "}), "x")
 

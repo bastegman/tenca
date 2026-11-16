@@ -671,8 +671,8 @@ class SinCarpetaPorReunionTests(unittest.TestCase):
 
 @unittest.skipUnless(av, "PyAV no instalado")
 class SubirYTranscribirTests(unittest.TestCase):
-    """De punta a punta con la cola de verdad: cada formato subido se decodifica (PyAV), se pasa a FLAC y va a un Groq
-    falso en 127.0.0.1 (nunca una clave real), y su .txt queda junto al audio. En ui-smoke.yml corre también en
+    """De punta a punta con la cola de verdad: cada formato subido se decodifica (PyAV), se pasa a FLAC y va a una API
+    falsa en 127.0.0.1 (nunca una clave real), y su .txt queda junto al audio. En ui-smoke.yml corre también en
     Windows: es la prueba de que allí se leen los formatos del móvil."""
 
     def test_cada_formato_subido_acaba_transcrito(self):

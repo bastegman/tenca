@@ -280,7 +280,7 @@ DEFAULT_SETTINGS = {
     "cloud": {"provider": "groq", "api_key": "", "model": "whisper-large-v3", "base_url": "",
               "azure_endpoint": "", "azure_deployment": "", "azure_api_version": "2024-06-01",
               "chunk_minutes": 10, "parallel": 3,
-              # directo en la nube: modelo rapido por trozo y claves de otras cuentas de Groq (rotacion de cupo)
+              # directo en la nube: modelo rapido por trozo y claves de otras cuentas del proveedor (rotacion de cupo)
               "live_model": engines.LIVE_MODEL_DEFAULT, "extra_keys": [],
               # «Otra (compatible)»: modelo del directo propio ("" = el de la cola) y sus claves adicionales; las
               # claves adicionales de cada proveedor solo se usan con el (engines.EXTRA_KEYS_FIELDS)
@@ -301,7 +301,7 @@ NUBE_OFF = ("La transcripción en la nube está desactivada: en Ajustes → «D�
 # DEFAULT_SETTINGS se compara con su tipo y, si tiene una lista cerrada o un rango, con ellos; si no cuadra, el valor
 # por defecto y una linea en el log. En las listas y los mapas solo se quitan los elementos que no valen. Lo que no
 # esta en DEFAULT_SETTINGS (marcas de migracion, lo que guarda la app aparte) no se toca, y el proveedor de la nube
-# solo se mira por su tipo: su valor lo arregla reparar_proveedor (fix-groq), que dice en el log a que pasa.
+# solo se mira por su tipo: su valor lo arregla reparar_proveedor, que dice en el log a que pasa.
 _MAL = object()  # «no vale»: vuelve el de por defecto
 
 
@@ -459,7 +459,7 @@ def procesado_de(st):
 def proveedor_elegido(st):
     """Si ya hay un proveedor de la nube elegido: «API externa» elegida, o una clave, una direccion propia o una de
     Azure guardadas. En una instalacion nueva no lo hay, y la interfaz no da ninguno por elegido: a quien instala
-    por primera vez no se le sugiere un servicio concreto. cloud.provider sigue siendo "groq" por defecto en los
+    por primera vez no se le sugiere un servicio concreto. cloud.provider sigue teniendo un valor por defecto en los
     ajustes, para no cambiar nada a quien ya lo usa sin haberlo guardado nunca."""
     c = st.get("cloud") or {}
     # un proveedor que no es el de por defecto solo puede venir de una eleccion (aunque aun no tenga clave)
@@ -469,24 +469,25 @@ def proveedor_elegido(st):
 
 
 def reparar_proveedor(d):
-    """Al arrancar (fix-groq, 10/11/2026): unos ajustes con un proveedor de la nube que no existe (vacio o de una
-    version anterior) pasan a Groq, que es lo que hacia el motor hasta fe29522 y otra vez desde fix-groq; asi Ajustes
-    lo ensena elegido y «Guardar» no lo cambia. Con 0d5169b, en ese caso el desplegable no marcaba ninguno, el navegador
-    marcaba el primero (Azure OpenAI) y un «Guardar» lo dejaba en Azure sin endpoint: si quedo asi (Azure sin endpoint
-    ni deployment, y una clave de Groq, «gsk_…»), vuelve a Groq. Una instalacion nueva no cambia (ya lleva "groq" y
-    nada elegido). Devuelve lo que se ha cambiado (una frase para el log) o None."""
+    """Al arrancar (10/11/2026): unos ajustes con un proveedor de la nube que no existe (vacio o de una version
+    anterior) pasan al proveedor por defecto, que es lo que hacia el motor hasta fe29522 y otra vez desde el 10/11; asi
+    Ajustes lo ensena elegido y «Guardar» no lo cambia. Con 0d5169b, en ese caso el desplegable no marcaba ninguno, el
+    navegador marcaba el primero (Azure OpenAI) y un «Guardar» lo dejaba en Azure sin endpoint: si quedo asi (Azure sin
+    endpoint ni deployment, y una clave «gsk_…»), vuelve al de por defecto. Una instalacion nueva no cambia (ya lleva
+    el de por defecto y nada elegido). Devuelve lo que se ha cambiado (una frase para el log) o None."""
     c = d.get("cloud")
     if not isinstance(c, dict):
         return None
     p = c.get("provider")
     if p not in engines.PROVIDERS:
         c["provider"] = "groq"
-        return f"«{p if isinstance(p, str) else type(p).__name__}» no es ninguno de los que hay: pasa a Groq"
+        return (f"«{p if isinstance(p, str) else type(p).__name__}» no es ninguno de los que hay: pasa a "
+                f"{engines.provider_name(c)}")
     clave = c.get("api_key") if isinstance(c.get("api_key"), str) else ""
     if (p == "azure" and not str(c.get("azure_endpoint") or "").strip()
             and not str(c.get("azure_deployment") or "").strip() and clave.strip().startswith("gsk_")):
         c["provider"] = "groq"
-        return "Azure OpenAI sin endpoint ni deployment y con una clave de Groq: pasa a Groq"
+        return f"Azure OpenAI sin endpoint ni deployment y con una clave «gsk_…»: pasa a {engines.provider_name(c)}"
     return None
 
 

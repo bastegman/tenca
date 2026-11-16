@@ -562,7 +562,7 @@ class InterfazProcesadoTests(unittest.TestCase):
                       app)
         self.assertIn("Elegir dónde se procesa (Ajustes)", notas)
         self.assertIn("S.config.procesado === 'api' ? S.config.cloud?.has_key : true", notas)
-        # el permiso es por destino; sin config, el de por defecto (sin-groq: nada da la API por hecha)
+        # el permiso es por destino; sin config, el de por defecto (nada da la API por hecha)
         self.assertIn("'sumOk:' + (S.config?.procesado || 'local')", notas)
         self.assertIn("Elige dónde se procesan tus reuniones", notas)
         self.assertIn("|| S.config.procesado !== 'api') return '';", app)  # el aviso heredado habla de la API

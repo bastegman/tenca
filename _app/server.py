@@ -358,7 +358,7 @@ class App(Grabar, Reuniones, Listas, Carpetas, Hoy, Textos, Directo, Ajustes, Vo
                 raise
 
     def _reparar_proveedor(self):
-        """Al arrancar: reparar_proveedor (fix-groq). Se mira sobre una copia y solo se escribe si hay algo que
+        """Al arrancar: reparar_proveedor. Se mira sobre una copia y solo se escribe si hay algo que
         reparar. Devuelve la frase del log o None."""
         if not reparar_proveedor(self.settings.get()):
             return None
@@ -526,18 +526,18 @@ def main():
         pass
     # antes de cualquier ventana (la propia, el selector de carpetas o un aviso): la barra de tareas agrupa por este id
     log(f"AppUserModelID {APP_ID}: {'fijado' if set_app_id() else 'no disponible'}")
-    # los modelos de Whisper los descarga el servidor (con truststore y los proxies, como Groq), con progreso real;
+    # los modelos de Whisper los descarga el servidor (con truststore y los proxies, como la nube), con progreso real;
     # antes de App(): la precarga y /api/config ya miran ahi (engines.WhisperModels)
     engines.AgenteLocal.log = log  # tiempos y avisos de Claude Code (p. ej. un hijo que deja su salida abierta)
     engines.MODELS = engines.WhisperModels(os.path.join(DATA_DIR, "models", "whisper"), log=log,
                                            url=os.environ.get("CHULETA_PRUEBAS_URL_MODELOS") or engines.WHISPER_URL)
     if os.environ.get("CHULETA_PRUEBAS_URL_MODELOS"):
         log("PRUEBAS: los modelos de Whisper se descargan de una URL de pruebas (CHULETA_PRUEBAS_URL_MODELOS)")
-    if os.environ.get("CHULETA_PRUEBAS_URL_GROQ"):  # E2E: un Groq falso en local; nunca una clave real en la CI
+    if os.environ.get("CHULETA_PRUEBAS_URL_GROQ"):  # E2E: un proveedor falso en local; nunca una clave real en la CI
         base = os.environ["CHULETA_PRUEBAS_URL_GROQ"].rstrip("/")
         engines.PROVIDERS["groq"] = dict(engines.PROVIDERS["groq"], url=base + "/audio/transcriptions")
         engines.CHAT_URLS["groq"] = base + "/chat/completions"
-        log("PRUEBAS: Groq va a una URL de pruebas (CHULETA_PRUEBAS_URL_GROQ)")
+        log("PRUEBAS: el proveedor de fábrica va a una URL de pruebas (CHULETA_PRUEBAS_URL_GROQ)")
     try:
         Handler.app = App()
     except Exception as e:

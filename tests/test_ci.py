@@ -498,7 +498,7 @@ class WorkflowsWindowsTests(unittest.TestCase):
                               ("reunion-windows.yml", ("_app/**", "tests/**", "requirements.txt")),
                               # fix-windows: la suite en Windows con el formato regional español y la ventana real
                               ("windows-real.yml", ("_app/**", "tests/**", "requirements.txt")),
-                              # los tres modos de punta a punta (Whisper de verdad, Groq y Claude Code falsos)
+                              # los tres modos de punta a punta (Whisper de verdad, la API y Claude Code falsos)
                               ("e2e-procesado.yml", ("_app/**", "tests/**", "requirements.txt"))):
             with self.subTest(nombre):
                 on = workflow(nombre)["on"]
