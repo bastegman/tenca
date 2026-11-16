@@ -36,6 +36,49 @@ Rama `motor-lote2b` (puntos 17, 28 y 56 de la revisión del 14/11/2026).
   minutos de grabación se identifican las voces de ese bloque, en segundo plano y en reposo, con un solo hilo. La página
   del directo enseña quién habla en lo ya identificado («hasta el min 30»). Al terminar solo queda el último bloque, así
   que «Quién habla» llega antes. Se corta solo si la grabación termina o el directo pasa a este PC.
+### La grabación, en dos pistas: tu micro y el audio del PC por separado (15/11/2026)
+
+Punto 20 de la revisión del 14/11/2026. Rama `dos-pistas`. Sin cambiar el directo ni el rendimiento de la grabadora.
+
+- **El WAV de la grabadora tiene el mismo formato y tamaño, pero cada canal lleva una cosa:** el izquierdo, tu micro;
+  el derecho, lo que suena en el PC (los demás, en mono). Cada uno con su nivelador, como antes. La marca va en la
+  cabecera (un comentario que también se ve en las propiedades del archivo). Su suma es la mezcla de siempre: el directo, la cola,
+  la nube y el repaso final leen exactamente lo mismo que antes. Los audios subidos y las grabaciones de antes, igual.
+- **«Tú», de tu micro.** La grabadora apunta cada cuarto de segundo si el micro lleva tu voz y no el eco de los
+  altavoces (con la puerta de eco que ya medía), alineado con el archivo. «Quién habla» separa por un lado a los demás
+  (con lo que suena en el PC) y por otro lo que recoge tu micro: en una reunión simulada de 6 voces, «Tú» encuentra el
+  92 % de tu voz (antes, 53-68 %) y los demás se confunden menos (error 0,19 frente a 0,24-0,32); con ruido en el
+  micro o tu voz que vuelve por la llamada, también. Quien está a tu lado en la sala sale aparte. En una reunión
+  presencial (el PC callado), como antes.
+- **El reproductor mezcla las dos pistas** y, con el botón «Pistas», deja subir o bajar «Tú» y «Los demás» y quitar el
+  eco de los altavoces de tu micro (quitado por defecto si la grabadora lo vio; con cascos no hay eco que quitar): las
+  voces de los demás ya no se oyen dos veces. No cambia el archivo. **«Exportar audio mezclado»** guarda en el
+  Escritorio un WAV normal con lo que oyes, para abrirlo con otro programa (abierto fuera de Tenca, el de dos pistas
+  suena con tu voz en un oído y los demás en el otro).
+
+### Ajustes a prueba de valores raros, el PC despierto, informe técnico por reunión y «Buscar versión nueva» (15/11/2026)
+
+Puntos 5, 30, 32, 33 y 60 de la revisión del 14/11/2026. Rama `motor-lote2a`.
+
+- **Un valor raro en `settings.json` ya no deja la app sin arrancar** ni «cargando». Al arrancar, cada ajuste se
+  compara con su tipo y con lo que vale (lista cerrada o rango); si no cuadra, vuelve al valor por defecto y queda
+  una línea en el registro, con la clave y sin el valor. De una lista o un mapa solo se quita lo que no vale. Medido
+  con un fuzz de 583 casos (cada ajuste con un tipo equivocado): antes, 21 sin arrancar y 58 con algo roto; ahora, 0.
+  «Copiar diagnóstico» dice qué ajustes se corrigieron.
+- **El PC no se suspende solo mientras graba o transcribe.** Mientras hay una grabación o trabajos en cola o en
+  marcha, la app pide a Windows que no se suspenda por inactividad, y lo suelta al acabar. No enciende la pantalla
+  ni impide suspenderlo a mano (tapa o botón). El diagnóstico dice si está pedido y por qué.
+- **Informe técnico de cada reunión, solo números.** Junto al audio, `<reunión>.informe.json` (va con ella al moverla o
+  borrarla): grabación (segundos, audio perdido, eco), directo (motor y modelo de cada tramo, trozos fallidos y
+  segundos perdidos, latencia p50/p95, espera por cupo, caídas a este PC, cupo y memoria pico) y transcripción o
+  repaso (motor, modelo, tiempos). Sin texto de la reunión, ni su nombre, ni rutas, ni nombres de dispositivos.
+  «Copiar diagnóstico» lleva los de las 3 últimas.
+- **Los errores de los hilos quedan en el registro.** Lo que se escape de un hilo o del programa va a `server.log`
+  (con el acceso directo no había dónde verlo), un fallo grave de Python deja su volcado en `fallos-graves.log` y, si
+  se para una parte que vigila (las colas de trabajos, el directo automático, el aviso de llamada…), la interfaz lo
+  avisa con un aviso que se queda.
+- **Ajustes › Ayuda › Acerca de › «Buscar versión nueva».** Una consulta a GitHub al pulsarlo, nunca sola: dice si hay
+  una versión publicada más nueva que la tuya, con el enlace a su página.
 
 ### Las huellas de voz se rehacen solas al actualizar, y lo que faltaba enganchar al servidor (15/11/2026)
 

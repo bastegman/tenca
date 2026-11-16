@@ -34,6 +34,7 @@ import uuid
 
 import numpy as np
 
+import pistas
 from common import log, protect, read_text, unprotect, write_bytes
 
 # Modelo de huellas desde el 15/11/2026 (review del 14/11, punto 36): CAM++ zh_en de 3D-Speaker (Apache 2.0). Medido
@@ -223,18 +224,24 @@ def ensure_models(data_dir, progress=None, cancelled=None):
 
 # ----------------------------------------------------------------------------- audio
 
-def load_audio_16k(path, cancelled=None, en_disco=None):
+def load_audio_16k(path, cancelled=None, en_disco=None, canal=None):
     """int16 16 kHz mono. Con PyAV (engines.decode_16k) cualquier formato; sin el, solo WAV PCM 16 bit (desarrollo).
     en_disco: un archivo nuevo donde dejar el audio decodificado; se devuelve leído de ahí con np.memmap (solo lectura),
     así que no ocupa memoria del proceso por mucho que dure: el sistema trae del disco lo que se va leyendo y lo puede
-    soltar cuando quiera (en Windows no cuenta como memoria comprometida, la que se acaba en un «bad allocation»)."""
+    soltar cuando quiera (en Windows no cuenta como memoria comprometida, la que se acaba en un «bad allocation»).
+    Un WAV de la grabadora en dos pistas (pistas.es_doble): la suma (la mezcla de siempre), o con `canal` 0 el micro,
+    1 lo que suena y "ambos" los dos, (n, 2). En cualquier otro audio `canal` no cambia nada."""
+    doble = pistas.es_doble(path)
+    ancho = 2 if canal == "ambos" and doble else 1
     try:
         import engines
         if en_disco is None:
-            return engines.decode_16k(path, cancelled=cancelled or (lambda: False))
+            return engines.decode_16k(path, cancelled=cancelled or (lambda: False), canal=canal)
         with open(en_disco, "wb") as f:
-            n = engines.decode_16k(path, cancelled=cancelled or (lambda: False), destino=f)
-        return np.memmap(en_disco, dtype="<i2", mode="r", shape=(n,)) if n else np.zeros(0, np.int16)
+            n = engines.decode_16k(path, cancelled=cancelled or (lambda: False), destino=f, canal=canal)
+        if not n:
+            return np.zeros((0, 2) if ancho == 2 else 0, np.int16)
+        return np.memmap(en_disco, dtype="<i2", mode="r", shape=(n, 2) if ancho == 2 else (n,))
     except ImportError:
         pass
     import wave
@@ -244,10 +251,20 @@ def load_audio_16k(path, cancelled=None, en_disco=None):
     if sw != 2:
         raise VoicesError("Sin PyAV solo se leen WAV de 16 bit")
     x = np.frombuffer(raw, dtype="<i2")
-    if ch > 1:
+    if doble and ch == 2:
+        x2 = x.reshape(-1, 2)
+        if canal == "ambos":
+            return np.ascontiguousarray(np.stack([_a_16k(x2[:, 0], sr), _a_16k(x2[:, 1], sr)], axis=1))
+        x = pistas.a_mono_i16(x2) if canal is None else x2[:, int(canal)]
+    elif ch > 1:
         x = x.reshape(-1, ch).mean(axis=1)
+    return _a_16k(x, sr)
+
+
+def _a_16k(x, sr):
+    """Sin PyAV (desarrollo): a 16 kHz con un filtro tosco (vale para diarizar), int16."""
     if sr != SR:
-        if sr % SR == 0:  # 48 kHz → 16 kHz: media de cada 3 muestras (filtro tosco, vale para diarizar)
+        if sr % SR == 0:  # 48 kHz → 16 kHz: media de cada 3 muestras
             k = sr // SR
             x = x[:len(x) // k * k].reshape(-1, k).mean(axis=1)
         else:
@@ -338,23 +355,24 @@ def fingerprint(ex, samples16, tramos, max_s=HUELLA_MAX_S):
     return embed(ex, _f32(np.concatenate(parts))), sum(b - a for a, b in tramos)
 
 
-def audio_huella(path, tramos, duracion, max_s=HUELLA_MAX_S, en_disco=None):
+def audio_huella(path, tramos, duracion, max_s=HUELLA_MAX_S, en_disco=None, canal=None):
     """El audio de la huella de un hablante (tramos_huella, concatenado) sin decodificar la reunion entera: solo esos
     tramos (engines.decode_rangos_16k, que comprueba con `duracion`, la del sidecar, que los tiempos del archivo son
     los de la diarizacion). Si el formato no deja saltar (mp3, aac, amr…) o algo no cuadra, entera como antes
-    (load_audio_16k, con en_disco). Devuelve (int16, si ha sido por tramos)."""
+    (load_audio_16k, con en_disco). `canal`: el de un WAV en dos pistas (0 el micro, 1 lo que suena; None la suma).
+    Devuelve (int16, si ha sido por tramos)."""
     elegidos = tramos_huella(tramos, max_s)
     if not elegidos:
         return np.zeros(0, np.int16), True
     try:
         import engines
-        partes = engines.decode_rangos_16k(path, elegidos, duracion)
+        partes = engines.decode_rangos_16k(path, elegidos, duracion, canal=canal)
         return np.concatenate(partes), True
     except ImportError:  # sin PyAV (desarrollo): entera, por el camino de siempre
         pass
     except Exception as e:  # SinSalto u otra cosa: entera
         log(f"   huella: el audio se lee entero ({e.__class__.__name__}: {e})")
-    samples = load_audio_16k(path, en_disco=en_disco)
+    samples = load_audio_16k(path, en_disco=en_disco, canal=canal)
     try:
         return np.concatenate([np.asarray(samples[int(a * SR):int(b * SR)]) for a, b in elegidos]), False
     finally:
@@ -693,6 +711,328 @@ def bloque_guardar(carpeta, clave, grupos, t_off):
                 os.remove(e.path)
     except OSError:
         pass
+
+
+# ----------------------------------------------------------------------------- dos pistas (grabacion propia)
+
+# Desde el 15/11/2026 la grabadora guarda el micro a la izquierda y lo que suena a la derecha (pistas.py), y manda su
+# propia linea de «Tú» (recorder.PasosTu: «1» donde el micro lleva su voz y no el eco; «desfase» 0). Con las dos cosas,
+# «Quién habla» se hace por separado: los demas, en el canal de lo que suena (sin su voz ni el eco), y lo que el micro
+# recoge y no es eco, en el del micro (su voz y, en una sala, quien este a su lado). Asi «Tú» es un grupo propio con
+# los tramos de su micro, no el grupo de la mezcla que mas coincide con unos niveles con 0,875 s de desfase. Sin esas
+# dos cosas, o en una reunion presencial (lo que suena casi callado), la suma, como siempre.
+PISTA_VOZ_MIN_S = 60.0   # con menos voz en el canal de lo que suena: presencial, se diariza la suma
+PISTA_VOZ_DB = -45.0     # un paso de 0,25 s de ese canal tiene voz por encima de esto (RMS, ya nivelado a -22 dB)
+PISTA_ECO = 0.6          # un grupo del micro que suena con los demas el 60 % de su tiempo y se parece a uno: su eco
+PISTA_VUELTA = 0.6       # un grupo de los demas que coincide con tu micro el 60 % de su tiempo y se parece a ti: tu voz
+#                          que vuelve por la llamada (otro participante con altavoz)
+PISTA_HUECO_S = 0.3      # silencio entre los tramos del micro al juntarlos para diarizarlos
+# Lo que suena tambien se diariza junto (solo sus tramos con sonido, por encima de PISTA_JUNTAR_DB, con las pausas de
+# menos de PISTA_PAUSA_S dentro): el segmentador cuesta por segundo de audio, y en ese canal hay silencio cada vez que
+# hablas tu. Sin esto, «Quién habla» tardaba un 16 % mas que con la mezcla (voces-memoria en Windows, 55 min, run
+# 43761758493: 52 s frente a 45); medido en la simulacion, ademas, los demas salen algo mejor (DER 0,208 -> 0,175).
+PISTA_JUNTAR_DB = -55.0  # muy por debajo de una voz (el nivelador la deja hacia -22 dB): no se pierde a nadie flojo
+PISTA_PAUSA_S = 1.0
+PISTA_MICRO_SOBRE_DB = 6.0   # del micro se diariza lo que pasa de su ruido de fondo esto (pasos_micro)...
+PISTA_MICRO_MIN_DB = -55.0   # ...y de esto
+PISTA_SUENA_SOBRE_DB = 10.0  # el PC «suena» si pasa de su propio fondo esto...
+PISTA_SUENA_MAX_DB = -30.0   # ...pero a partir de aqui siempre
+PISTA_TU_NIVEL_DB = 6.0      # sin «Tú» por la linea (dos del micro con «1»): el que suena 6 dB mas que los otros del
+#                              micro es el que esta junto a el (elegir_tu)
+PISTA_COPIA_DB = 6.0     # ...y esos dos solo si la copia va al menos 6 dB por debajo del otro canal en esos tramos
+#                          (el original suena mas: es el mismo criterio que pistas.ganancias_eco al reproducir)
+
+
+def micro_de_grabadora(micro):
+    """¿La linea de tiempo del micro es la de la grabadora (desde el 15/11/2026), alineada con el archivo?"""
+    if not isinstance(micro, dict) or not isinstance(micro.get("activo"), str) or "1" not in micro["activo"]:
+        return False
+    try:
+        return float(micro.get("desfase", MIC_DESFASE_S)) == 0.0 and micro.get("fuente") == "grabadora"
+    except (TypeError, ValueError):
+        return False
+
+
+def niveles_db(x16, paso=pistas.PASO, trozo_s=60.0):
+    """RMS por paso en dB (respecto al fondo de escala de int16; -120 en silencio digital). Por trozos (x16 puede ser
+    un memmap de horas)."""
+    n = int(round(paso * SR))
+    k = len(x16) // n
+    out = np.full(k, -120.0)
+    step = max(1, int(trozo_s / paso))
+    for i in range(0, k, step):
+        j = min(k, i + step)
+        fr = np.asarray(x16[i * n:j * n], np.float32).reshape(j - i, n)
+        out[i:j] = 10 * np.log10(np.mean(fr * fr, axis=1) / 32768.0 ** 2 + 1e-12)
+    return out
+
+
+def actividad(x16, paso=pistas.PASO, umbral_db=PISTA_VOZ_DB, trozo_s=60.0):
+    """bool por paso: RMS por encima de umbral_db."""
+    return niveles_db(x16, paso, trozo_s) > umbral_db
+
+
+def _suelos(d, b, tope=True):
+    """El ruido de fondo de una serie de niveles por paso: el percentil 10 de cada bloque de b pasos. Con tope (el del
+    micro), sin pasar del de toda la reunión + 6 dB: quien habla un bloque entero sin pausas no se convierte en «ruido
+    de fondo». Sin tope, el de lo que suena (que ya tiene el suyo en PISTA_SUENA_MAX_DB): con el tope, un ruido por la
+    llamada que no durase toda la reunión daba el PC por sonando siempre (revisión 3)."""
+    out = np.empty(len(d))
+    total = float(np.percentile(d, 10)) if len(d) else -120.0
+    for i in range(0, len(d), b):
+        p = float(np.percentile(d[i:i + b], 10))
+        out[i:i + b] = min(p, total + 6.0) if tope else p
+    return out
+
+
+def pasos_micro(dl, dr, bits=None, bloque_s=30.0, paso=pistas.PASO):
+    """bool por paso: lo que el micro recoge que no es eco, para diarizarlo (no para decidir quién es «Tú»: eso lo hace
+    la línea de la grabadora). Con el PC callado (ni eco ni su cola: lo que ha sonado en los últimos 0,75 s no pasa de
+    PISTA_SUENA_SOBRE_DB sobre su propio fondo, ni de -45 dB), lo que pasa de su ruido de fondo PISTA_MICRO_SOBRE_DB y
+    de PISTA_MICRO_MIN_DB; con el PC sonando, solo los pasos «1» de la línea (bits), que vienen de la puerta de eco de
+    la grabadora: por nivel no se distingue el eco (con altavoces fuertes, el nivelador del micro lo deja al nivel de
+    los demás: medido, DER 0,19 -> 0,53 y 8 personas para 6). Así entra también quien está en la sala lejos del micro,
+    que la línea no marca (revisión 1, P1-1: 18 dB por debajo de tu voz, 2 % de sus pasos «1» y 65 de 72 s sin
+    hablante); también con un fondo de ruido en la llamada (revisión 2: a -44 dB, se perdía el 78 % de su voz)."""
+    k = len(dl)
+    if not k:
+        return np.zeros(0, bool)
+    b = max(1, int(bloque_s / paso))
+    out = dl > np.maximum(_suelos(dl, b) + PISTA_MICRO_SOBRE_DB, PISTA_MICRO_MIN_DB)
+    ref = dr.copy()
+    for d in (1, 2):  # lo que ha sonado en los ultimos 0,75 s (la cola del eco)
+        ref[d:] = np.maximum(ref[d:], dr[:-d])
+    # «el PC suena»: por encima de su fondo; el umbral, entre -45 dB (un PC callado) y -30 dB (por alto que salga el
+    # fondo, una voz de los demás, nivelada hacia -22 dB, siempre cuenta)
+    # el fondo de lo que suena, por bloques de 10 s (un ruido que entra a media reunion se nota pronto; un bloque todo
+    # voz da un fondo alto, pero el umbral no pasa de PISTA_SUENA_MAX_DB y la voz sigue contando)
+    umbral = np.clip(_suelos(dr, max(1, int(10.0 / paso)), tope=False) + PISTA_SUENA_SOBRE_DB, pistas.ECO_SOBRE_DB,
+                     PISTA_SUENA_MAX_DB)
+    out &= ref <= umbral
+    if bits is not None and len(bits):
+        m = min(k, len(bits))
+        out[:m] |= bits[:m]
+    return out
+
+
+def compactar(x16, tramos, hueco_s=PISTA_HUECO_S, en_disco=None):
+    """Los tramos [(a, b)] de x16, uno tras otro con hueco_s de silencio entre ellos: (int16, mapa). mapa: [(inicio en
+    lo compactado, inicio real, duracion)] en segundos. en_disco: un archivo nuevo donde dejarlo (se devuelve como
+    np.memmap, como load_audio_16k: quien presenta una reunion de 3 h habla mas de 1 h)."""
+    mapa, t, n = [], 0.0, 0
+    gap = np.zeros(int(hueco_s * SR), np.int16)
+    partes = [] if en_disco is None else None
+    f = open(en_disco, "wb") if en_disco is not None else None
+    try:
+        for a, b in tramos:
+            i, j = max(0, int(round(a * SR))), min(len(x16), int(round(b * SR)))
+            if j <= i:
+                continue
+            trozos = ([gap] if n else []) + [np.asarray(x16[i:j], np.int16)]
+            if n:
+                t += len(gap) / SR
+            mapa.append((t, i / SR, (j - i) / SR))
+            t += (j - i) / SR
+            for y in trozos:
+                n += len(y)
+                if f is not None:
+                    f.write(np.ascontiguousarray(y, "<i2").tobytes())
+                else:
+                    partes.append(y)
+    finally:
+        if f is not None:
+            f.close()
+    if en_disco is not None:
+        return (np.memmap(en_disco, dtype="<i2", mode="r", shape=(n,)) if n else np.zeros(0, np.int16)), mapa
+    return (np.concatenate(partes) if partes else np.zeros(0, np.int16)), mapa
+
+
+def descompactar(tramos, mapa):
+    """Tramos [{inicio, fin, h}] de lo compactado → tiempos reales (un tramo que cruza un hueco se parte)."""
+    out = []
+    for t in tramos:
+        a, b = float(t["inicio"]), float(t["fin"])
+        for c0, r0, d in mapa:
+            lo, hi = max(a, c0), min(b, c0 + d)
+            if hi > lo:
+                out.append({"inicio": round(r0 + lo - c0, 2), "fin": round(r0 + hi - c0, 2), "h": t["h"]})
+    return out
+
+
+def _mediana_pasos(niveles, tramos, paso=pistas.PASO):
+    """La mediana de los niveles por paso (niveles_db) dentro de los tramos [(a, b)]; -120 si no hay ninguno."""
+    idx = [i for a, b in tramos for i in range(max(0, int(a / paso)), min(len(niveles), int(math.ceil(b / paso))))]
+    return float(np.median(niveles[idx])) if idx else -120.0
+
+
+def _fraccion(tramos, bits, paso=pistas.PASO):
+    """Fraccion del tiempo de los tramos [(a, b)] con bits[i] verdadero (bits: bool por paso)."""
+    tot = on = 0
+    for a, b in tramos:
+        for i in range(max(0, int(math.floor(a / paso))), int(math.ceil(b / paso))):
+            tot += 1
+            on += bool(i < len(bits) and bits[i])
+    return on / tot if tot else 0.0
+
+
+def nivel_db(x16, tramos):
+    """RMS en dB (respecto a int16 a fondo de escala) de x16 en esos tramos [(a, b)]; -120 si no hay nada."""
+    acc = n = 0
+    for a, b in tramos:
+        i, j = max(0, int(a * SR)), min(len(x16), int(b * SR))
+        for k in range(i, j, SR * 60):
+            y = np.asarray(x16[k:min(j, k + SR * 60)], np.float64)
+            acc += float(np.sum(y * y))
+            n += len(y)
+    return 10 * math.log10(acc / n / 32768.0 ** 2 + 1e-12) if n else -120.0
+
+
+def diarize_pistas(stereo16, micro, data_dir, threads=2, progress=None, cancelled=None, participantes=None,
+                   tmp_micro=None, tmp_demas=None):
+    """«Quién habla» de un WAV en dos pistas (stereo16: (n, 2) int16 16 kHz, p. ej. un memmap; micro: la linea de la
+    grabadora). None si no vale (micro_de_grabadora, o PISTA_VOZ_MIN_S): quien llama diariza la suma. Si vale, el
+    formato de diarize con, en cada hablante, "pista": "micro" o "sistema":
+      - los demas: diarize del canal derecho, solo sus tramos con sonido, juntados (PISTA_JUNTAR_DB);
+      - el micro: diarize solo de lo que recoge y no es eco (pasos_micro), juntado (compactar);
+      - un grupo del micro que suena con los demas (PISTA_ECO), se parece a uno de ellos (>= ENLACE) y en sus tramos va
+        PISTA_COPIA_DB por debajo de lo que suena es su eco y se quita; uno de los demas que coincide con el micro
+        (PISTA_VUELTA), se parece a uno del micro y va por debajo de el es tu voz que vuelve por la llamada y se quita.
+        El nivel decide cual es el original (sin el, tu voz y su vuelta se quitaban las dos).
+    «Tú» lo decide despues elegir_tu con la linea de la grabadora, entre los grupos del micro (fuera_de_tu): tu grupo
+    coincide con ella y quien este a tu lado casi nada."""
+    progress = progress or (lambda **k: None)
+    cancelled = cancelled or (lambda: False)
+    if not micro_de_grabadora(micro) or stereo16.ndim != 2 or stereo16.shape[1] != 2:
+        return None
+    izq, der = stereo16[:, 0], stereo16[:, 1]
+    dr = niveles_db(der)
+    act_der = dr > PISTA_VOZ_DB
+    if act_der.sum() * pistas.PASO < PISTA_VOZ_MIN_S:
+        log(f"🗣 dos pistas: lo que suena tiene {act_der.sum() * pistas.PASO:.0f} s de voz: se identifica la suma "
+            "(reunion presencial)")
+        return None
+
+    def prog(a, b):
+        return lambda stage=None, frac=None: progress(stage=stage, frac=None if frac is None else a + (b - a) * frac)
+
+    total = len(stereo16) / SR
+    sonando = dr > PISTA_JUNTAR_DB
+    suyos = pistas.tramos_de_bits("".join("1" if b else "0" for b in sonando), hueco_s=PISTA_PAUSA_S, min_s=0.1,
+                                  margen_s=0.25)
+    comp_s, mapa_s = compactar(der, suyos, en_disco=tmp_demas)  # tmp_demas: lo borra quien llama
+    try:
+        rs = diarize(comp_s, data_dir, threads, prog(0.0, 0.8), cancelled, participantes=participantes)
+    finally:
+        del comp_s
+    res_s = dict(rs, tramos=descompactar(rs["tramos"], mapa_s))
+    mic_bits = np.frombuffer(micro["activo"].encode("ascii"), np.uint8) == ord("1")
+    dl = niveles_db(izq)
+    del_micro = pasos_micro(dl, dr, mic_bits)
+    mios = pistas.tramos_de_bits("".join("1" if b else "0" for b in del_micro))
+    voz_mic = sum(b - a for a, b in mios)
+    res_m = {"tramos": [], "hablantes": {}, "huellas": {}}
+    if voz_mic >= MIN_MATCH_S:
+        comp, mapa = compactar(izq, mios, en_disco=tmp_micro)  # tmp_micro: lo borra quien llama
+        try:
+            rm = diarize(comp, data_dir, threads, prog(0.8, 0.95), cancelled)
+        finally:
+            del comp  # suelta el memmap (en Windows, uno mapeado no se puede borrar)
+        res_m = dict(rm, tramos=descompactar(rm["tramos"], mapa))
+    grupos = []  # (pista, tramos [(a, b)], huella | None)
+    for pista, r in (("micro", res_m), ("sistema", res_s)):
+        by_h = {}
+        for t in r["tramos"]:
+            by_h.setdefault(t["h"], []).append((float(t["inicio"]), float(t["fin"])))
+        for h, tr in by_h.items():
+            grupos.append({"pista": pista, "tramos": _intervals(tr), "vec": _unit(r["huellas"].get(h)), "h": h})
+    del res_m, res_s
+    quitar = []
+    for g in grupos:
+        otros = [o for o in grupos if o["pista"] != g["pista"] and o["vec"] is not None]
+        parecido = max((cosine(g["vec"], o["vec"]) for o in otros), default=0.0) if g["vec"] is not None else 0.0
+        if parecido < ENLACE:
+            continue
+        if g["pista"] == "micro":
+            if _fraccion(g["tramos"], act_der) >= PISTA_ECO \
+                    and nivel_db(izq, g["tramos"]) < nivel_db(der, g["tramos"]) - PISTA_COPIA_DB:
+                quitar.append(g)
+        elif _fraccion(g["tramos"], mic_bits) >= PISTA_VUELTA \
+                and nivel_db(der, g["tramos"]) < nivel_db(izq, g["tramos"]) - PISTA_COPIA_DB:
+            quitar.append(g)
+    for g in quitar:
+        log(f"🗣 dos pistas: {sum(b - a for a, b in g['tramos']):.0f} s del canal "
+            f"{'del micro' if g['pista'] == 'micro' else 'de lo que suena'} quitados: "
+            f"{'eco de los demas' if g['pista'] == 'micro' else 'tu voz que vuelve por la llamada'}")
+    grupos = [g for g in grupos if not any(g is q for q in quitar)]
+    for g in grupos:
+        g["secs"] = sum(b - a for a, b in g["tramos"])
+    grupos.sort(key=lambda g: -g["secs"])
+    tramos, hablantes, huellas = [], {}, {}
+    for k, g in enumerate(grupos, 1):
+        h = f"h{k}"
+        tramos += [{"inicio": round(a, 2), "fin": round(b, 2), "h": h} for a, b in g["tramos"]]
+        hablantes[h] = {"persona": None, "score": None, "segundos": round(g["secs"], 1), "provisional": False,
+                        "breve": g["secs"] < BREVE_S, "pista": g["pista"]}
+        if g["pista"] == "micro":  # lo cerca que esta del micro (elegir_tu): la mediana de sus pasos, que un trozo
+            # de otra voz mas fuerte metido en su grupo no mueve (revision 2: con la media, 5,8 dB en vez de ~13)
+            hablantes[h]["nivel_db"] = round(_mediana_pasos(dl, g["tramos"]), 1)
+        if g["vec"] is not None:
+            huellas[h] = [round(float(x), 5) for x in g["vec"]]
+    tramos.sort(key=lambda t: (t["inicio"], t["fin"]))
+    progress(stage="Voces identificadas", frac=0.95)
+    return {"tramos": tramos, "hablantes": hablantes, "huellas": huellas, "duracion_s": round(total, 1),
+            "pistas": True}
+
+
+def fuera_de_tu(data):
+    """Los hablantes que no compiten por «Tú»: los breves y, en dos pistas, los del canal de lo que suena (no pueden
+    ser el usuario, y un grupo suyo que coincida con falsos «1» de la linea le quitaba «Tú» a toda la reunion: revision
+    1, P1-2 y P2-6)."""
+    hablantes = (data or {}).get("hablantes") or {}
+    out = {h for h, i in hablantes.items() if i.get("breve")}
+    if (data or {}).get("pistas"):
+        out |= {h for h, i in hablantes.items() if i.get("pista") == "sistema"}
+    return out
+
+
+def elegir_tu(data, micro, ratios=None):
+    """(«Tú», dudoso). «Tú»: el hablante que coincide >= 60 % con la linea del micro y el siguiente <= 30 % (pick_user),
+    entre los que pueden serlo (fuera_de_tu). En dos pistas, si asi no sale (dos voces del micro con «1»: la charla de
+    la oficina con cascos, o alguien a tu lado), el del micro que coincide >= 60 % y suena PISTA_TU_NIVEL_DB mas que
+    los otros del micro, pero DUDOSO: por nivel no se distingue la charla lejana de un compañero mas cerca del micro
+    que tu (revision 3: con el compañero 15 dB mas cerca, «Tú» era el; y con tu huella guardada salian dos «Tú»). Lo
+    dudoso se enseña «¿Tú?» y una huella tuya en otro grupo manda (identify). ratios: mic_ratios ya calculado."""
+    if not micro:
+        return None, False
+    hablantes = (data or {}).get("hablantes") or {}
+    fuera = fuera_de_tu(data)
+    if ratios is None:
+        ratios = mic_ratios((data or {}).get("tramos", []), micro, skip=fuera)
+    r = {h: v for h, v in ratios.items() if h not in fuera}
+    tu = pick_user(r)
+    if tu or not (data or {}).get("pistas"):
+        return tu, False
+    cands = sorted(((float(hablantes[h].get("nivel_db", -120.0)), h) for h in r
+                    if hablantes.get(h, {}).get("pista") == "micro"), reverse=True)
+    if cands and r[cands[0][1]] >= 0.6 and (len(cands) < 2 or cands[0][0] - cands[1][0] >= PISTA_TU_NIVEL_DB):
+        return cands[0][1], True
+    return None, False
+
+
+def poner_tu(data, tu, dudoso):
+    """data["tu"] y, si es dudoso, data["tu_dudoso"] (si no, se quita)."""
+    data["tu"] = tu
+    if tu and dudoso:
+        data["tu_dudoso"] = True
+    else:
+        data.pop("tu_dudoso", None)
+
+
+def canal_de(data, h):
+    """El canal de la huella de h en un WAV en dos pistas: 0 (micro), 1 (lo que suena) o None (la suma: un hablante de
+    antes o unido de los dos canales)."""
+    p = ((data or {}).get("hablantes") or {}).get(h, {}).get("pista")
+    return 0 if p == "micro" else 1 if p == "sistema" else None
 
 
 # ----------------------------------------------------------------------------- emparejado, casado y «Tu» (numpy puro)
@@ -1335,7 +1675,18 @@ def identify(data, huellas, voices, micro=None):
     breve = {h for h, i in hablantes.items() if i.get("breve")}
     ratios = mic_ratios(data.get("tramos", []), micro, skip=breve) if micro else {}
     if micro:
-        data["tu"] = pick_user(ratios)
+        tu, dudoso = elegir_tu(data, micro, ratios)
+        if dudoso:  # «Tú» solo por nivel: lo que digan las huellas manda
+            suyos = sorted((h for h, i in hablantes.items() if uid and i.get("persona") == uid
+                            and i.get("origen") == "huella" and not i.get("provisional")),
+                           key=lambda h: -float(hablantes[h].get("segundos") or 0))
+            otro = (hablantes.get(tu) or {}).get("origen") == "huella" and (hablantes.get(tu) or {}).get("persona") \
+                and hablantes[tu]["persona"] != uid and not hablantes[tu].get("provisional")
+            if suyos:
+                tu, dudoso = suyos[0], False
+            elif otro:  # su huella dice que es otra persona
+                tu, dudoso = None, False
+        poner_tu(data, tu, dudoso)
     tu = data.get("tu")
     for h, info in hablantes.items():
         if info.get("origen") != "huella" or not info.get("persona"):
@@ -1347,8 +1698,8 @@ def identify(data, huellas, voices, micro=None):
             info["provisional"] = True
     if tu and uid:
         info = hablantes.get(tu)
-        if info and not info.get("persona"):  # el micro ya dice que eres tu: no hace falta huella
-            info.update(persona=uid, provisional=False, origen="micro")
+        if info and not info.get("persona"):  # el micro ya dice que eres tu: no hace falta huella (dudoso: «¿Tú?»)
+            info.update(persona=uid, provisional=bool(data.get("tu_dudoso")), origen="micro")
     return data
 
 
@@ -1362,6 +1713,7 @@ def assign(data, h, pid, usuario=None):
         raise KeyError(h)
     old_tu = data.get("tu")
     info.update(persona=pid, provisional=False, origen="manual")
+    data.pop("tu_dudoso", None)  # lo dice el usuario: ya no hay duda (dos pistas, elegir_tu)
     if pid and pid == usuario:
         data["tu"] = h
         for k, other in hablantes.items():  # sin «origen» (sidecar de antes del 07/11/2026): el que era «tu»
@@ -1410,6 +1762,8 @@ def join_speakers(data, h, con, usuario=None, names=None):
                             key=lambda t: (t["inicio"], t["fin"]))
     secs = sum(b - a for a, b in joined)
     hablantes[con].update(segundos=round(secs, 1), breve=secs < BREVE_S)
+    if hablantes[h].get("pista") != hablantes[con].get("pista"):  # dos pistas: uno de cada canal, su huella de la suma
+        hablantes[con].pop("pista", None)
     del hablantes[h]
     for f in data.get("frases") or []:
         if isinstance(f, dict) and f.get("h") == h:
@@ -1494,7 +1848,8 @@ def label(h, data, names, for_llm=False, usuario=None):
             shown = name
         return f"¿{shown}?" if doubt else shown
     if data.get("tu") == h:
-        return "Yo" if for_llm else "Tú"
+        shown = "Yo" if for_llm else "Tú"
+        return f"¿{shown}?" if data.get("tu_dudoso") else shown
     if info.get("breve"):
         return "(breve)"
     n = h[1:] if h.startswith("h") and h[1:].isdigit() else h
@@ -1533,6 +1888,17 @@ def export_text(segs, who, data, names, usuario=None):
 # ----------------------------------------------------------------------------- CLI (subproceso)
 
 TMP_VIEJO_S = 6 * 3600  # un voces-*.pcm de hace más de esto ya no es de ningún subproceso vivo
+
+
+def _suma_en_disco(stereo16, ruta, trozo=16000 * 60):
+    """La suma de las dos pistas (pistas.a_mono_i16) de un memmap (n, 2) a otro archivo, por trozos: memmap (n,)."""
+    n = len(stereo16)
+    if not n:
+        return np.zeros(0, np.int16)
+    with open(ruta, "wb") as f:
+        for i in range(0, n, trozo):
+            f.write(pistas.a_mono_i16(np.asarray(stereo16[i:i + trozo])).astype("<i2").tobytes())
+    return np.memmap(ruta, dtype="<i2", mode="r", shape=(n,))
 
 
 def _borrar_tmp(path):
@@ -1612,6 +1978,9 @@ def main(argv=None):
 
     # el audio decodificado, en un archivo de DATA_DIR/tmp (el servidor vacía esa carpeta al arrancar y al cerrarse)
     tmp = os.path.join(a.data, "tmp", f"voces-{os.getpid()}-{uuid.uuid4().hex[:8]}.pcm")
+    tmp_suma = tmp[:-4] + "-suma.pcm"  # dos pistas en una reunion presencial: la suma de las dos
+    tmp_micro = tmp[:-4] + "-micro.pcm"  # dos pistas: los tramos del micro, juntados
+    tmp_demas = tmp[:-4] + "-demas.pcm"  # y los de lo que suena
     samples = None
     try:
         if not models_ready(a.data):  # p. ej. tras actualizar con otro modelo de huellas: «Recordar» antes que nada
@@ -1626,7 +1995,8 @@ def main(argv=None):
                       if t.get("h") == a.fingerprint]
             if not tramos:
                 raise VoicesError(f"El sidecar no tiene tramos de {a.fingerprint}")
-            voz, _ = audio_huella(a.diarize, tramos, data.get("duracion_s"), en_disco=tmp)
+            canal = canal_de(data, a.fingerprint) if pistas.es_doble(a.diarize) else None
+            voz, _ = audio_huella(a.diarize, tramos, data.get("duracion_s"), en_disco=tmp, canal=canal)
             so = _sherpa()
             vec = embed(_extractor(so, model_paths(a.data), a.threads), _f32(voz)) if len(voz) else None
             if vec is None:
@@ -1634,11 +2004,6 @@ def main(argv=None):
             send({"type": "result", "huellas": {a.fingerprint: [round(float(x), 5) for x in vec]},
                   "segundos": sum(b - a_ for a_, b in tramos)})
             return 0
-        samples = load_audio_16k(a.diarize, en_disco=tmp)
-        if a.hasta:  # una grabacion en curso: hasta donde ya esta escrita entera (el final aun puede cambiar)
-            samples = samples[:int(a.hasta * SR)]
-        res = diarize(samples, a.data, a.threads, progress, participantes=a.participantes or None,
-                      rejilla=a.rejilla, cache=a.cache)
         micro = None
         if a.niveles:
             try:
@@ -1646,11 +2011,29 @@ def main(argv=None):
             except (OSError, ValueError):
                 micro = None
         old = read_sidecar(a.out) or {}
+        micro = micro or old.get("micro")
+        res = None
+        if pistas.es_doble(a.diarize) and micro_de_grabadora(micro):
+            samples = load_audio_16k(a.diarize, en_disco=tmp, canal="ambos")
+            if a.hasta:  # una grabacion en curso: hasta donde ya esta escrita entera (el final aun puede cambiar)
+                samples = samples[:int(a.hasta * SR)]
+            res = diarize_pistas(samples, micro, a.data, a.threads, progress, participantes=a.participantes or None,
+                                 tmp_micro=tmp_micro, tmp_demas=tmp_demas)
+            if res is None:  # presencial: la suma, sin decodificar otra vez
+                samples = _suma_en_disco(samples, tmp_suma)
+        else:
+            samples = load_audio_16k(a.diarize, en_disco=tmp)
+            if a.hasta:
+                samples = samples[:int(a.hasta * SR)]
+        if res is None:  # (por bloques fijos y con lo ya hecho mientras se grababa: punto 56, voces_directo.py)
+            res = diarize(samples, a.data, a.threads, progress, participantes=a.participantes or None,
+                          rejilla=a.rejilla, cache=a.cache)
         data = {"version": 1, "modelo": MODEL_ID, "creado": _now(), "duracion_s": res["duracion_s"],
                 "tramos": res["tramos"], "hablantes": res["hablantes"], "tu": None, "frases": [],
-                "micro": micro or old.get("micro")}
-        breve = {h for h, i in data["hablantes"].items() if i.get("breve")}
-        data["tu"] = mark_user(data["tramos"], data["micro"], skip=breve) if data["micro"] else None
+                "micro": micro}
+        if res.get("pistas"):
+            data["pistas"] = True
+        poner_tu(data, *(elegir_tu(data, data["micro"]) if data["micro"] else (None, False)))
         write_sidecar(a.out, data)
         send({"type": "result", "sidecar": a.out, "huellas": res["huellas"], "hablantes": len(res["hablantes"]),
               "duracion_s": res["duracion_s"]})
@@ -1661,6 +2044,9 @@ def main(argv=None):
     finally:
         del samples  # suelta el memmap: en Windows un archivo mapeado no se puede borrar
         _borrar_tmp(tmp)
+        _borrar_tmp(tmp_suma)
+        _borrar_tmp(tmp_micro)
+        _borrar_tmp(tmp_demas)
 
 
 if __name__ == "__main__":

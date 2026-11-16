@@ -25,6 +25,7 @@ import webbrowser  # noqa: F401 (fachada: los tests usan server.webbrowser)
 import calendario
 import directo_avisos
 import engines
+import fallos
 import live  # noqa: F401 (fachada: los tests usan server.live)
 import movil
 import voices  # noqa: F401 (fachada: los tests usan server.voices)
@@ -160,6 +161,8 @@ PARTES = ("ajustes", "apagado", "api", "app_ajustes", "app_carpetas", "app_conse
           "app_grabar", "app_hoy", "app_listas", "app_reuniones", "app_textos", "app_voces",
           "aprendido", "biblioteca", "carpetas", "conservar", "diagnostico", "inicio_windows", "instancia",
           "listas", "paquete", "rutas", "trabajos", "voces_directo",
+          # nuevos, no salieron de server.py (lote 2a del motor, 15/11/2026): informe usa DATA_DIR (_compartir)
+          "despierto", "fallos", "informe",
           # nuevo, no salió de server.py: «Mis pendientes» (punto 28 del review, 15/11/2026)
           "pendientes")
 COMPARTIDAS = ("PORT", "URL", "DATA_DIR", "SERVER", "WINDOW", "COMPLETE")  # COMPLETE: lo crea App()
@@ -482,6 +485,7 @@ def main():
     DATA_DIR = os.path.abspath(arg("--data", DATA_DIR))
     _compartir("PORT", "URL", "DATA_DIR")
     setup_logging(DATA_DIR)
+    fallos.ganchos()  # lo que se escape de un hilo o del principal, a server.log (punto 33)
     no_browser = "--no-browser" in sys.argv
     os.environ["CHULETA_DATOS"] = DATA_DIR  # el aviso flotante (proceso hijo) lee ahi sesion.token, tambien con --data
     # instancia unica, antes que el puerto: un segundo lanzamiento (doble clic, o el acceso directo otra vez porque la
@@ -509,6 +513,7 @@ def main():
     if srv is None:
         show_running(no_browser)
         return
+    fallos.instalar(DATA_DIR)  # ya es LA app: faulthandler a fallos-graves.log (punto 33)
     try:
         start_session(DATA_DIR)
     except OSError as e:

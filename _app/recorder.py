@@ -14,8 +14,13 @@ el servidor se cierra) corrige la cabecera y queda un WAV normal.
 
   --mic default  sigue al micro predeterminado de Windows (aunque cambie a mitad de grabacion)
   --sys all      todas las salidas a la vez (recomendado)   --sys default  la salida predeterminada
+  --pistas       dos pistas (lo que pide la app desde el 15/11/2026): canal izquierdo = el micro, derecho = lo que
+                 suena, cada uno con su nivelador; su suma es la mezcla de siempre (pistas.py). Sin --pistas, la
+                 mezcla en los dos canales, como antes
 
-Por stdout sale una linea JSON de estado cada 0,25 s; por stdin se le manda "stop".
+Por stdout sale una linea JSON de estado cada 0,25 s; por stdin se le manda "stop". Con el micro, el estado lleva
+"tu": los pasos de 0,25 s del archivo («1» = el micro lleva su voz y no el eco) completados desde el anterior, y
+"tu_i": el indice del primero (la linea de tiempo de «Tú», ya alineada con lo escrito).
 """
 import argparse
 import errno
@@ -31,6 +36,7 @@ import warnings
 from collections import deque
 
 import eco
+import pistas
 
 SR = 48000
 # margen para que lleguen los paquetes de las dos fuentes antes de mezclar: con Teams y el portatil
@@ -134,6 +140,7 @@ class MicLeveler(Leveler):
         self.eco, self.eco_visto, self.sonando_s = None, False, 0.0
         self.refs = deque()     # (t, dB de la salida) de los ultimos REF_COLA_S
         self.recent = deque()   # (t, duracion, dB) de los bloques de su voz de los ultimos MIC_INICIO[0] s
+        self.mine, self.db = False, None
 
     def _mine(self, db, ref_db):
         """¿De este bloque se aprende?"""
@@ -158,14 +165,16 @@ class MicLeveler(Leveler):
 
     def __call__(self, x, update=True, ref=None):
         import numpy as np
+        self.mine = False  # este bloque es su voz (no el eco): lo que aprende la ganancia y la linea de «Tú» (PasosTu)
         if not len(x):
             return x
         self.dur = dur = len(x) / SR
         self.t += dur
-        db = block_db(x)
+        self.db = db = block_db(x)  # en crudo (lo usa tambien SueloMic, para la linea de «Tú»)
         if db is None:  # un bloque roto (NaN): se aplica la ganancia de antes y no se aprende nada
             update = False
         if update and self._mine(db, block_db(ref)):
+            self.mine = True
             self.recent.append((self.t, dur, db))
         while self.recent and self.recent[0][0] < self.t - MIC_INICIO[0]:
             self.recent.popleft()
@@ -206,14 +215,104 @@ def mezclar(parts, levelers, mic_muted=False, eco=None):
     return mix
 
 
-def soft_limit(x, knee=0.8):
-    """Por encima de 0,8 se curva suavemente hacia 1 en vez de recortar en seco (sin distorsion dura)."""
+soft_limit = pistas.soft_limit  # por encima de 0,8 se curva suavemente hacia 1 (sin recorte en seco)
+
+
+def mezclar_pistas(parts, levelers, mic_muted=False, eco=None):
+    """Lo mismo que mezclar, en dos pistas: (bloque (n, 2), si el micro lleva su voz). Canal izquierdo, el micro con
+    su nivelador (mono: Source lo duplica); derecho, lo que suena con el suyo, en mono (la media de sus dos canales).
+    Cada canal con el limitador. La suma de los dos es la mezcla de mezclar (pistas.a_mono): el mismo trabajo por
+    bloque, en otro orden."""
     import numpy as np
-    a = np.abs(x)
-    over = a > knee
-    if over.any():
-        x[over] = np.sign(x[over]) * (knee + (1 - knee) * np.tanh((a[over] - knee) / (1 - knee)))
-    return x
+    n = len(next(iter(parts.values())))
+    out = np.zeros((n, 2), np.float32)
+    mine = False
+    if "mic" in parts and not mic_muted:
+        lev = levelers["mic"]
+        if isinstance(lev, MicLeveler):
+            lev.eco = eco
+            out[:, 0] = lev(parts["mic"], ref=parts.get("sys"))[:, 0]
+            mine = lev.mine
+        else:
+            out[:, 0] = lev(parts["mic"])[:, 0]
+    if "sys" in parts:
+        y = levelers["sys"](parts["sys"])
+        out[:, 1] = (y[:, 0] + y[:, 1]) * np.float32(0.5)
+    soft_limit(out)
+    np.clip(out, -1.0, 1.0, out=out)
+    return out, mine
+
+
+class SueloMic:
+    """El ruido de fondo del micro (dB de cada bloque, en crudo): baja al momento con un bloque mas flojo y sube
+    despacio (SUBE_S), asi que entre dos palabras vuelve a el. Un bloque cuenta para la linea de «Tú» solo si pasa de
+    ese suelo SOBRE_DB: con un micro con ruido por encima de -50 dBFS (un ventilador) y cascos, el nivelador lo toma por
+    su voz (como antes del 14/11) y la linea salia toda «1»; despues «Tú» no salia (revision 1 de dos-pistas, P1-2:
+    ruido a -46/-43/-40 dBFS, con 67-98 % de pasos «1» sin su voz)."""
+
+    SUBE_S, SOBRE_DB, CERO_DB = 20.0, 6.0, -90.0
+
+    def __init__(self):
+        self.suelo = None
+
+    def __call__(self, db, dur):
+        if db is None or db < self.CERO_DB:  # silencio digital (micro silenciado en el equipo, dispositivo reabierto):
+            return False                     # no es ruido de fondo; si lo fuese, tardaria ~70 s en volver (revision 2)
+        if self.suelo is None or db < self.suelo:
+            self.suelo = db
+        else:
+            self.suelo += (db - self.suelo) * (1 - math.exp(-dur / self.SUBE_S))
+        return db > self.suelo + self.SOBRE_DB
+
+
+def marcar_eco(path, valor=b"1"):
+    """eco=1 (o 0) en la cabecera de un WAV de dos pistas, con un descriptor propio (el de la grabadora no se mueve).
+    True si se ha escrito."""
+    try:
+        with open(path, "r+b", buffering=0) as g:
+            g.seek(pistas.eco_off(SR))
+            return g.write(valor) == 1
+    except OSError:
+        return False
+
+
+class PasosTu:
+    """La linea de tiempo de «Tú» en pasos de PASO s del archivo: «1» si al menos UMBRAL del paso son bloques en los que
+    el micro lleva su voz (MicLeveler.mine: por encima del ruido y, con altavoces, pasando del eco que cabe esperar
+    segun la puerta de eco). Va con lo que se escribe, asi que no lleva el desfase de la de niveles
+    (voices.MIC_DESFASE_S)."""
+
+    PASO = pistas.PASO
+    UMBRAL = 0.3
+
+    def __init__(self):
+        self.pos, self.acc, self.i, self.bits = 0, 0, 0, []
+        self.paso = int(round(self.PASO * SR))
+
+    def add(self, n, mine):
+        while n > 0:
+            k = min(self.paso - self.pos % self.paso, n)
+            if mine:
+                self.acc += k
+            self.pos += k
+            n -= k
+            if self.pos % self.paso == 0:
+                self.bits.append("1" if self.acc >= self.UMBRAL * self.paso else "0")
+                self.acc = 0
+
+    def cerrar(self):
+        """Al parar: el ultimo paso, aunque no este completo."""
+        resto = self.pos % self.paso
+        if resto:
+            self.bits.append("1" if self.acc >= self.UMBRAL * resto else "0")
+            self.pos += self.paso - resto
+            self.acc = 0
+
+    def take(self):
+        """(indice del primer paso, pasos completados desde la ultima llamada)."""
+        i, s = self.i, "".join(self.bits)
+        self.i, self.bits = self.i + len(s), []
+        return i, s
 
 
 warnings.filterwarnings("ignore")  # soundcard avisa de "discontinuidades" cada vez que hay silencio
@@ -564,6 +663,7 @@ def main():
     ap.add_argument("--monitor", action="store_true")
     ap.add_argument("--mic", default="default")
     ap.add_argument("--sys", default="default")
+    ap.add_argument("--pistas", action="store_true", help="dos pistas: micro a la izquierda, lo que suena a la derecha")
     a = ap.parse_args()
     out = sys.stdout
     try:
@@ -636,13 +736,17 @@ def main():
         try:
             f = open(a.out, "wb", buffering=0)
             w = Escritor(f, log=elog)
-            w.write(wav_header())
+            w.write(pistas.cabecera(SR) if a.pistas else wav_header())
         except OSError as e:
             emit({"fatal": motivo_de(e)})
             elog(f"✖ no se puede crear la grabacion: {e.__class__.__name__}: {e}")
             raise
+    data_off = len(pistas.cabecera(SR) if a.pistas else wav_header())  # donde empieza el audio en el archivo
+    tu = PasosTu() if "mic" in sources else None
+    suelo = SueloMic()
     t0, written, last = time.perf_counter(), 0, 0.0
     dicho = [False]  # ya se mando una linea «fatal» con el motivo
+    eco_dicho = [False]  # ya se puso eco=1 en la cabecera
     base = int(round((t0 - EPOCH) * SR))  # posicion de la muestra 0 del fichero: lo capturado en t0
     try:
         while True:
@@ -661,10 +765,27 @@ def main():
                     except Exception as e:  # un fallo aqui no puede parar la grabacion
                         gates[0] = False
                         elog(f"✖ eco: {e.__class__.__name__}: {e}: se deja de medir")
-                # micro y reunion a un volumen parecido (el micro, sin aprender del eco que mide la puerta)
-                mix = mezclar(parts, levelers, muted["mic"], echo if gates[0] else None)
+                # micro y reunion a un volumen parecido (el micro, sin aprender del eco que mide la puerta); en dos
+                # pistas, cada uno en su canal
+                if a.pistas:
+                    mix, mine = mezclar_pistas(parts, levelers, muted["mic"], echo if gates[0] else None)
+                else:
+                    mix = mezclar(parts, levelers, muted["mic"], echo if gates[0] else None)
+                    mine = bool(getattr(levelers.get("mic"), "mine", False)) and not muted["mic"]
+                if tu is not None:
+                    lev = levelers["mic"]
+                    if not muted["mic"]:  # el ruido de fondo, con todos los bloques (tambien los del eco)
+                        mine = suelo(getattr(lev, "db", None), n / SR) and mine
+                    tu.add(n, mine)
                 if w:
                     w.write((mix * 32767).astype("<i2").tobytes())
+                if a.pistas and f and not eco_dicho[0] and getattr(levelers.get("mic"), "eco_visto", False):
+                    # en cuanto la puerta ve el eco, eco=1 en la cabecera: asi lo sabe el reproductor tambien mientras
+                    # se graba o si se corta sin cerrar (revision 2: ahi quedaba «?» y se quitaba el eco con cascos).
+                    # Con OTRO descriptor: el del audio no se mueve nunca (revision 3, P0: si este write fallaba, el
+                    # seek de vuelta no se hacia y el audio seguia escribiendose sobre la cabecera). Si falla, se
+                    # reintenta en la vuelta siguiente; al cerrar se escribe igual
+                    eco_dicho[0] = marcar_eco(a.out)
                 written += n
             elif w and w.pend:
                 w.flush()  # lo que quedo en memoria por un fallo al escribir
@@ -684,7 +805,11 @@ def main():
                         txt = (f"esta salida lleva tu micro ({ms} ms): quita «Escuchar este dispositivo» del micro en "
                                "Sonido de Windows")
                     st[k]["note"] = f"{st[k]['note']} · {txt}" if st[k].get("note") else txt
+                if final and tu is not None:
+                    tu.cerrar()
+                tu_i, tu_s = tu.take() if tu is not None else (0, "")
                 emit({"t": round(written / SR, 2), "mic_muted": muted["mic"], **st,
+                      **({"tu": tu_s, "tu_i": tu_i} if tu is not None else {}),
                       "eco": {"micro": echo.status(), "salida": mon.status()} if both else None,
                       # minutos de grabacion que caben en el disco (cada DISK_CHECK_S) y segundos de audio que esperan
                       # en memoria a poder escribirse (un fallo pasajero al escribir)
@@ -733,8 +858,11 @@ def main():
                 size = f.tell()
                 f.seek(4)
                 f.write(struct.pack("<I", size - 8))
-                f.seek(40)
-                f.write(struct.pack("<I", size - 44))
+                f.seek(data_off - 4)
+                f.write(struct.pack("<I", size - data_off))
+                if a.pistas:  # si vio el eco de los altavoces (el reproductor solo lo quita por defecto entonces)
+                    f.seek(pistas.eco_off(SR))
+                    f.write(b"1" if getattr(levelers.get("mic"), "eco_visto", False) else b"0")
             except OSError as e:
                 elog(f"✖ no se pudo cerrar la cabecera del WAV: {e.__class__.__name__}: {e}")
             finally:

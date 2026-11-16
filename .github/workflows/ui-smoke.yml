@@ -29,6 +29,8 @@ name: ui-smoke
 # papelera de verdad, también la de Windows) y «Quién habla» por bloques mientras se graba (punto 56).
 # test_ui_pendientes: «Mis pendientes» en Hoy y las casillas del resumen (punto 28): marcar cambia el .resumen.md y
 # «Deshacer» lo devuelve.
+# test_ui_pistas: una grabación en dos pistas (micro y audio del PC, punto 20) se oye mezclada por Web Audio, con «Tú»
+# y «Los demás» por separado y «Exportar audio mezclado»; un audio de antes suena tal cual.
 on:
   push:
     paths: ["_app/**", "tests/**", "requirements.txt", ".github/workflows/ui-smoke.yml"]
@@ -63,9 +65,9 @@ jobs:
           NOTAS_ARTEFACTOS: ${{ github.workspace }}/artefactos
         run: |
           mkdir -p "$NOTAS_ARTEFACTOS"
-          python -m unittest -v test_ui_smoke test_ui_voces test_e2e_carpetas test_subir_audio test_e2e_idioma test_ui_aprender test_sin_groq test_fix_groq test_fix_lento test_ui_movil test_e2e_avisos test_ui_hoy test_ui_grabadora test_ui_lote2b test_ui_pendientes 2>&1 | tee salida.txt
+          python -m unittest -v test_ui_smoke test_ui_voces test_e2e_carpetas test_subir_audio test_e2e_idioma test_ui_aprender test_sin_groq test_fix_groq test_fix_lento test_ui_movil test_e2e_avisos test_ui_hoy test_ui_grabadora test_ui_lote2a test_ui_pistas test_ui_lote2b test_ui_pendientes 2>&1 | tee salida.txt
           test ${PIPESTATUS[0]} -eq 0
-          if grep -q "skipped=" salida.txt; then echo "::error::test_ui_smoke, test_ui_voces, test_e2e_carpetas, test_subir_audio, test_e2e_idioma, test_ui_aprender, test_sin_groq, test_fix_groq, test_fix_lento, test_ui_movil, test_e2e_avisos, test_ui_hoy, test_ui_grabadora, test_ui_lote2b o test_ui_pendientes se ha saltado"; exit 1; fi
+          if grep -q "skipped=" salida.txt; then echo "::error::test_ui_smoke, test_ui_voces, test_e2e_carpetas, test_subir_audio, test_e2e_idioma, test_ui_aprender, test_sin_groq, test_fix_groq, test_fix_lento, test_ui_movil, test_e2e_avisos, test_ui_hoy, test_ui_grabadora, test_ui_lote2a, test_ui_pistas, test_ui_lote2b o test_ui_pendientes se ha saltado"; exit 1; fi
           grep -q "^Ran [1-9][0-9]* tests\?" salida.txt
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         if: always()

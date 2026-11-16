@@ -41,6 +41,9 @@ on:
       - "_app/trabajos.py"
       - "_app/voces_directo.py"
       - "_app/pendientes.py"
+      - "_app/despierto.py"
+      - "_app/fallos.py"
+      - "_app/informe.py"
       - "scripts/e2e/claude_windows.py"
       - ".github/workflows/claude-windows.yml"
 

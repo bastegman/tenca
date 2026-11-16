@@ -6,6 +6,7 @@ una carpeta o una reunion (settings_moved) o al cambiar el nombre de la app (mig
 Salio tal cual de server.py al partirlo (15/11/2026); server.py lo reexporta."""
 import copy
 import json
+import math
 import os
 import re
 import shutil
@@ -42,6 +43,9 @@ class Store:
                 self.data[k].update(v)
             else:
                 self.data[k] = v
+        # un valor de tipo o de valor raro (escrito a mano, versiones mezcladas): el de por defecto, con su linea en el
+        # log (punto 5 del review del 14/11/2026). `corregidos`: las claves, para el diagnostico
+        self.corregidos = normalizar_ajustes(self.data, defaults)
         self.lost = []  # secretos que no se pudieron descifrar (la interfaz pide pegarlos otra vez)
         # config_rev: sube con cada cambio de Ajustes (update(..., rev=True)). Empieza en la hora de arranque, asi
         # que tras reiniciar no coincide con la que tuviera una ventana abierta antes
@@ -288,6 +292,159 @@ PROCESADOS = ("local", "agente", "api")
 PRUEBA_VOZ_DB = -35.0  # «Probar»: pico del micro (dB, cada 0,25 s) que cuenta como voz; supuesto, sin medir
 NUBE_OFF = ("La transcripción en la nube está desactivada: en Ajustes → «Dónde se procesan tus reuniones» elige "
             "«API externa».")
+
+
+# ----------------------------------------------------------------------------- ajustes a prueba de valores raros
+# Punto 5 del review del 14/11/2026: un valor de otro tipo en settings.json (escrito a mano, una version mezclada)
+# dejaba la app sin arrancar o «cargando» (fuzz de 583 casos: 21 sin arrancar y 58 con /api/config, Hoy, el diagnostico
+# o la lista de modelos rotos; el 10/11/2026, un proveedor antiguo la dejo sin transcripcion). Al cargar, cada clave de
+# DEFAULT_SETTINGS se compara con su tipo y, si tiene una lista cerrada o un rango, con ellos; si no cuadra, el valor
+# por defecto y una linea en el log. En las listas y los mapas solo se quitan los elementos que no valen. Lo que no
+# esta en DEFAULT_SETTINGS (marcas de migracion, lo que guarda la app aparte) no se toca, y el proveedor de la nube
+# solo se mira por su tipo: su valor lo arregla reparar_proveedor (fix-groq), que dice en el log a que pasa.
+_MAL = object()  # «no vale»: vuelve el de por defecto
+
+
+def _entero(lo, hi):
+    def f(v):
+        if isinstance(v, float) and v.is_integer():  # 30.0 escrito a mano es 30
+            v = int(v)
+        return v if isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi else _MAL
+    return f
+
+
+def _uno_de(validos):
+    return lambda v: v if isinstance(v, str) and v in validos() else _MAL
+
+
+def _texto(v):
+    return v if isinstance(v, str) else _MAL
+
+
+def _texto_lleno(v):
+    return v if isinstance(v, str) and v.strip() else _MAL
+
+
+def _o_nada(f):
+    return lambda v: None if v is None else f(v)
+
+
+def _lista_de(elemento):
+    """Una lista: los elementos que no valen, fuera (el resto se queda)."""
+    return lambda v: [x for x in v if elemento(x)] if isinstance(v, list) else _MAL
+
+
+def _mapa_de(valor):
+    """Un mapa de textos: las entradas que no valen, fuera."""
+    return lambda v: ({a: b for a, b in v.items() if isinstance(a, str) and valor(b)} if isinstance(v, dict)
+                      else _MAL)
+
+
+def _con_ruta(x):  # carpetas vinculadas, de listas y favoritos: {"path": …, "name"?: …}
+    return (isinstance(x, dict) and isinstance(x.get("path"), str) and bool(x["path"].strip())
+            and isinstance(x.get("name", ""), (str, type(None))))
+
+
+def _es_texto(x):
+    return isinstance(x, str)
+
+
+def _velocidad(x):  # «speed»: veces tiempo real medidas por modelo
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) and x > 0
+
+
+def _presets():
+    return engines.PRESETS_BY_ID
+
+
+# por clave (las de un nivel por debajo, con su seccion): lo que vale. Sin entrada, el tipo de su valor por defecto
+VALIDOS = {
+    ("preset",): _uno_de(_presets),
+    ("live_preset",): _uno_de(_presets),
+    ("threads",): _entero(1, 1024),
+    ("rec_mic",): _texto_lleno,
+    ("rec_sys",): _texto_lleno,
+    ("links",): _lista_de(_con_ruta),
+    ("vocab_links",): _lista_de(_con_ruta),
+    ("favorites",): _lista_de(_con_ruta),
+    ("project_folders",): _mapa_de(_es_texto),
+    ("workstream_folders",): _mapa_de(_es_texto),
+    ("project_langs",): _mapa_de(_es_texto),
+    ("workstream_langs",): _mapa_de(_es_texto),
+    ("folder_icons",): _mapa_de(_es_texto),
+    ("outlook_asistentes",): _uno_de(lambda: ("", "si", "pregunta", "deniega")),
+    ("aviso_resumen_local",): _o_nada(lambda v: v if isinstance(v, bool) else _MAL),
+    ("summary_lang",): _uno_de(lambda: engines.SUMMARY_LANGS),
+    ("procesado",): _o_nada(_uno_de(lambda: PROCESADOS)),
+    ("agente",): _o_nada(lambda v: v if isinstance(v, dict) else _MAL),  # lo de dentro lo resuelve agente_de
+    ("worker_keepalive_min",): _entero(0, 720),
+    ("perfil", "folder"): _o_nada(_texto),
+    ("perfil", "vocab"): _o_nada(_texto),
+    ("cloud", "provider"): _texto,  # el valor, reparar_proveedor
+    ("cloud", "chunk_minutes"): _entero(2, 20),
+    ("cloud", "parallel"): _entero(1, 8),
+    ("cloud", "extra_keys"): _lista_de(_es_texto),
+    ("cloud", "extra_keys_openai"): _lista_de(_es_texto),
+    ("cloud", "extra_keys_azure"): _lista_de(_es_texto),
+    ("cloud", "extra_keys_custom"): _lista_de(_es_texto),
+    ("speed",): _mapa_de(_velocidad),
+}
+
+
+def _por_tipo(defecto):
+    """Sin entrada en VALIDOS: del mismo tipo que el de por defecto (un entero no vale por un si/no ni al reves).
+    Con None por defecto, cualquier cosa (la resuelve quien la lee)."""
+    if defecto is None:
+        return lambda v: v
+    if isinstance(defecto, bool):
+        return lambda v: v if isinstance(v, bool) else _MAL
+    if isinstance(defecto, (int, float)):
+        return _entero(-2**63, 2**63) if isinstance(defecto, int) else (
+            lambda v: v if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) else _MAL)
+    return lambda v: v if isinstance(v, type(defecto)) else _MAL
+
+
+def normalizar_ajustes(d, defaults):
+    """Al cargar settings.json (Store): cada clave de `defaults`, y un nivel por debajo en sus secciones, con el tipo
+    y los valores que valen (VALIDOS o el tipo del de por defecto). Lo que no cuadra pasa al de por defecto; de una
+    lista o un mapa solo se quita lo que no vale. Cada cambio deja una linea en el log, con la clave y sin el valor
+    (puede ser una ruta o una clave). Cambia `d` y devuelve las claves corregidas («cloud.parallel»)."""
+    out = []
+
+    def una(keys, cont, defecto):
+        k = keys[-1]
+        if k not in cont:
+            return
+        v = cont[k]
+        if isinstance(defecto, dict) and len(keys) == 1:
+            if not isinstance(v, dict):
+                cont[k] = copy.deepcopy(defecto)
+                out.append(k)
+                log(f"   ajuste {k} no válido: vuelve al valor por defecto")
+                return
+            for k2, d2 in defecto.items():
+                una(keys + (k2,), v, d2)
+            if keys not in VALIDOS:
+                return
+        f = VALIDOS.get(keys) or _por_tipo(defecto)
+        try:
+            nuevo = f(v)
+        except Exception:  # noqa: BLE001  un validador nunca impide arrancar
+            nuevo = _MAL
+        nombre = ".".join(keys)
+        if nuevo is _MAL:
+            cont[k] = copy.deepcopy(defecto)
+            out.append(nombre)
+            log(f"   ajuste {nombre} no válido: vuelve al valor por defecto")
+        elif isinstance(nuevo, (list, dict)) and len(nuevo) != len(v):
+            cont[k] = nuevo
+            out.append(nombre)
+            log(f"   ajuste {nombre}: {len(v) - len(nuevo)} elementos no válidos, fuera")
+        elif nuevo is not v and not isinstance(nuevo, (list, dict)):  # 30.0 escrito a mano: 30, sin mas
+            cont[k] = nuevo
+    for k, defecto in defaults.items():
+        una((k,), d, defecto)
+    return out
 
 
 def procesado_de(st):

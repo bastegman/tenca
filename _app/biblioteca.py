@@ -24,8 +24,10 @@ from rutas import (AUDIO_EXT, CLOUD_ONLY, DATA_DIR, LINK, LINKS, MARCA_SIN_AUDIO
 
 
 # lo que acompana a cada audio (se mueve y borra con el): texto, subtitulos, notas, resumen, hablantes y su exportacion
-# y, si el audio ya se mando a la papelera (conservar.py), lo que queda de el
-SIDE_EXTS = (".txt", ".srt", ".md", ".resumen.md", voices.SIDECAR_EXT, ".hablantes.txt", MARCA_SIN_AUDIO)
+# y el informe tecnico (informe.py, punto 32 del review del 14/11/2026) y, si el audio ya se mando a la papelera
+# (conservar.py, punto 17), lo que queda de el
+SIDE_EXTS = (".txt", ".srt", ".md", ".resumen.md", voices.SIDECAR_EXT, ".hablantes.txt", ".informe.json",
+             MARCA_SIN_AUDIO)
 
 
 DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})[ _-](\d{2})-(\d{2})-(\d{2})")

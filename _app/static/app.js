@@ -1710,6 +1710,7 @@ function loadAudio(a, t, autoplay = true) {
     savePos();
     S.playing = a.path;
     audio.src = '/media?path=' + enc(a.path);
+    if (typeof Pistas !== 'undefined') Pistas.cargar(a.path);  // grabada en dos pistas: se mezcla al oírla (pistas.js)
     audio.defaultPlaybackRate = audio.playbackRate = S.rate;
     const saved = parseFloat(localStorage.getItem('pos:' + a.path));
     const start = t != null ? t : (saved > 5 ? saved : 0);
@@ -1986,9 +1987,21 @@ async function pollJobs(now) {
     const r = await api('/api/jobs', undefined, 5000);  // con tope: una petición colgada no para el sondeo
     onJobs(r.jobs);
     if (typeof onMovimientos === 'function') onMovimientos(r.movimientos);  // cambiar la carpeta en pleno directo
+    onHilosCaidos(r.hilos_caidos);
   } catch { /* servidor reiniciandose */ }
   const active = S.jobs.some(isActive);
   jobsTimer = setTimeout(pollJobs, active ? 1000 : 4000);
+}
+/* un hilo vigía del servidor se ha parado por un error (fallos.py, punto 33 del review): algo deja de funcionar hasta
+   reiniciar la app. Se avisa una vez por hilo, con un aviso que se queda hasta cerrarlo. */
+function onHilosCaidos(lista) {
+  S.hilosVistos = S.hilosVistos || new Set();
+  for (const h of lista || []) {
+    const k = `${h.id}·${h.hilo}·${h.a_las}`;
+    if (S.hilosVistos.has(k)) continue;
+    S.hilosVistos.add(k);
+    toast(`${I.info}Se ha parado una parte de ${esc(APP_NAME)}: <b>${esc(h.que)}</b> (a las ${esc(h.a_las)}). Hasta que la reinicies no funcionará: Ajustes → Apagar ${esc(APP_NAME)} y vuelve a abrirla. Si se repite, Ajustes → Acerca de → Copiar diagnóstico.`, 'err', undefined, true);
+  }
 }
 function onJobs(jobs) {
   const prev = S.jobsById;
@@ -2038,6 +2051,28 @@ function applyProgress() {
     if (a && m) { syncClock(a); const j = liveJob(a); m.innerHTML = j ? liveStatus(a, j) : 'Grabando · sin transcripción en directo'; }
   });
   renderLiveChip();
+}
+/* Acerca de › «Buscar versión nueva» (punto 60 del review): UNA consulta a GitHub al pulsarlo, nunca sola. Si hay una
+   más nueva, su enlace abre la página del Release en el navegador. */
+const VERSION_TXT = {
+  nueva: v => `Hay una versión más nueva: <b>${esc(v.ultima)}</b>${v.fecha ? ` (publicada el ${esc(fmtFechaCorta(v.fecha))})` : ''}. <a href="${esc(v.url)}" id="aVersionVer">Ver la versión</a>: baja el zip y ejecuta su INSTALAR.bat (tus grabaciones y ajustes se quedan).`,
+  al_dia: v => `Tienes la última versión publicada (${esc(v.ultima)}).`,
+  posterior: v => `Tu versión es posterior a la última publicada (${esc(v.ultima)}): no hay nada más nuevo.`,
+  mismo_dia: v => `Hay otra versión publicada el mismo día que la tuya (${esc(v.ultima)}): puede ser más nueva. <a href="${esc(v.url)}" id="aVersionVer">Ver sus novedades</a>.`,
+  sin_version: v => `Esta copia no lleva número de versión (es una copia de trabajo). La última publicada es ${esc(v.ultima)}: <a href="${esc(v.url)}" id="aVersionVer">verla</a>.`,
+};
+const fmtFechaCorta = f => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(f || ''); return m ? `${+m[3]}/${+m[2]}/${m[1]}` : f; };
+async function buscarVersion(d) {
+  const btn = $('#aVersion', d), res = $('#aVersionRes', d);
+  btn.disabled = true;
+  res.textContent = 'Consultando GitHub…';
+  try {
+    const v = await api('/api/version/buscar', {}, 30000);
+    res.innerHTML = (VERSION_TXT[v.estado] || VERSION_TXT.al_dia)(v);
+    const ver = $('#aVersionVer', d);
+    if (ver) ver.onclick = e => { e.preventDefault(); api('/api/acerca/abrir', { que: 'release' }).catch(() => window.open(v.url, '_blank')); };
+  } catch (e) { res.innerHTML = `<span style="color:var(--err)">✖ ${esc(e.message)}</span>`; }
+  finally { btn.disabled = false; }
 }
 /* el botón de explicar.py de un trabajo con error (configurar.js), en su aviso como en la Cola (punto 11) */
 const jobAccionHtml = j => (typeof cfgAccionHtml === 'function' ? cfgAccionHtml(j) : '');
@@ -2471,8 +2506,9 @@ function openSettings(opts) {
         Código, novedades y ayuda: <a href="${esc(ac.repo || '#')}" id="aRepo">${esc((ac.repo || '').replace(/^https?:\/\//, ''))}</a><br>
         Datos y registros (ajustes, API key cifrada, <code>server.log</code>): <code>${esc(ac.datos || '')}</code><br>
         ${esc(APP_NAME)} es gratis. Si te sirve, puedes <a href="${esc(ac.donar || '#')}" id="aDonar">invitar al autor a un café</a> (PayPal).</div>
-      <div class="row" style="margin-top:8px"><button class="btn sm" type="button" id="aDatos">${I.folder}Abrir</button><button class="btn sm" type="button" id="aDiag">${I.clipboard}Copiar diagnóstico</button><span class="muted" style="font-size:12.5px">versión, sistema, motor y las últimas líneas del registro: para pedir ayuda</span></div>
-      <div class="help">Solo lleva datos técnicos: la versión, el sistema, el motor y el modelo, cuántas carpetas vinculadas y copias en otras carpetas hay y, de las últimas líneas del registro, el texto fijo de cada mensaje con sus cifras y códigos de error. Los nombres de reuniones, carpetas, proyectos, temas y personas, las rutas y cualquier otro texto van como &lt;texto&gt;, y las claves no van. El registro completo (<code>server.log</code>) sí lleva nombres y rutas: no lo compartas tal cual. Aun así, revisa el diagnóstico antes de pegarlo y no lo publiques en un sitio público.</div>
+      <div class="row" style="margin-top:8px"><button class="btn sm" type="button" id="aDatos">${I.folder}Abrir</button><button class="btn sm" type="button" id="aDiag">${I.clipboard}Copiar diagnóstico</button><span class="muted" style="font-size:12.5px">versión, sistema, motor, las 3 últimas reuniones en números y las últimas líneas del registro: para pedir ayuda</span></div>
+      <div class="row" style="margin-top:8px"><button class="btn sm" type="button" id="aVersion">${I.refresh}Buscar versión nueva</button><span class="muted" id="aVersionRes" style="font-size:12.5px">Una consulta a GitHub al pulsarlo; ${esc(APP_NAME)} nunca la hace sola</span></div>
+      <div class="help">Solo lleva datos técnicos: la versión, el sistema, el motor y el modelo, cuántas carpetas vinculadas y copias en otras carpetas hay, el informe técnico de las 3 últimas reuniones (motor, modelo, tiempos, cortes, eco y memoria, solo números: ni su nombre ni su texto) y, de las últimas líneas del registro, el texto fijo de cada mensaje con sus cifras y códigos de error. Los nombres de reuniones, carpetas, proyectos, temas y personas, las rutas y cualquier otro texto van como &lt;texto&gt;, y las claves no van. El registro completo (<code>server.log</code>) sí lleva nombres y rutas: no lo compartas tal cual. Aun así, revisa el diagnóstico antes de pegarlo y no lo publiques en un sitio público.</div>
       ${ac.tenca && /^tenca$/i.test(APP_NAME) ? `<p class="ac-tenca">${I.tenca}<span>El nombre viene de la tenca (<a href="${esc(ac.tenca)}" id="aTenca" title="Museo Nacional de Historia Natural de Chile"><i>Mimus thenca</i></a>), un pájaro de Chile.</span></p>` : ''}
     </fieldset>
     <label style="display:flex;gap:8px;align-items:center;font-weight:500;margin-top:10px"><input type="checkbox" id="sInicioWin" disabled> Arrancar ${esc(APP_NAME)} al iniciar Windows <span class="muted" id="sInicioWinNota" style="font-weight:400">· lo mismo que «Arrancar con Windows» en el menú del icono de la bandeja</span></label>
@@ -2747,6 +2783,7 @@ function openSettings(opts) {
     $('#aDiag', d).onclick = async () => {
       try { const r = await api('/api/diagnostico'); await copy(r.texto, 'Diagnóstico copiado: revísalo antes de pegarlo donde pidas ayuda'); } catch (e) { toast(esc(e.message), 'err'); }
     };
+    $('#aVersion', d).onclick = () => buscarVersion(d);
     const autoLocal = $('#sAutoLocal', d);
     if (autoLocal) autoLocal.addEventListener('change', () => { $('#sAutoLocalAviso', d).hidden = !autoLocal.checked; if (autoLocal.checked) localStorage.setItem('sumOk', '1'); });
     bindVocesSettings(d);

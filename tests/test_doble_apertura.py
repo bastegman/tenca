@@ -672,7 +672,8 @@ class SegundaCopiaTests(unittest.TestCase):
                    mock.patch.object(server, "DATA_DIR", server.DATA_DIR), mock.patch.object(server, "SERVER", None),
                    mock.patch.object(server, "WINDOW", None), mock.patch.object(server.Handler, "app", None),
                    mock.patch.dict(os.environ), mock.patch.object(server, "log", lines.append),
-                   mock.patch.object(server.engines, "MODELS", None)]  # main() lo pone: que no pase a otros tests
+                   mock.patch.object(server.engines, "MODELS", None),  # main() lo pone: que no pase a otros tests
+                   mock.patch.object(server, "fallos")]  # ni los ganchos ni faulthandler en el proceso de los tests
         nombrados = {"App": mock.patch.object(server, "App"),
                      "fatal": mock.patch.object(server, "fatal", side_effect=SystemExit(1)),
                      "lock": mock.patch.object(server, "instance_lock", side_effect=self.secuencia(instancia)),

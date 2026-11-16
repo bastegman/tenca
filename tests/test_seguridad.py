@@ -572,7 +572,7 @@ class SegundaCopiaTests(ServidorBase):
         with mock.patch.object(sys, "argv", argv), mock.patch.object(server, "App") as App, \
                 mock.patch.object(server, "Window"), \
                 mock.patch.object(server, "fatal", side_effect=SystemExit(1)) as fatal, \
-                mock.patch.object(server, "setup_logging"), \
+                mock.patch.object(server, "setup_logging"), mock.patch.object(server, "fallos"), \
                 mock.patch.object(server, "set_app_id", return_value=False), \
                 mock.patch.object(server, "PORT_WAIT", wait, create=True), \
                 mock.patch.object(server, "PORT", server.PORT), mock.patch.object(server, "URL", server.URL), \

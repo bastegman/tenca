@@ -64,7 +64,15 @@ class _Dev:
 
 # FAKESC_MIC_MUDO="s": desde ese segundo el micro da ceros (silenciado con la tecla, sin permiso: tests/test_e2e_avisos)
 _MUDO = float(os.environ.get("FAKESC_MIC_MUDO") or 0) or None
-_MIC = _Dev("mic1", "Micro", lambda w: (_at(MINE, w) + 0.1 * _at(MEET, w - 0.03)) * (1 if _MUDO is None else w < _MUDO))
+# FAKESC_RUIDO_MIC="dB": ruido blanco en el micro a ese nivel (un ventilador); FAKESC_SIN_ECO="1": cascos (sin el eco de
+# la reunion en el micro). Los usa tests/test_dos_pistas (la linea de «Tú» con ruido)
+_RUIDO = 10 ** (float(os.environ["FAKESC_RUIDO_MIC"]) / 20) if os.environ.get("FAKESC_RUIDO_MIC") else 0.0
+_ECO = 0.0 if os.environ.get("FAKESC_SIN_ECO") else 0.1
+_RNG = np.random.default_rng(7)
+_MIA = float(os.environ.get("FAKESC_MIA") or 1.0)  # su voz, por este factor (0,3: -32 dBFS en vez de -21)
+_MIC = _Dev("mic1", "Micro", lambda w: (_MIA * _at(MINE, w) + _ECO * _at(MEET, w - 0.03)
+                                        + (_RNG.standard_normal(len(w)) * _RUIDO if _RUIDO else 0))
+            * (1 if _MUDO is None else w < _MUDO))
 _S1 = _Dev("spk1", "Altavoces", lambda w: _at(MEET, w), _gaps())
 _S2 = _Dev("spk2", "Espejo del driver", lambda w: _at(MEET, w - 0.08))
 

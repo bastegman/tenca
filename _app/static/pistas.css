@@ -1,0 +1,18 @@
+/* ---------- reproductor: grabaciones en dos pistas (pistas.js) ---------- */
+.p-pistas { display: none; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--panel); color: var(--ink-2); cursor: pointer; font: 500 12.5px var(--font); }
+.p-pistas svg { width: 16px; height: 16px; stroke-width: 1.8; }
+.p-pistas:hover, .p-pistas[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
+.p-pistas { position: relative; }
+.p-pistas.ajustado::after { content: ""; position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.player.pistas { grid-template-columns: auto 1fr auto auto; }
+.player.pistas .p-pistas { display: inline-flex; }
+.pistas-panel { position: fixed; right: 22px; bottom: 86px; width: 340px; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); z-index: 30; display: grid; gap: 10px; font-size: 13.5px; }
+.pistas-panel .pp-tit { font-weight: 600; font-size: 14px; }
+.pistas-panel .pp-controles { display: grid; gap: 10px; }
+.pistas-panel .pp-txt { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+.pistas-panel .pp-fila { display: grid; grid-template-columns: 82px 1fr 46px; align-items: center; gap: 8px; color: var(--ink-2); }
+.pistas-panel .pp-fila span { font: 12px var(--mono); color: var(--muted); text-align: right; }
+.pistas-panel .pp-check { display: flex; gap: 8px; align-items: center; color: var(--ink-2); }
+.pistas-panel .btn { justify-self: start; }
+.pistas-panel .pp-nota { color: var(--muted); font-size: 12.5px; }
+.pistas-panel .pp-nota:empty { display: none; }

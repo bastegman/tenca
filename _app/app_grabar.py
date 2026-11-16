@@ -12,7 +12,9 @@ import time
 
 import calendario
 import conservar
+import despierto as despierto_mod
 import engines
+import informe
 import plan as grabar_plan
 import voices
 from ajustes import agente_de, procesado_de
@@ -27,8 +29,10 @@ from common import APP_NAME, ApiError, clean_name, log, log_exc
 from instancia import open_ui
 from listas import (LIVE_PRESETS, SIN_AUDIO, _con_o_sin, _norm_dir, _project_dir, ajustes_previstos, check_perfil,
                     find_vocab, list_vocab, perfil_de, perfil_folder, read_vocab, update_perfil)
+import pistas
+from paquete import desktop_dir
 from recording import Cortes, RecorderProcess, cue, disco_al_empezar, notify, teams_mic_estado
-from rutas import APP_DIR, BUILD, DATA_DIR, LINKS, in_app_dir, rel_of, root_name, safe
+from rutas import APP_DIR, BUILD, DATA_DIR, LINKS, alias_of, in_app_dir, rel_of, root_name, safe
 
 
 # Lo que rec_start espera a que la grabadora cree el WAV con su cabecera antes de escribir la del .md y arrancar el
@@ -337,6 +341,30 @@ class Grabar:
             if m and time.time() - self.monitor_seen > 8:
                 self.monitor = None
                 m.stop(timeout=2)
+            # el PC despierto mientras se graba o hay trabajos (punto 30): desde este hilo, que vive lo que la app (la
+            # peticion a Windows es del hilo que la hace)
+            try:
+                self.despierto.al_dia(self._motivo_despierto())
+            except Exception:  # noqa: BLE001  el vigilante no puede pararse por esto
+                pass
+
+    @property
+    def despierto(self):
+        """Lo pedido a Windows para que no se suspenda (despierto.py): uno por App, al primer uso."""
+        d = self.__dict__.get("_despierto")
+        if d is None:  # setdefault: si dos hilos llegan a la vez, los dos se quedan con el mismo
+            d = self.__dict__.setdefault("_despierto", despierto_mod.Despierto())
+        return d
+
+    def _motivo_despierto(self):
+        """Por que no debe suspenderse: grabando (la grabadora propia) y/o con trabajos en cola o en marcha."""
+        r = self.rec
+        jobs = getattr(self, "jobs", None)
+        trabajos = False
+        if jobs is not None:
+            with jobs.lock:
+                trabajos = any(j.status in ("queued", "running") for j in jobs.list)
+        return despierto_mod.motivo(bool(r and r.alive()), trabajos)
 
     def rec_devices(self, q):
         at, cached = self.devices_cache
@@ -600,6 +628,19 @@ class Grabar:
         log(f"   micro {'silenciado' if mute else 'reactivado'}")
         return {"mic_muted": mute}
 
+    def audio_mezclado(self, b):
+        """«Exportar audio mezclado» (reproductor, pistas.js): una grabación en dos pistas a un WAV normal en el
+        Escritorio, con lo que se oye (tú, los demás y el eco). La que se está grabando, no."""
+        abs_path = safe(alias_of(b.get("path")), "file")
+        r = self.rec
+        grabando = r.path if r and r.alive() else None
+        try:
+            out = pistas.exportar_peticion(abs_path, desktop_dir(), b, grabando=grabando)
+        except ValueError as e:
+            raise ApiError(str(e))
+        log(f"🎧 audio mezclado exportado ({out['segundos'] / 60:.1f} min)")
+        return out
+
     def rec_stop(self, b):
         with self.rec_lock:
             r = self.rec
@@ -621,6 +662,8 @@ class Grabar:
                 voices.write_micro(voices.sidecar_path(r.path), tl)
         except Exception:
             log_exc()
+        if os.path.isfile(r.path):  # informe tecnico (punto 32): segundos, audio perdido y eco; antes de moverla
+            informe.grabacion(r.path, r.status, secs)
         self.library.at = 0
         log(f"■ Grabación parada: {rel_of(r.path)} ({secs / 60:.1f} min)")
         # «Ya ha empezado «X» · Grabar · Ahora no»: durante SIGUIENTE_S, la reunión de ahora que no sea la grabada
@@ -659,6 +702,8 @@ class Grabar:
                 self.notes_save({"path": rel, "props": {"interrumpida": f"{a_las} · {motivo}"}, "_al_grabar": True})
         except Exception:
             log_exc()
+        if os.path.isfile(r.path):  # informe tecnico (punto 32), tambien de la que se corto
+            informe.grabacion(r.path, r.status)
         self.library.at = 0
         log(f"✖ Grabación interrumpida a las {a_las}: {rel} ({motivo})"
             + (" · se sigue en una continuación" if sigue else " · no se sigue"))

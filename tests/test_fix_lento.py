@@ -257,9 +257,9 @@ class AudioHuellaTests(unittest.TestCase):
         llamado = []
         real = voices.load_audio_16k
 
-        def entera(path, cancelled=None, en_disco=None):
+        def entera(path, cancelled=None, en_disco=None, canal=None):  # canal: el de un WAV en dos pistas
             llamado.append(path)
-            return real(path, cancelled, en_disco)
+            return real(path, cancelled, en_disco, canal)
         with mock.patch.object(voices, "load_audio_16k", side_effect=entera), mock.patch.object(voices, "log"):
             voz, por_tramos = voices.audio_huella(p, self.TRAMOS, duracion(p))
         self.assertFalse(por_tramos)
@@ -275,7 +275,8 @@ class AudioHuellaTests(unittest.TestCase):
         hasta = main[main.index('progress(stage="Leyendo audio…"'):]
         rama = hasta[hasta.index("        if a.fingerprint:"):]
         rama = rama[:rama.index("            return 0")]
-        self.assertIn('audio_huella(a.diarize, tramos, data.get("duracion_s"), en_disco=tmp)', rama)
+        # con dos pistas (15/11/2026) lleva además el canal de ese hablante
+        self.assertIn('audio_huella(a.diarize, tramos, data.get("duracion_s"), en_disco=tmp, canal=canal)', rama)
         self.assertNotIn("load_audio_16k", hasta[:hasta.index("        if a.fingerprint:")] + rama)
 
     def test_la_huella_sale_siempre_de_sus_segundos(self):

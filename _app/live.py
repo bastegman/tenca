@@ -24,7 +24,9 @@ import numpy as np
 
 import directo_avisos
 import engines
+import pistas
 from common import log
+import informe  # el informe tecnico de la reunion (punto 32): trozos, tramos y esperas
 
 SR = 16000
 OPEN = 0xFFFFFFFF
@@ -158,6 +160,8 @@ def wav_info(path):
             if tag == 0xFFFE and off + 34 <= len(head):  # WAVE_FORMAT_EXTENSIBLE
                 tag = struct.unpack("<H", head[off + 32:off + 34])[0]
             info.update(tag=tag, channels=ch, rate=rate, byte_rate=br, block_align=ba, bits=bits)
+        elif cid == b"LIST" and pistas.MARCA in head[off + 8:off + 8 + n]:  # grabacion propia en dos pistas
+            info["pistas"] = info.get("channels") == 2 and info.get("bits") == 16 and info.get("tag") == 1
         elif cid == b"data":
             if "rate" not in info or not info["byte_rate"]:
                 return None
@@ -183,6 +187,8 @@ def to_mono(raw, info):
         x = (((b[:, 0] | (b[:, 1] << 8) | (b[:, 2] << 16)) << 8) >> 8).astype(np.float32) / 8388608.0
     else:
         raise engines.EngineError(f"Formato WAV no soportado ({bits} bits)")
+    if ch == 2 and info.get("pistas"):  # micro + lo que suena: la suma es la mezcla de antes (no la media)
+        return pistas.a_mono(x.reshape(-1, 2))
     if ch > 1:
         x = x.reshape(-1, ch).mean(axis=1)
     return x
@@ -821,6 +827,7 @@ def run(job, path, opts, write, log):
                 stage("Whisper no respondía: reiniciándolo…")
         else:
             log("   se salta un trozo que Whisper no consigue transcribir")
+            st["saltado"] = True
             return []
         if res["language"] != lang:
             log(f"   idioma: {res['language']}" + (f" ({res['prob']:.0%})" if res.get("prob") else ""))
@@ -885,6 +892,7 @@ def run(job, path, opts, write, log):
                     stage(msg)
                     publish(None, paused=True)
                     time.sleep(POLL_S)
+                    informe.pausa(job, POLL_S)
                     continue
                 if paused_logged:
                     log("   directo reanudado: vuelve a haber cupo")
@@ -934,6 +942,7 @@ def run(job, path, opts, write, log):
                 new = None
                 if voice >= DIRECT_MIN_VOICE_S:  # menos de 1 s de voz: musica/ruido, Whisper solo inventaria
                     tm = {"prep": perf_counter() - t_iter}
+                    fallo = st["saltado"] = False
                     try:
                         new = transcribe(audio, t0 + a / SR, tm, voice)
                     except engines.Cancelled:
@@ -950,7 +959,7 @@ def run(job, path, opts, write, log):
                         # salta, la grabacion sigue y el repaso final lo recupera; si Groq ha bloqueado la clave, la
                         # siguiente vuelta entra en pausa. Tambien un fallo inesperado (una respuesta rara del proxy)
                         err = str(e) if isinstance(e, engines.EngineError) else f"{e.__class__.__name__}: {e}"
-                        new, job.live_error = [], err
+                        new, job.live_error, fallo = [], err, True
                         hueco = opts.get("hueco")  # apuntado ya, no al terminar: si el proceso muere, queda dicho
                         if hueco:  # (una escritura por reunion: si ya estaba apuntado, no se reescribe)
                             hueco()
@@ -960,6 +969,7 @@ def run(job, path, opts, write, log):
                         # err ya es una frase con lo que ha pasado y que hacer (engines.cloud_http_error…)
                         stage(f"Sin respuesta de la nube: {err.rstrip('.')}. Se sigue con el siguiente trozo; el "
                               "repaso final recupera el texto.")
+                    informe.trozo(job, cloud, cfg, t0 + a / SR, len(audio) / SR, not (fallo or st["saltado"]))
                     if job.restart:  # se pidio rehacer mientras tanto: este trozo ya no vale
                         continue
                     if lang_cuts():  # cambio el idioma con la peticion en vuelo (a la nube no se le corta): fuera
