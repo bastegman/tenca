@@ -1317,6 +1317,44 @@ def join_participants(names):
     return ("; " if any("," in n for n in names) else ", ").join(names)
 
 
+# las palabras de un nombre de lista que no cuentan sueltas («TSA y legal», «HR and people», «Gestão de dados»)
+_VACIAS = frozenset(("y", "e", "o", "u", "a", "and", "or", "of", "the", "for", "to", "in", "on", "de", "del", "do",
+                     "da", "dos", "das", "la", "el", "los", "las", "lo", "en", "con", "com", "para", "por", "sin",
+                     "et", "und", "der", "die"))
+
+
+def _esta(k, hay):
+    return bool(re.search(r"(?<!\w)" + re.escape(k) + r"(?!\w)", hay))
+
+
+def _palabras_nombre(nombre):
+    """Las palabras de un nombre de lista que cuentan sueltas (sin «y», «and», «de»… ni las genéricas): «TSA y legal» →
+    tsa, legal; «Legacy (AS400)» → legacy, as400. De 3 letras o más, siglas de 2 en mayúsculas («HR», «BI») o con
+    cifras («Wave 1» → wave, 1: si no, «wave» sola valdría por el nombre entero y «Wave 3» iría a «Wave 1»)."""
+    out = []
+    for w in re.findall(r"\w+", str(nombre or "")):
+        f = fold(w)
+        if f not in _VACIAS and f not in _GENERICOS and f not in out \
+                and (len(f) >= 3 or (len(w) == 2 and w.isupper()) or any(c.isdigit() for c in w)):
+            out.append(f)
+    return out
+
+
+def _por_nombre(nombre, hay, crudo=""):
+    """Puntos del nombre de la lista en lo que dice la reunión: 2 si está entero o están todas sus palabras («Legal y
+    TSA» para «TSA y legal»), 1 por palabra suelta («TSA review» para «TSA y legal»; con un término de la lista ya
+    llega al umbral). Antes solo contaba la frase entera, y «Legacy (AS400)» o «HR and people» casi nunca salían así en
+    un asunto (16/11/2026). `hay`: el texto de la reunión plegado (fold); `crudo`, tal cual: las siglas de dos
+    letras cuentan solo escritas en mayúsculas («IT» no es «it» en «Review it»). Devuelve (puntos, entero): entero si
+    el nombre sale tal cual, para desempatar «Network» frente a «Network team» (que, sin «team», también suma 2)."""
+    k = fold(nombre or "").strip()
+    if len(k) >= 3 and k not in _GENERICOS and _esta(k, hay):
+        return 2, True
+    pal = _palabras_nombre(nombre)
+    hits = sum(1 for w in pal if (_esta(w, hay) if len(w) >= 3 else _esta(w.upper(), crudo)))
+    return (2 if pal and hits == len(pal) else hits), False
+
+
 def suggest(meeting, vocab_lists, min_score=2):
     """Nombre, tema y participantes sugeridos para la grabación.
 
@@ -1324,21 +1362,28 @@ def suggest(meeting, vocab_lists, min_score=2):
     `vocab_lists`: [{id, project, name, terms: [...]}] (las listas <proyecto>/Vocabulario/<tema>.txt).
     El tema es la lista con más términos (y nombre de proyecto/tema) presentes en asunto + categorías +
     organizador + asistentes; un término suelto no basta (umbral `min_score`), para no sugerir a ciegas.
+    El nombre del proyecto suma a todas sus listas a la vez: si es lo único que coincide (el asunto dice el proyecto y
+    nada de ninguna lista), va la General del proyecto y no la primera por orden alfabético; si alguna lista coincide
+    por lo suyo (términos o nombre), gana la concreta, como antes. A igual puntuación manda, en este orden: que el
+    asunto nombre el proyecto de la lista (una reunión de un cliente no se va a la lista de otro), lo que coincide de la
+    propia lista, su nombre entero y la General o la concreta según lo anterior.
     """
     meeting = meeting or {}
     subject = " ".join(str(meeting.get("subject") or "").split())
     attendees = [a for a in (meeting.get("attendees") or []) if a]
     organizer = str(meeting.get("organizer") or "").strip()
     categories = [c for c in (meeting.get("categories") or []) if c]
-    hay = " " + fold(" ".join([subject] + categories + [organizer] + attendees)) + " "
+    crudo = " ".join([subject] + categories + [organizer] + attendees)
+    hay = " " + fold(crudo) + " "
     best, best_key = None, None
     for i, v in enumerate(vocab_lists or []):
-        score = _puntos(v.get("terms") or [], hay)
-        for key in (v.get("project"), v.get("name")):
-            k = fold(key or "").strip()
-            if len(k) >= 3 and k not in _GENERICOS and re.search(r"(?<!\w)" + re.escape(k) + r"(?!\w)", hay):
-                score += 2
-        key = (score, fold(v.get("name") or "") != "general", -i)
+        por_nombre, entero = _por_nombre(v.get("name"), hay, crudo)
+        propio = _puntos(v.get("terms") or [], hay) + por_nombre
+        k = fold(v.get("project") or "").strip()
+        nombrado = len(k) >= 3 and k not in _GENERICOS and _esta(k, hay)
+        score = propio + (2 if nombrado else 0)
+        general = fold(v.get("name") or "").strip() == "general"
+        key = (score, nombrado, propio, entero, general if not propio else not general, -i)
         if score >= min_score and (best_key is None or key > best_key):
             best, best_key = v, key
     participants, seen = [], set()
@@ -1526,18 +1571,27 @@ class Vigia:
         self.proc = None
 
     def abrir_aviso(self, puerto, app_dir, python=None, creationflags=0, segundos=20, ocultar=False, siguiente=None,
-                    titulo=None, sub=None, tema=None):
+                    titulo=None, sub=None, tema=None, tema_plan=None):
         """Lanza aviso.py (proceso aparte, como el selector de carpetas) con lo que se sabe de la reunión. ocultar: el
         ajuste «Al compartir pantalla» (que el aviso no salga en lo que ven los demás). `siguiente`: el aviso de «Ya
-        ha empezado «X»» al parar una grabación, con sus textos; su «Grabar» graba esa reunión (/api/rec/siguiente)."""
+        ha empezado «X»» al parar una grabación, con sus textos; su «Grabar» graba esa reunión (/api/rec/siguiente).
+        `tema_plan()`: el proyecto › lista con que grabará su «Grabar» (server.tema_del_plan). Sin él, el de la
+        sugerencia por título, que puede no ser el que se usa: el plan antes mira la misma reunión grabada antes, el
+        proyecto fijo de Ajustes y la última grabación (16/11/2026)."""
         sug = dict((self.ultimo or {}).get("sugerencia") or {})
         if siguiente:
             cmd_reunion = ["--titulo", titulo or siguiente, "--siguiente", siguiente, "--tema", tema or ""] + (
                 ["--sub", sub] if sub else [])
         else:
             titulo = ((self.ultimo or {}).get("teams") or {}).get("title") or sug.get("name") or ""
+            etiqueta = sug.get("vocab_label") or ""
+            if callable(tema_plan):
+                try:
+                    etiqueta = tema_plan() or ""
+                except Exception:
+                    log_exc()
             cmd_reunion = ["--titulo", titulo, "--nombre", sug.get("name") or "", "--vocab", sug.get("vocab") or "",
-                           "--tema", sug.get("vocab_label") or ""]
+                           "--tema", etiqueta]
         cmd = [python or sys.executable, os.path.join(app_dir, "aviso.py"), "--puerto", str(puerto), *cmd_reunion,
                "--segundos", str(segundos)] + (["--ocultar-captura"] if ocultar else [])
         try:
@@ -1549,7 +1603,7 @@ class Vigia:
             log_exc()
             return False
 
-    def tic(self, app, recording, settings, leer, puerto, app_dir, creationflags=0, cada=60):
+    def tic(self, app, recording, settings, leer, puerto, app_dir, creationflags=0, cada=60, tema_plan=None):
         """Un paso del vigilante (cada ~8 s): lee la reunión mientras dure la llamada, abre el aviso cuando toca
         y lo cierra si la llamada termina o ya se graba. Devuelve True solo en el paso en que abre el aviso."""
         if app and (self.ultimo is None or time.time() - self.ultimo_at > cada):
@@ -1561,7 +1615,8 @@ class Vigia:
                                             self.avisado)
         if abrir:
             return self.abrir_aviso(puerto, app_dir, creationflags=creationflags,
-                                    ocultar=settings.get("ocultar_al_compartir", True) is not False)
+                                    ocultar=settings.get("ocultar_al_compartir", True) is not False,
+                                    tema_plan=tema_plan)
         # sin llamada, el de la llamada sobra; el de «Ya ha empezado «X»» no depende de ella: solo se cierra al grabar
         if (recording or (not app and self.tipo != "siguiente")) and self.abierto():
             self.cerrar_aviso()

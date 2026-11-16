@@ -390,6 +390,8 @@ class Grabar:
         r, m = self.rec, self.monitor
         if q.get("monitor"):
             self.monitor_seen = time.time()
+        if q.get("ui"):
+            self.ui_vista = time.monotonic()  # la interfaz sondea (cada 1,5 s; 0,3 grabando): ver rec_elegir
         out = {"recording": bool(r and r.alive()), "monitor": bool(m and m.alive()), "meeting": self.meeting,
                "build": BUILD}
         if r and r.alive():
@@ -412,6 +414,11 @@ class Grabar:
               and not getattr(r, "apuntado", True)):
             # el proceso ya no esta y aun no se ha apuntado el corte (se esta leyendo lo ultimo): ya es un corte
             out["cortada"] = {"tipo": "cortada", "path": rel_of(r.path), "pendiente": True}
+        t = getattr(self, "tarjeta_pedida", None)
+        if out["recording"] and t:  # se empezó a grabar antes de que la interfaz la abriera: ya no se abre al parar
+            self.tarjeta_pedida = dict(t, at=0)
+        elif t and time.time() - t["at"] < self.TARJETA_S:
+            out["tarjeta"] = t["seq"]  # «Cambiar» del aviso flotante: la interfaz abre la tarjeta (rec_elegir)
         if not out["recording"]:
             out["siguiente"] = self._siguiente_pub()
         return out
@@ -829,3 +836,35 @@ class Grabar:
                 return {"ok": True}
         open_ui()
         return {"ok": True, "browser": True}
+
+    TARJETA_S = 30  # la tarjeta pedida desde el aviso flotante se abre si la interfaz lo ve antes de esto
+    UI_VIVA_S = 5  # la interfaz ha sondeado /api/rec/status?ui=1 hace menos de esto: está abierta
+
+    def rec_elegir(self, b):
+        """POST /api/rec/elegir: «Cambiar» del aviso flotante (16/11/2026). El aviso graba al momento con el
+        plan de la reunión; para elegir otro proyecto › lista al empezar, pide la tarjeta de Grabar: se trae la ventana
+        y la interfaz, al ver `tarjeta` en /api/rec/status (rec_status), la abre con la reunión de ahora. Con una
+        grabación en marcha no hay nada que elegir (lo dice `recording`). {vista: N}: la interfaz ya ha atendido la
+        petición N; ninguna otra página (otra ventana, o la misma al recargarse) la vuelve a abrir."""
+        if "vista" in b:
+            t = getattr(self, "tarjeta_pedida", None)
+            if t and t["seq"] == b.get("vista"):
+                self.tarjeta_pedida = dict(t, at=0)
+            return {"ok": True}
+        if self.rec and self.rec.alive():
+            return {"ok": False, "recording": True}
+        anterior = getattr(self, "tarjeta_pedida", None) or {}
+        self.tarjeta_pedida = {"seq": int(anterior.get("seq") or 0) + 1, "at": time.time()}
+        log(f"   tarjeta de grabar pedida desde {'el aviso flotante' if b.get('origen') == 'aviso' else 'fuera'}")
+        vista = getattr(self, "ui_vista", None)
+        if WINDOW is None and vista is not None and time.monotonic() - vista < self.UI_VIVA_S:
+            # sin ventana propia (Edge) pero con la interfaz abierta y sondeando: abre ella la tarjeta, sin otro Edge
+            return {"ok": True, "abierta": True, "tarjeta": self.tarjeta_pedida["seq"]}
+        return dict(self.mostrar({}), tarjeta=self.tarjeta_pedida["seq"])
+
+    def tema_del_plan(self, st=None):
+        """Proyecto › lista con que grabaría ahora Ctrl+Alt+R o el «Grabar» del aviso (plan_grabar con la reunión de
+        ahora), para que el aviso diga eso y no solo la sugerencia por título: el plan antes mira la misma reunión
+        grabada antes, el proyecto fijo de Ajustes y la última grabación. "" sin proyecto."""
+        p = self.plan_grabar({}, st=st)["proyecto"]
+        return p["texto"] if p.get("vocab") else ""

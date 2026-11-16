@@ -45,7 +45,7 @@ class PerfilCargaTests(unittest.TestCase):
         self.assertIn("sSumLang: el => ({ summary: { lang: el.value } })", app)
         # mezclas nuevas en la lista de idiomas y el toast de Ctrl+Alt+R con «clic para ajustar»
         self.assertIn("['es-pt', 'Español + portugués (mezcla)'], ['en-pt', 'Inglés + portugués (mezcla)']", app)
-        self.assertIn("clic para verla y cambiar el idioma o el contexto", app)
+        self.assertIn("clic para verla y cambiar el proyecto, el idioma o el contexto", app)
         # el idioma de la reunion no cambia el ajuste general al grabar
         self.assertNotIn("S.config.language = S.selLang = $('#rLang', d).value;", app)
 

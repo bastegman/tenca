@@ -639,8 +639,9 @@ class RutasPlanTests(unittest.TestCase):
         src = codigo_del_servidor()
         self.assertIn('"/api/grabar/plan": a.grabar_plan_api', src)
         self.assertIn('"/api/grabar/recordar": a.grabar_recordar', src)
-        # la tarjeta (grabar_plan_api), Ctrl+Alt+R, Hoy (B7) y «Ya ha empezado «X»» (rec_siguiente): el mismo cálculo
-        self.assertEqual(src.count("self.plan_grabar("), 4)
+        # la tarjeta (grabar_plan_api), Ctrl+Alt+R, Hoy (B7), «Ya ha empezado «X»» (rec_siguiente) y lo que dice el
+        # aviso flotante (tema_del_plan, 16/11/2026): el mismo cálculo
+        self.assertEqual(src.count("self.plan_grabar("), 5)
 
 
 if __name__ == "__main__":

@@ -101,6 +101,8 @@ class FakeHandler(BaseHTTPRequestHandler):
                 return self._json({"error": "Esa reunión ya no está en curso: graba desde «Grabar» si sigues en ella."},
                                   400)
             return self._json({"recording": True, "path": "Reuniones/y.wav", "workstream": None})
+        if self.path == "/api/rec/elegir":  # «Cambiar»: la tarjeta de Grabar de la app
+            return self._json({"ok": True, "tarjeta": 1})
         if self.path == "/api/rec/toggle":
             if self.server.fail:
                 return self._json({"error": "No se pudo grabar: prueba"}, 400)
@@ -274,12 +276,13 @@ class AvisoTests(unittest.TestCase):
         with open(os.path.join(ART, "foco.json"), "w", encoding="utf-8") as f:
             json.dump(foco, f, indent=1)
         trabajo.cerrar()
-        # abajo y centrado en el área de trabajo (sin pisar la barra de tareas), tamaño ~340×64 × escala
+        # abajo y centrado en el área de trabajo (sin pisar la barra de tareas), tamaño ~380×64 × escala (340 hasta que
+        # llevó «Cambiar» junto al proyecto, 16/11/2026)
         self.assertGreaterEqual(x, l)
         self.assertLessEqual(x + w, r)
         self.assertLessEqual(y + h, b)
         self.assertLessEqual(abs((x + w / 2) - (l + r) / 2), 2 * e["escala"] + 2)
-        self.assertLessEqual(abs(w - 340 * e["escala"]), 4)
+        self.assertLessEqual(abs(w - 380 * e["escala"]), 4)
         self.assertLessEqual(abs(h - 64 * e["escala"]), 4)
         self.assertTrue(e.get("exstyle", 0) & 0x08000000, "WS_EX_NOACTIVATE")  # no roba el foco
         self.assertTrue(e.get("exstyle", 0) & 0x80, "WS_EX_TOOLWINDOW")  # ni sale en la barra de tareas
@@ -301,6 +304,54 @@ class AvisoTests(unittest.TestCase):
                                             "vocab": "Alfa/Vocabulario/General.txt"})
         with open(os.path.join(ART, "aviso_auto.json"), "w", encoding="utf-8") as f:
             json.dump({"estado": e, "resultado": res, "posts": posts}, f, ensure_ascii=False, indent=1)
+
+    def test_cambiar_pide_la_tarjeta_de_grabar(self):
+        """«Cambiar», junto al proyecto (16/11/2026): POST /api/rec/elegir y el aviso se cierra; la app sale
+        delante con la tarjeta de Grabar. Primero con --auto-elegir-ms (el POST) y luego con un clic real en él."""
+        p, est = self.abrir("elegir", "--auto-elegir-ms", "2500")
+        e = self.estado(est)
+        self.assertIn("cambiar", e["botones"], e)
+        self.assertEqual(e["sub"], "Alfa · General")  # el proyecto entero, sin «Tema:» ni recortar, junto a Cambiar
+        x, y, w, h = e["geometry"]
+        cx, cy = e["botones"]["cambiar"]
+        self.assertTrue(x <= cx <= x + w and y <= cy <= y + h, e)  # dentro del aviso, a la vista
+        res = self.resultado(p)
+        self.assertEqual(res, {"resultado": "elegir", "tarjeta": 1})
+        posts = self.espera_post()
+        self.assertEqual([(q["path"], q["body"]) for q in posts], [("/api/rec/elegir", {"origen": "aviso"})])
+        with self.srv.lock:
+            self.srv.posts.clear()
+        p, est = self.abrir("elegir-clic")
+        e = self.estado(est)
+        time.sleep(0.5)
+        clic(*e["botones"]["cambiar"])
+        posts = self.espera_post(5)
+        if not posts:
+            p.kill()
+            self.skipTest("el clic sintético no llegó a la ventana en este escritorio (el POST, con --auto-elegir-ms)")
+        self.assertEqual(self.resultado(p)["resultado"], "elegir")
+        self.assertEqual(posts[0]["path"], "/api/rec/elegir")
+
+    def test_sin_proyecto_dice_sin_proyecto_y_elegir(self):
+        """Revisión 2, P3-2: sin proyecto, «Sin proyecto · Elegir», entero (con «Elegir proyecto» al lado, «Pulsa Grabar
+        para tomar notas» se recortaba)."""
+        est = os.path.join(ART, "estado-sin-proyecto.json")
+        if os.path.exists(est):
+            os.remove(est)
+        p = subprocess.Popen([sys.executable, AVISO, "--puerto", str(self.port), "--titulo", "Reunión semanal",
+                              "--segundos", "4", "--estado", est], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, encoding="utf-8")
+        self.procs.append(p)
+        e = self.estado(est)
+        self.assertEqual(e["sub"], "Sin proyecto")
+        self.assertIn("cambiar", e["botones"], e)
+        self.resultado(p)
+
+    def test_en_la_siguiente_reunion_no_hay_cambiar(self):
+        p, est = self.abrir("siguiente-sin-cambiar", "--siguiente", "Revisión de presupuesto", segundos=4)
+        e = self.estado(est)
+        self.assertNotIn("cambiar", e["botones"], e)
+        self.resultado(p)
 
     def test_clic_real_en_grabar(self):
         trabajo = VentanaDeTrabajo()
