@@ -172,7 +172,9 @@ function Run-Installer($dir, $label, $timeoutMin, $sondear = $true) {
         # no lleva BOM y PowerShell 5.1 lo lee como ANSI
         $m = [regex]::Match((Last-Run-Log), "ventana: lo m\S{1,2}s largo sin atenderla, ([\d.,]+) s")
         $hueco = $(if ($m.Success) { [double]($m.Groups[1].Value -replace ",", ".") } else { $null })
-        Check "$label.ventana_latido" ($null -ne $hueco -and $hueco -lt 2.5) $(if ($m.Success) { $m.Value } else { "sin la linea del latido en instalar.log" })
+        # puerta en 4 s (Windows la da por colgada a los 5): el temporizador es el mensaje de menos prioridad y, con la
+        # ventana repintando mucho (pip en una primera instalacion), su hueco sale algo mayor que el de la sonda
+        Check "$label.ventana_latido" ($null -ne $hueco -and $hueco -lt 4.0) $(if ($m.Success) { $m.Value } else { "sin la linea del latido en instalar.log" })
     }
     if (-not $p.HasExited) {
         Check "$label.termina" $false "INSTALAR.bat no termino en $timeoutMin min (se mata)"
