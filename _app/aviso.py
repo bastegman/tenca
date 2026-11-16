@@ -221,7 +221,7 @@ class Aviso:
         titulo, tema = limpiar_texto(args.titulo), limpiar_texto(args.tema)
         if not getattr(args, "siguiente", ""):
             f_link = tkfont.Font(family=fam, size=8, underline=True)
-            enlace = "Cambiar" if tema else "Elegir proyecto"  # sin proyecto, al lado de «Pulsa Grabar…»
+            enlace = "Cambiar" if tema else "Elegir"  # sin proyecto: «Sin proyecto · Elegir» (cabe entero)
             self.cambiar_btn = tk.Label(fila, text=enlace, fg=C["boton"], bg=C["fondo"], font=f_link,
                                         cursor="hand2")
             self.cambiar_btn.pack(side="left", padx=(int(6 * s), 0))
@@ -231,8 +231,11 @@ class Aviso:
             ancho_sub = max(int(60 * s), ancho_txt - f_link.measure(enlace) - int(6 * s))
         self.l_tit.configure(text=self._encajar(f_tit, titulo or "Llamada en curso", ancho_txt))
         # con «Cambiar» al lado, el proyecto › lista sin «Tema:» delante: así cabe entero más a menudo
-        sub = limpiar_texto(getattr(args, "sub", "")) or (
-            (tema if self.cambiar_btn is not None else "Tema: " + tema) if tema else "Pulsa Grabar para tomar notas")
+        if self.cambiar_btn is not None:
+            sub = limpiar_texto(getattr(args, "sub", "")) or tema or "Sin proyecto"
+        else:
+            sub = limpiar_texto(getattr(args, "sub", "")) or (
+                ("Tema: " + tema) if tema else "Pulsa Grabar para tomar notas")
         self.sub(self._encajar(f_sub, sub, ancho_sub))
         for w in [self.grabar_btn] + partes:
             w.bind("<Button-1>", lambda e: self.grabar())

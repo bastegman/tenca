@@ -2141,6 +2141,16 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         pg.wait_for_selector("#modal.hidden", state="attached", timeout=5000)
         time.sleep(2)  # otro sondeo: la misma petición no la vuelve a abrir
         self.assertFalse(pg.is_visible(".dialog.gr"))
+        # revisión 2, P3-1: con la tarjeta de «Subir audio» abierta (también .dialog.gr) no se pisa, pero se dice
+        pg.evaluate("(() => { const m = document.querySelector('#modal');"
+                    " m.innerHTML = '<div class=\"dialog gr sb\"><div class=\"gr-kicker\">Subir audio</div></div>';"
+                    " m.classList.remove('hidden'); })()")
+        self.api_post("/api/rec/elegir", {"origen": "aviso"})
+        pg.wait_for_function("document.querySelector('#toasts').textContent.includes('Cierra este diálogo')",
+                             timeout=8000)
+        self.assertEqual(pg.text_content("#modal .gr-kicker"), "Subir audio")
+        pg.evaluate("(() => { const m = document.querySelector('#modal'); m.classList.add('hidden');"
+                    " m.innerHTML = ''; })()")
         err, red = self.limpiar(errores, red)
         self.assertEqual(err, [], (err, red))
         self.assertEqual(red, [], red)

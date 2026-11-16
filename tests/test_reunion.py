@@ -435,6 +435,20 @@ class SuggestTests(unittest.TestCase):
         self.assertEqual(calendario.suggest({"subject": "Network team weekly"}, listas)["vocab"],
                          "Beta/Vocabulario/Network team.txt")
 
+    def test_las_cifras_del_nombre_cuentan(self):
+        """Revisión 2, P2-1: «Wave 1» quedaba en «wave» (las cifras no contaban) y esa palabra sola valía por el nombre
+        entero: «Wave 3 planning» iba a «Wave 1». Ahora pide también la cifra, como palabra entera («1» no es «10»)."""
+        olas = [{"id": f"Gamma/Vocabulario/{n}.txt", "project": "Gamma", "name": n, "terms": []}
+                for n in ("Wave 1", "Wave 2", "General")]
+        self.assertEqual(calendario._palabras_nombre("Wave 1"), ["wave", "1"])
+        self.assertEqual(calendario.suggest({"subject": "Wave 3 planning"}, olas)["vocab"], "")
+        self.assertEqual(calendario.suggest({"subject": "Wave readiness"}, olas)["vocab"], "")
+        self.assertEqual(calendario.suggest({"subject": "Wave 10 kickoff"}, olas)["vocab"], "")
+        self.assertEqual(calendario.suggest({"subject": "Wave 2 go/no-go"}, olas)["vocab"],
+                         "Gamma/Vocabulario/Wave 2.txt")
+        self.assertEqual(calendario.suggest({"subject": "Go-live wave 1"}, olas)["vocab"],
+                         "Gamma/Vocabulario/Wave 1.txt")
+
     def test_sin_reunion_ni_listas(self):
         self.assertEqual(calendario.suggest({}, [])["name"], "")
         self.assertEqual(calendario.suggest(None, None)["participants"], [])

@@ -332,6 +332,21 @@ class AvisoTests(unittest.TestCase):
         self.assertEqual(self.resultado(p)["resultado"], "elegir")
         self.assertEqual(posts[0]["path"], "/api/rec/elegir")
 
+    def test_sin_proyecto_dice_sin_proyecto_y_elegir(self):
+        """Revisión 2, P3-2: sin proyecto, «Sin proyecto · Elegir», entero (con «Elegir proyecto» al lado, «Pulsa Grabar
+        para tomar notas» se recortaba)."""
+        est = os.path.join(ART, "estado-sin-proyecto.json")
+        if os.path.exists(est):
+            os.remove(est)
+        p = subprocess.Popen([sys.executable, AVISO, "--puerto", str(self.port), "--titulo", "Reunión semanal",
+                              "--segundos", "4", "--estado", est], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, encoding="utf-8")
+        self.procs.append(p)
+        e = self.estado(est)
+        self.assertEqual(e["sub"], "Sin proyecto")
+        self.assertIn("cambiar", e["botones"], e)
+        self.resultado(p)
+
     def test_en_la_siguiente_reunion_no_hay_cambiar(self):
         p, est = self.abrir("siguiente-sin-cambiar", "--siguiente", "Revisión de presupuesto", segundos=4)
         e = self.estado(est)

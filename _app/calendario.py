@@ -1329,12 +1329,13 @@ def _esta(k, hay):
 
 def _palabras_nombre(nombre):
     """Las palabras de un nombre de lista que cuentan sueltas (sin «y», «and», «de»… ni las genéricas): «TSA y legal» →
-    tsa, legal; «Legacy (AS400)» → legacy, as400. De 3 letras o más, o siglas de 2 en mayúsculas («HR», «BI»)."""
+    tsa, legal; «Legacy (AS400)» → legacy, as400. De 3 letras o más, siglas de 2 en mayúsculas («HR», «BI») o con
+    cifras («Wave 1» → wave, 1: si no, «wave» sola valdría por el nombre entero y «Wave 3» iría a «Wave 1»)."""
     out = []
     for w in re.findall(r"\w+", str(nombre or "")):
         f = fold(w)
-        if f not in _VACIAS and f not in _GENERICOS and (len(f) >= 3 or (len(w) == 2 and w.isupper())) \
-                and f not in out:
+        if f not in _VACIAS and f not in _GENERICOS and f not in out \
+                and (len(f) >= 3 or (len(w) == 2 and w.isupper()) or any(c.isdigit() for c in w)):
             out.append(f)
     return out
 

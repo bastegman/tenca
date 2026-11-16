@@ -619,7 +619,7 @@ function tarjetaPedida() {
   S.tarjetaVista = t;
   api('/api/rec/elegir', { vista: t }).catch(() => { });  // atendida: otra página (o esta al recargar) no la repite
   if (!$('#modal').classList.contains('hidden')) {
-    if ($('#modal .dialog.gr')) return;  // ya está abierta
+    if (recDialog) return;  // la de Grabar ya está abierta (la de Subir audio también es .gr: esa no vale)
     return toast('Cierra este diálogo y pulsa <b>● Grabar</b> para elegir el proyecto de la reunión');
   }
   abrirGrabar({ aviso: true });  // sin la carpeta de la vista: la app estaba donde la dejaste, no en esta reunión
