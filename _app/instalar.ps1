@@ -134,7 +134,7 @@ function Finish-Ui($ok, $text) {
     $ui.done = $true
     Ui-Log $(if ($ok) { "Listo." } else { "X $text" })
     $ui.btnClose.Focus() | Out-Null
-    if ($script:latido) { Log-File ("ventana: lo más largo sin atenderla, {0:N1} s" -f $script:hueco) }
+    if ($script:latido) { Log-File ("ventana: lo más largo sin atenderla, {0:0.0} s" -f $script:hueco) }
     $t0 = Get-Date
     while ($ui.form.Visible) {
         [System.Windows.Forms.Application]::DoEvents()
@@ -256,6 +256,7 @@ function New-InstallerWindow {
         $f.Show()
         $f.Activate()
         [System.Windows.Forms.Application]::DoEvents()
+        $script:latido.Restart()  # desde que se ve: abrir el runspace y ensenarla no cuentan como «sin atender»
         $tm.Start()
         $null = Invoke-Fondo "Hide-Console" @{} @("Hide-Console")
         return $true

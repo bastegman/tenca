@@ -1170,6 +1170,7 @@ class Jobs:
                 raise ApiError("Ya se están identificando las voces de esta reunión.")
             job = Job(rel, os.path.basename(rel), "voces", None)
             job.stage, job.then_summary = "En cola para identificar voces", then_summary
+            job.auto = auto  # la de al terminar una reunion; la pulsada a mano no espera a la memoria
             self.list.append(job)
         self.queues["voces"].put(job)
         log(f"🗣 {job.name}  voces{' (automático)' if auto else ''} en cola")
@@ -1382,7 +1383,8 @@ class Jobs:
             # identificacion anterior ya no son de esos hablantes y «Recordar» guardaria la voz de otro
             self.voice_vectors.pop(job.path, None)
             n = self._participant_hint(abs_path, old)
-            self._esperar_memoria(job)
+            if getattr(job, "auto", False):  # la automatica, al terminar una reunion (la de a mano, enseguida)
+                self._esperar_memoria(job)
             res = self._voices_subprocess(job, ["--diarize", abs_path, "--out", side,
                                                 *(["--participantes", str(n)] if n else []), *rejilla])
             huellas = res.get("huellas") or {}

@@ -117,11 +117,22 @@ class RehacerSuaveTests(RehacerBase):
         corta = self.llamadas[0]["cancel"]
         self.assertFalse(corta())
         with mock.patch.object(carga, "poca_memoria", return_value=True) as pm:
-            self.assertTrue(corta())
-        # con un umbral menor que el de empezar: el propio proceso (~0,26 GB) no lo corta (revision 1, P1-1)
+            # REHACER_CORTE_LECTURAS lecturas seguidas (revision 2, P1-A: un vaiven de otro programa no lo corta)
+            self.assertEqual([corta() for _ in range(app_voces.REHACER_CORTE_LECTURAS)],
+                             [False] * (app_voces.REHACER_CORTE_LECTURAS - 1) + [True])
+        # con un umbral menor que el de empezar: el propio proceso (~0,26 GB) no lo corta (revision 1, P1-1), con
+        # margen (revision 2, P1-A)
         self.assertEqual(pm.call_args.args, (app_voces.REHACER_CORTE_LIBRE,))
-        self.assertLessEqual(app_voces.REHACER_CORTE_LIBRE + int(0.26 * carga.GB), app_voces.REHACER_MIN_LIBRE_TRAS)
+        self.assertLessEqual(app_voces.REHACER_CORTE_LIBRE + int(0.35 * carga.GB), app_voces.REHACER_MIN_LIBRE_TRAS)
         self.assertLess(app_voces.REHACER_MIN_LIBRE_TRAS, app_voces.REHACER_MIN_LIBRE)
+        self.assertLessEqual(app_voces.REHACER_MIN_LIBRE, 1 * carga.GB)  # como antes: con 1 GB libre, enseguida
+
+    def test_un_vaiven_de_memoria_no_corta(self):
+        self.app.rehacer_huellas()
+        corta = self.llamadas[0]["cancel"]
+        lecturas = iter([True, True, False, True, True, False])
+        with mock.patch.object(carga, "poca_memoria", lambda *a: next(lecturas)):
+            self.assertEqual([corta() for _ in range(6)], [False] * 6)
 
     def test_un_pc_que_vive_con_poca_memoria_acaba_rehaciendo(self):
         """Tras REHACER_MEMORIA_MAX_S esperando memoria en la tanda, basta con REHACER_MIN_LIBRE_TRAS (revision 1,
@@ -137,6 +148,21 @@ class RehacerSuaveTests(RehacerBase):
         self.assertEqual(res["rehechas"], 2)
         self.assertEqual(pedidas[0], app_voces.REHACER_MIN_LIBRE)
         self.assertEqual(pedidas[-1], app_voces.REHACER_MIN_LIBRE_TRAS)
+
+    def test_con_una_hora_esperando_memoria_se_intenta_igual(self):
+        """Tope de verdad (revision 2, P1-A): tras REHACER_MEMORIA_TOPE_S esperando memoria en la tanda, ya no se
+        espera y decide el corte."""
+        pedidas = []
+
+        def ocupado(min_libre=carga.MIN_LIBRE, **k):
+            pedidas.append(min_libre)
+            return "memoria" if min_libre > 0 else None
+        with mock.patch.object(carga, "ocupado", ocupado), mock.patch.object(app_voces, "REHACER_MEMORIA_MAX_S", 0.1), \
+                mock.patch.object(app_voces, "REHACER_MEMORIA_TOPE_S", 0.3), mock.patch.object(app_voces, "log"):
+            res = self.app.rehacer_huellas()
+        self.assertEqual(res["rehechas"], 2)
+        self.assertEqual(pedidas[-1], 0)
+        self.assertIn(app_voces.REHACER_MIN_LIBRE_TRAS, pedidas)
 
     def test_con_el_pc_ocupado_espera_y_lo_dice(self):
         estados = iter(["cpu", "memoria", None, None, None, None, None, None, None, None])
@@ -218,6 +244,25 @@ class RehacerAlArrancarSuaveTests(RehacerBase):
         self.app.rehacer_huellas = lambda *a: pedidos.append(a)
         app_voces.Voces.rehacer_huellas_al_arrancar(self.app)
         self.assertEqual(pedidos, [(app_voces.REHACER_ESPERA_S, app_voces.REHACER_CALMA_S)])
+
+    def test_una_cpu_que_va_y_viene_no_bloquea_la_calma(self):
+        """Una muestra de cada tres con la CPU alta: el tiempo esperando a la CPU se suma en la tanda y, al pasar de
+        REHACER_CPU_MAX_S, la CPU ya no cuenta y la calma acaba (revision 2, P2-A: antes, nunca)."""
+        reloj, n = [0.0], [0]
+
+        def ocupado(*a, **k):
+            n[0] += 1
+            return "cpu" if n[0] % 3 == 0 else None
+
+        def dormir(s):
+            reloj[0] += 1.0
+        self.app._rehacer_tanda = self.app._tanda_nueva()
+        with mock.patch.object(carga, "ocupado", ocupado), mock.patch.object(app_voces, "_ahora", lambda: reloj[0]), \
+                mock.patch.object(app_voces, "_dormir", dormir), mock.patch.object(app_voces, "REHACER_PASO_S", 1.0), \
+                mock.patch.object(app_voces, "REHACER_CPU_MAX_S", 20.0), mock.patch.object(app_voces, "log"):
+            self.app._rehacer_calma(60.0)
+        self.assertTrue(self.app._rehacer_tanda["cpu_vencida"])
+        self.assertLess(reloj[0], 200)
 
     def test_la_calma_tiene_que_ser_seguida(self):
         """Tenca y el PC, tranquilos `calma` segundos seguidos: un rato ocupado en medio vuelve a empezar la cuenta."""
@@ -323,12 +368,24 @@ class VocesConMemoriaTests(TempTree):
             jobs._esperar_memoria(job, paso=0.01)
         self.assertEqual(job.stage, "Preparando…")
 
-    def test_run_voices_lo_pide_antes_del_subproceso(self):
+    def test_run_voices_lo_pide_antes_del_subproceso_solo_la_automatica(self):
+        """La de al terminar una reunion espera; la pulsada a mano, no (revision 2, P3-B)."""
         with open(os.path.join(APP, "trabajos.py"), encoding="utf-8") as f:
             src = f.read()
         cuerpo = src[src.index("    def _run_voices(self, job):"):]
+        self.assertLess(cuerpo.index('if getattr(job, "auto", False):'), cuerpo.index("self._esperar_memoria(job)"))
         self.assertLess(cuerpo.index("self._esperar_memoria(job)"),
                         cuerpo.index('self._voices_subprocess(job, ["--diarize"'))
+        jobs = bare_jobs([])
+        jobs.queues = {"voces": types.SimpleNamespace(put=lambda j: None)}
+        jobs.voices_on = lambda: True
+        jobs.library = types.SimpleNamespace(find=lambda rel: None)
+        self.wav("r.wav")
+        self.wav("s.wav")
+        with mock.patch.object(voices, "available", return_value=(True, None)), mock.patch.object(trabajos, "log"):
+            jobs.submit_voices("r.wav", auto=True)
+            jobs.submit_voices("s.wav")
+        self.assertEqual([j.auto for j in jobs.list], [True, False])
 
 
 # ----------------------------------------------------------------------------- precargas del arranque
@@ -441,7 +498,12 @@ class InstaladorNoSeCongelaTests(unittest.TestCase):
     def test_el_runspace_se_abre_antes_de_ensenar_la_ventana(self):
         w = _funcion(self.ps1, "New-InstallerWindow")
         self.assertLess(w.index("Open-Fondo"), w.index("$f.Show()"))
-        self.assertLess(w.index("$script:latido.Restart()"), w.index("$tm.Start()"))
+        # el Restart propio, en su linea (no el del manejador del temporizador): justo antes de arrancarlo
+        # (revision 2, P2-B: el test encontraba el del manejador y pasaba igual sin el arreglo)
+        lineas = [x.strip() for x in w.split("\n")]
+        i = next(k for k, x in enumerate(lineas) if x.startswith("$script:latido.Restart()"))
+        self.assertEqual(lineas[i + 1], "$tm.Start()")
+        self.assertLess(w.index("$f.Show()"), w.index(lineas[i]))
         for nombre in ("$CodigoExe = @'", "$CodigoSalida = @'"):  # un programa que no arranca no hereda el rc de otro
             i = self.ps1.index(nombre)
             self.assertEqual(self.ps1[i:].split("\n")[1], "$global:LASTEXITCODE = $null")
@@ -458,7 +520,7 @@ class InstaladorNoSeCongelaTests(unittest.TestCase):
 
     def test_el_log_dice_la_hora_de_cada_paso_y_lo_mas_largo_sin_atender(self):
         self.assertIn('Log-File ("> $text  [" + (Get-Date -Format "HH:mm:ss") + "]")', _funcion(self.ps1, "Step"))
-        self.assertIn("ventana: lo más largo sin atenderla", _funcion(self.ps1, "Finish-Ui"))
+        self.assertIn('"ventana: lo más largo sin atenderla, {0:0.0} s"', _funcion(self.ps1, "Finish-Ui"))  # sin miles
         self.assertIn("$tm.Add_Tick(", _funcion(self.ps1, "New-InstallerWindow"))
 
     def test_el_e2e_mide_si_la_ventana_responde(self):
