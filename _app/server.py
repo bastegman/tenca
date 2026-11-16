@@ -60,8 +60,8 @@ from instancia import (  # noqa: F401 (fachada: server.X sigue valiendo)
     retire_other_version, show_running, start_session, _UI_LOCK, _UI_OPENED, UI_REOPEN_GAP, ui_url, wait_instance,
     _wait_port_free, write_token)
 from apagado import (  # noqa: F401 (fachada: server.X sigue valiendo)
-    ask_yes_no, make_tray, schedule_shutdown, shutdown, tell, tray_abrir, tray_balloon, tray_estado, tray_grabar,
-    tray_salir)
+    apagando, arranca, ask_yes_no, esperar_salida, make_tray, schedule_shutdown, shutdown, tell, tray_abrir,
+    tray_balloon, tray_estado, tray_grabar, tray_salir)
 from biblioteca import (  # noqa: F401 (fachada: server.X sigue valiendo)
     apply_edits, _CARPETAS, _CARPETAS_LOCK, carpetas_reunion, CarpetasReunion, clean_icon, CLOUD_TEXT_LOCK, CloudText,
     COMPLETE, Complete, DATE_RE, dump_notes, Durations, ICON_BAD, ICON_MAX, IDIOMA_RE, is_partial, Library, LINK_DEPTH,
@@ -480,6 +480,7 @@ def main():
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):
             pass
+    arranca()  # nada se esta apagando (apagado.py)
     PORT = int(arg("--port", PORT))
     URL = f"http://{HOST}:{PORT}/"
     DATA_DIR = os.path.abspath(arg("--data", DATA_DIR))
@@ -572,8 +573,10 @@ def main():
         # la ventana propia exige el hilo principal: el servidor pasa a un hilo y aqui se bloquea hasta apagar
         threading.Thread(target=srv.serve_forever, daemon=True, name="http").start()
         if WINDOW.run():
-            if WINDOW.quitting:
-                return  # apagando: shutdown() termina el proceso
+            if WINDOW.quitting:  # apagando: shutdown() termina el proceso; este hilo no sale antes (apagado.py)
+                if apagando():
+                    esperar_salida()
+                return
             log("la ventana se ha cerrado sin apagar: la app sigue en segundo plano")
         else:
             log("no se pudo abrir la ventana propia (detalle arriba): se abre en Edge")
@@ -594,6 +597,9 @@ def main():
         srv.serve_forever()
     except KeyboardInterrupt:
         pass
+    else:
+        if apagando():  # el servidor ha parado porque se apaga: lo termina shutdown() (o este hilo, si tarda)
+            esperar_salida()
 
 
 if __name__ == "__main__":

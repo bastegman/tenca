@@ -106,10 +106,54 @@ def make_tray(ico_path):
                               "inicio": (inicio_windows_leer, inicio_windows_poner)}, tray_estado)
 
 
+# Apagar termina el proceso en pocos segundos pase lo que pase (lookfeel-e2e: «e.apagar_proceso_muere_5s», que fallaba
+# de vez en cuando: el proceso seguia vivo a los 5 s de «apagado»). Cada paso que espera a otro hilo (cerrar la ventana
+# de pywebview, parar el servidor HTTP) tiene un tope, y el hilo principal, cuando la ventana se cierra al apagar, no
+# sale por su cuenta: la finalizacion de Python (pythonnet, hilos de fondo) podia tardar segundos y dejar a medias el
+# hilo que apaga, que es quien llama a os._exit.
+SALIDA_TOPE_S = 1.5         # cada paso que espera a otro hilo
+SALIDA_PRINCIPAL_S = 8.0    # el hilo principal termina el proceso si shutdown() no lo ha hecho en este tiempo
+_APAGANDO = threading.Event()
+
+
+def apagando():
+    """shutdown() ya esta en marcha (de verdad: va a terminar el proceso)."""
+    return _APAGANDO.is_set()
+
+
+def arranca():
+    """main() al empezar: nada esta apagandose (en los tests, main() corre varias veces en el mismo proceso)."""
+    _APAGANDO.clear()
+
+
+def _con_tope(fn, tope=None):
+    """fn() en un hilo aparte, esperando como mucho `tope` s (sus errores, al log). True si termino a tiempo."""
+    def correr():
+        try:
+            fn()
+        except Exception:
+            log_exc()
+    t = threading.Thread(target=correr, daemon=True, name="apagado-paso")
+    t.start()
+    t.join(SALIDA_TOPE_S if tope is None else tope)
+    return not t.is_alive()
+
+
+def esperar_salida(tope=None, exit_fn=os._exit):
+    """El hilo principal, al volver de la ventana o del servidor durante un apagado: espera a que shutdown() termine
+    el proceso y, si en `tope` s no lo ha hecho, lo termina el (nunca deja que Python empiece a finalizar mientras el
+    otro hilo apaga)."""
+    time.sleep(SALIDA_PRINCIPAL_S if tope is None else tope)
+    exit_fn(0)
+
+
 def shutdown(reason, exit_fn=os._exit):
     """Apagado ordenado (Ajustes > Apagar): medidor/grabadora, trabajos y procesos de Whisper, servidor HTTP, ventana
     y fin del proceso. recorder.py, worker.py y voices.py mueren solos al quedarse sin padre. No llamarlo desde el
-    hilo que ejecuta serve_forever (SERVER.shutdown esperaria a si mismo)."""
+    hilo que ejecuta serve_forever (SERVER.shutdown esperaria a si mismo). Cerrar la ventana y parar el servidor
+    tienen un tope (SALIDA_TOPE_S cada uno): el proceso termina aunque se queden colgados."""
+    if exit_fn is os._exit:  # (los tests llaman con otro exit_fn: no es un apagado de verdad del proceso)
+        _APAGANDO.set()
     log(f"apagando ({reason})")
     try:
         if Handler.app is not None:
@@ -124,16 +168,10 @@ def shutdown(reason, exit_fn=os._exit):
         log_exc()
     log("apagado")
     logging.shutdown()  # antes de parar el servidor: en cuanto serve_forever vuelve, el hilo principal sale solo
-    try:
-        if WINDOW is not None:
-            WINDOW.destroy()
-    except Exception:
-        pass
-    try:
-        if SERVER is not None:
-            SERVER.shutdown()
-    except Exception:
-        pass
+    if WINDOW is not None:
+        _con_tope(WINDOW.destroy)
+    if SERVER is not None:
+        _con_tope(SERVER.shutdown)
     exit_fn(0)
 
 

@@ -391,6 +391,11 @@ $rc = Run-Installer $dir1 "c.instalador" 25  # pip real (faster-whisper, sherpa-
 # "Abrir"; aqui, el autocierre) y el usuario pulsa ademas el acceso directo mientras arranca. Se comprueba en e)
 $deskDoble = Join-Path ([Environment]::GetFolderPath("Desktop")) "$App.lnk"
 $doble = $null
+# la copia que acaba de abrir el instalador: cual de las dos se queda depende de quien coge antes la marca de instancia
+# (las dos arrancan a la vez); en e) se comprueba que queda UNA y que la otra termina sola, sea cual sea
+$primeras = @(Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" | Where-Object { "$($_.CommandLine)" -like "*server.py*" } |
+    ForEach-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue } | Where-Object { $_ })
+foreach ($q in $primeras) { $null = $q.Handle }
 if (Test-Path -LiteralPath $deskDoble) {
     $ldoble = Get-Lnk $deskDoble
     $doble = Start-Process -FilePath $ldoble.TargetPath -ArgumentList $ldoble.Arguments -WorkingDirectory $ldoble.WorkingDirectory -PassThru
@@ -520,9 +525,19 @@ Check "e.proceso_pythonw" ($proc -and $proc.Name -ieq "pythonw") $(if ($proc) { 
 $w = Ventana "icons" "app"
 Check "e.ventana_visible" ($w.hwnd -and $w.visible) ("hwnd=$($w.hwnd) clase=$($w.class) visible=$($w.visible) pid=$($w.pid)")
 Check "e.titulo" ($w.title -eq $App) "$($w.title)"
-# la segunda copia (el acceso directo pulsado durante el arranque) termina sola, sin aviso de error, y no deja Edge
-$dobleSalio = [bool]($doble -and $doble.WaitForExit(30000))
-Check "e.doble_apertura_segunda_termina" ($dobleSalio -and $doble.ExitCode -eq 0) $(if ($doble) { "pid $($doble.Id) exit=$(if ($dobleSalio) { $doble.ExitCode } else { 'sigue viva' })" } else { "sin acceso directo" })
+# de las dos copias (la que abrio el instalador y la del acceso directo pulsado durante el arranque) queda UNA, la que
+# sirve (cualquiera: gana la que coge antes la marca de instancia), y la otra termina sola, con 0, sin aviso de error y
+# sin dejar Edge. Antes se daba por hecho que perdia la del acceso directo, y a veces ganaba ella
+$copias = @(@($primeras) + @($doble) | Where-Object { $_ })
+$ganadoras = @($copias | Where-Object { $_.Id -eq $appPid })
+$perdedoras = @($copias | Where-Object { $_.Id -ne $appPid })
+$detalle = @(foreach ($q in $perdedoras) {
+    $fin = $q.WaitForExit(30000)
+    $quien = $(if ($doble -and $q.Id -eq $doble.Id) { "acceso directo" } else { "instalador" })
+    [pscustomobject]@{ ok = ($fin -and $q.ExitCode -eq 0); txt = "pid $($q.Id) ($quien) exit=$(if ($fin) { $q.ExitCode } else { 'sigue viva' })" }
+})
+$quienGana = $(if ($doble -and $appPid -eq $doble.Id) { "acceso directo" } else { "instalador" })
+Check "e.doble_apertura_segunda_termina" ($doble -and $ganadoras.Count -eq 1 -and $perdedoras.Count -ge 1 -and @($detalle | Where-Object { -not $_.ok }).Count -eq 0) $(if ($doble) { "se queda pid $appPid ($quienGana, copias vistas: $($copias.Count)); termina: " + (($detalle | ForEach-Object { $_.txt }) -join ", ") } else { "sin acceso directo" })
 $edgeApp = @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { "$($_.CommandLine)" -like "*--app=http://127.0.0.1:$Port*" })
 Check "e.doble_apertura_sin_edge" ($edgeApp.Count -eq 0) ("msedge --app: " + $edgeApp.Count)
 $slogDoble = Tail-Log "server.log" 200
