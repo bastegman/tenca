@@ -380,9 +380,10 @@ class ModulosTests(unittest.TestCase):
     def test_sin_notas_internas(self):
         # punto 50: el repo es público; las notas de trabajo (mensajes, nombres, «el portátil de…») no van en el
         # código. El enlace de donación lo pinta app.js desde la configuración: no hay correos en static/
-        malas = re.compile(r"msgs? ?[0-9]{3,4}|\bmensaje [0-9]{3,4}|bernard|stegmaier|bastegman|port[aá]til de|"
-                           r"\b(steve|claudia|linus|harvey)\b|/Users/|[A-Za-z]:\\\\Users\\\\|@[\w-]+\.(com|io|es)\b",
-                           re.I)
+        # (las letras entre corchetes: que este fichero no contenga las palabras que busca)
+        malas = re.compile(r"msgs? ?[0-9]{3,4}|\bmensaje [0-9]{3,4}|ber[n]ard|stegm[a]ier|bastegm[a]n|port[aá]til de|"
+                           r"\b(st[e]ve|cl[a]udia|lin[u]s|h[a]rvey)\b|/Us[e]rs/|[A-Za-z]:\\\\Us[e]rs\\\\|"
+                           r"@[\w-]+\.(com|io|es)\b", re.I)
         for nombre in sorted(os.listdir(STATIC)):
             if not nombre.endswith((".js", ".css", ".html")):
                 continue
