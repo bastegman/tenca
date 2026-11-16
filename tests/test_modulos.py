@@ -271,21 +271,25 @@ class ModulosTests(unittest.TestCase):
 
     def test_todos_son_modulos_con_import_y_export(self):
         for nombre in ficheros_js():
-            if nombre in ("main.js", "pistas-worklet.js"):
+            if nombre == "pistas-worklet.js":
                 continue
             with self.subTest(nombre):
                 src = leer(nombre)
                 self.assertNotIn("'use strict'", src)  # un módulo ya lo es; antes, 5 ficheros no lo eran
                 if nombre != "nombres-audio.js":
                     self.assertTrue(sentencias_import(src), "sin import")
-                if nombre != "movil.js":
+                if nombre not in ("movil.js", "main.js"):
                     self.assertTrue(exportados(src), "sin export")
-                # solo las dos formas que leen estos tests: `import { a, b } from './x.js';` e `import './x.js';`, y
-                # un único `export { … };` (otra forma no la vería ni la cadena ni la comprobación de los import)
-                lineas = re.findall(r"^import\b.*", src, re.M)
-                self.assertEqual(len(lineas), len(sentencias_import(src)), lineas)
-                self.assertEqual(re.findall(r"^export\b(?! \{)", src, re.M), [])
-                self.assertLessEqual(len(re.findall(r"^export \{", src, re.M)), 1)
+                # solo las dos formas que leen estos tests: `import { a, b } from './x.js';` e `import './x.js';`, en
+                # columna 0 y una por línea, y un único `export { … };`. Otra forma (comillas dobles, `import * as`,
+                # sangrada, dos en una línea, un import() dinámico, `export function`) no la vería ni la cadena ni la
+                # comprobación de los import. Se cuentan las palabras import/export del código, sin comentarios ni
+                # cadenas
+                palabras = [v for k, v, _ in fichas(src) if k == "id" and v in ("import", "export")]
+                self.assertEqual(palabras.count("import"), len(sentencias_import(src)), "un import de otra forma")
+                self.assertEqual(palabras.count("export"), len(re.findall(r"^export \{[^}]*\};", src, re.M)),
+                                 "un export de otra forma")
+                self.assertLessEqual(palabras.count("export"), 1)
 
     def test_cadena_de_arranque(self):
         orden = cadena()
