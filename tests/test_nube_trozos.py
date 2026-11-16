@@ -133,6 +133,38 @@ class CupoTests(TempTree):
 
 # ----------------------------------------------------------------------------- 3: el repaso retomado no hace esperar
 
+class HuecoFantasmaTests(CupoTests):
+    def test_mirar_el_hueco_no_se_lo_queda(self):
+        pool = engines.KeyPool()
+        pool.clock = lambda: 1000.0
+        k = "gsk_pruebas_00000000000000"
+        pool.reserve(k, "whisper")
+        espera = pool.reserve(k, "whisper", dry=True)
+        self.assertGreater(espera, 0)
+        self.assertEqual(pool.reserve(k, "whisper", dry=True), espera)
+        self.assertEqual(pool.reserve(k, "whisper"), espera)
+
+    def test_la_que_sale_sin_esperar_no_se_queda_un_hueco(self):
+        """Revision 2, P3-3: tras un 429 de otra peticion mientras esta esperaba, con mas de max_wait por delante (el
+        directo) sale ya; antes se quedaba ademas un hueco detras del plazo y retrasaba la siguiente de la cola."""
+        cloud = engines.CloudEngine(os.path.join(self.data_dir, "tmp"))
+        k = self.CFG["api_key"]
+        st = {}
+
+        def wait(segundos, cancelled):
+            if not st:  # durante la espera de su hueco llega el 429 de otra: 100 s
+                st.update(cloud.keys._st(k, "whisper", "m"))
+                cloud.keys._st(k, "whisper", "m")["not_before"] = cloud.keys.clock() + 100
+                st["last"] = cloud.keys._st(k, "whisper", "m")["last_request"]
+
+        with mock.patch.object(engines.HTTP, "post", lambda *a, **kw: Resp(200)), \
+                mock.patch.object(cloud, "_wait", wait), \
+                mock.patch.object(cloud.keys, "pick", lambda *a, **kw: k), \
+                mock.patch.object(cloud, "endpoint", lambda cfg, key=None, model=None: ("http://x", {}, "m")):
+            cloud._post(self.CFG, self.parte, "es", "", lambda **kw: None, lambda: False, max_wait=5.0)
+        self.assertEqual(cloud.keys._st(k, "whisper", "m")["last_request"], st["last"])
+
+
 class FondoTests(LiveJobs):
     """El repaso retomado al arrancar va en la cola «fondo» y se aparta mientras haya algo del usuario en la nube."""
 
@@ -195,6 +227,87 @@ class FondoTests(LiveJobs):
             nube = server.Job("d.wav", "d.wav", "nube", None)
             jobs.list.append(nube)
             self.assertEqual(jobs._ceder_fondo(fondo), "usuario")  # lo del usuario, sin tope
+
+    def test_el_tope_ante_el_directo_cuenta_solo_lo_cedido(self):
+        """Revision 2, P3-2: contaba el reloj desde la primera vez que vio un directo; si el directo iba y venia,
+        cedia menos de CEDER_DIRECTO_S."""
+        jobs = self.jobs()
+        fondo = server.Job("a.wav", "a.wav", "nube", None)
+        fondo.fondo = True
+        directo = self.live_job()
+        directo.status = "running"
+        jobs.list += [fondo, directo]
+        with mock.patch.object(trabajos, "CEDER_DIRECTO_S", 0.3):
+            self.assertEqual(jobs._ceder_fondo(fondo), "directo")
+            time.sleep(0.1)
+            self.assertEqual(jobs._ceder_fondo(fondo), "directo")  # 0,1 s cedidos
+            directo.status = "done"
+            self.assertIsNone(jobs._ceder_fondo(fondo))
+            time.sleep(0.5)  # sin directo: no cuenta
+            directo.status = "running"
+            self.assertEqual(jobs._ceder_fondo(fondo), "directo")
+            time.sleep(0.1)
+            self.assertEqual(jobs._ceder_fondo(fondo), "directo")  # 0,2 s
+            time.sleep(0.15)
+            self.assertIsNone(jobs._ceder_fondo(fondo))  # 0,35 s: se acabo
+
+    def retomado(self, jobs):
+        self.pendiente()
+        jobs._resume_final_passes(delay=0)
+        return jobs.queues["fondo"].get_nowait()
+
+    def test_run_le_pasa_ceder_con_su_tope_y_los_ajustes_de_ahora(self):
+        """Revision 2, P2-2: _run tiene que pasar al motor el ceder con el tope (_ceder_fondo) y cfg_fn; antes solo se
+        probaban sueltos. Y la pausa: la de antes de empezar no se descuenta, la de a mitad si; el ETA, nunca < 0."""
+        jobs = self.jobs()
+        job = self.retomado(jobs)
+        visto = {}
+
+        def transcribe(path, duration, cfg, language, prompt, job_id, report, cancelled, start=0.0, about=None,
+                       tramos_idioma=None, ceder=None, cfg_fn=None):
+            visto["ceder"] = ceder()
+            jobs.settings.update(lambda d: d["cloud"].update(api_key="gsk_nueva_00000000"))
+            visto["cfg"] = cfg_fn()["api_key"]
+            report(pausa=50.0)  # antes de empezar: fuera de lo que se mide
+            report(stage="Transcribiendo en la nube (0/6 partes)…", frac=0.12, transcribing=True)
+            time.sleep(0.3)
+            report(pausa=0.2)
+            report(frac=0.5)
+            visto["pausa_s"], visto["eta"] = job.pausa_s, job.eta
+            return [(0.0, 1.0, "hola")], "es", 2.0
+        jobs.cloud.transcribe = transcribe
+        with mock.patch.object(jobs, "_ceder_fondo", mock.Mock(return_value="usuario")) as cf, \
+                mock.patch.object(trabajos, "write_outputs", lambda *a, **k: None), \
+                mock.patch.object(trabajos, "meeting_setup", lambda *a, **k: {
+                    "prompt": "", "about": "", "language": "es"}):
+            jobs._run(job)
+        self.assertEqual((job.status, job.error), ("done", None))
+        cf.assert_called_with(job)
+        self.assertEqual(visto["ceder"], "usuario")
+        self.assertEqual(visto["cfg"], "gsk_nueva_00000000")
+        self.assertAlmostEqual(visto["pausa_s"], 0.2)
+        self.assertGreaterEqual(visto["eta"], 0)
+
+    def test_el_retomado_cancelado_al_apagar_la_nube_lo_dice(self):
+        """Revision 2, P3-4: los de la cola decian «Cancelado: la nube se ha desactivado en Ajustes»; el retomado en
+        marcha, «Cancelado» a secas."""
+        jobs = self.jobs()
+        job = self.retomado(jobs)
+
+        def transcribe(path, duration, cfg, language, prompt, job_id, report, cancelled, start=0.0, about=None,
+                       tramos_idioma=None, ceder=None, cfg_fn=None):
+            jobs.nube_apagada()
+            if cancelled():
+                raise engines.Cancelled()
+            return [(0.0, 1.0, "hola")], "es", 2.0
+        jobs.cloud.transcribe = transcribe
+        with mock.patch.object(trabajos, "write_outputs", lambda *a, **k: None), \
+                mock.patch.object(trabajos, "meeting_setup", lambda *a, **k: {
+                    "prompt": "", "about": "", "language": "es"}):
+            jobs._run(job)
+        self.assertEqual(job.status, "cancelled")
+        self.assertEqual(job.stage, "Cancelado: la nube se ha desactivado en Ajustes")
+        self.assertIn("r.wav", jobs.after)  # con el texto del directo: destinos y resumen
 
     def test_sin_cola_fondo_no_cede(self):
         """Revision 1, P3-1: un Jobs sin la cola «fondo» lo pone en la de siempre y entonces no debe ceder (lo que pide
@@ -355,6 +468,90 @@ class CederEnCloudEngineTests(TempTree):
         self.assertTrue(flacs and all(t - t0 >= 0.45 for t in flacs), [t - t0 for t in flacs])
         self.assertEqual(cfgs, ["nueva", "nueva"])
         self.assertTrue(pausas and max(pausas) >= 0.4, pausas)
+
+    def test_pausa_a_mitad_no_codifica_y_sigue_con_la_clave_nueva(self):
+        """Revision 2, P2-2: la pausa dentro de una parte (no solo al principio): esa parte no se codifica mientras
+        espera y, al volver, las que quedan usan los ajustes de ahora."""
+        cloud = engines.CloudEngine(os.path.join(self.data_dir, "tmp"))
+        cede, flacs, claves, pausas, lock = [False], [], [], [], threading.Lock()
+        soltado = []
+
+        def post(cfg, chunk, lang, prompt, report, stop, about=None):
+            with lock:
+                claves.append(cfg.get("api_key"))
+                primera = len(claves) == 1
+            if primera:  # tras la primera parte llega algo del usuario: 0,5 s
+                cede[0] = True
+
+                def soltar():
+                    time.sleep(0.5)
+                    soltado.append(time.time())
+                    cede[0] = False
+                threading.Thread(target=soltar, daemon=True).start()
+            return {"text": "hola", "segments": [{"start": 0.0, "end": 1.0, "text": "hola"}]}
+
+        def write_flac(path, data, sr=16000):
+            flacs.append(time.time())
+            open(path, "wb").close()
+
+        def report(**k):
+            if k.get("pausa"):
+                pausas.append(k["pausa"])
+        y = np.zeros(16000 * 1800, np.int16)
+        with mock.patch.object(cloud, "_post", post), mock.patch.object(cloud, "endpoint", lambda *a, **k: None), \
+                mock.patch.object(engines, "decode_16k", lambda *a, **k: y.copy()), \
+                mock.patch.object(engines, "write_flac", write_flac):
+            cloud.transcribe("x.wav", 1800.0, {"chunk_minutes": 10, "parallel": 1, "api_key": "vieja"}, "es", "",
+                             "j4", report, lambda: False, ceder=lambda: "usuario" if cede[0] else None,
+                             cfg_fn=lambda: {"chunk_minutes": 10, "parallel": 1, "api_key": "nueva"})
+        self.assertEqual(len(flacs), 3)
+        self.assertGreaterEqual(flacs[1], soltado[0] - 0.01)  # la segunda, codificada al soltarse, no antes
+        self.assertEqual(claves, ["vieja", "nueva", "nueva"])
+        self.assertEqual(len(pausas), 1)
+
+    def test_una_pausa_se_cuenta_una_vez_con_partes_en_paralelo(self):
+        """Revision 2, P2-1 y P3-1: con 3 partes a la vez en pausa, cada una decia su espera y se descontaba el triple
+        (ETA negativo, velocidad guardada inflada); y la etapa «En pausa…» la pisaba «Transcribiendo (k/n)»."""
+        cloud = engines.CloudEngine(os.path.join(self.data_dir, "tmp"))
+        cede, ev, n, lock = [False], [], [0], threading.Lock()
+
+        def post(cfg, chunk, lang, prompt, report, stop, about=None):
+            with lock:
+                n[0] += 1
+                primera = n[0] == 1
+            if primera:  # la primera trae algo del usuario (1 s); las demas tardan 0,4 s: terminan en plena pausa
+                cede[0] = True
+
+                def soltar():
+                    time.sleep(1.0)
+                    cede[0] = False
+                threading.Thread(target=soltar, daemon=True).start()
+            time.sleep(0.05 if primera else 0.4)
+            return {"text": "hola", "segments": [{"start": 0.0, "end": 1.0, "text": "hola"}]}
+
+        def report(**k):
+            with lock:
+                if k.get("pausa"):
+                    ev.append(("pausa", k["pausa"]))
+                if k.get("stage"):
+                    ev.append(("etapa", k["stage"]))
+        y = np.zeros(16000 * 3600, np.int16)
+        with mock.patch.object(cloud, "_post", post), mock.patch.object(cloud, "endpoint", lambda *a, **k: None), \
+                mock.patch.object(engines, "decode_16k", lambda *a, **k: y.copy()), \
+                mock.patch.object(engines, "write_flac", lambda path, data, sr=16000: open(path, "wb").close()):
+            t0 = time.time()
+            cloud.transcribe("x.wav", 3600.0, {"chunk_minutes": 10, "parallel": 3}, "es", "", "j5", report,
+                             lambda: False, ceder=lambda: "usuario" if cede[0] else None)
+            total = time.time() - t0
+        pausas = [v for k, v in ev if k == "pausa"]
+        self.assertTrue(pausas, ev)
+        self.assertLess(sum(pausas), 2.0, pausas)  # una pausa de 1-1,5 s, una vez (antes, una por parte: 3-4,5 s)
+        self.assertLess(sum(pausas), total, (pausas, total))
+        # entre «En pausa…» y la vuelta, ningun «Transcribiendo (k/n)» de las partes que terminan entretanto
+        i = ev.index(("etapa", engines.CloudEngine.PAUSAS["usuario"]))
+        j = next(k for k in range(i, len(ev)) if ev[k][0] == "pausa")
+        self.assertEqual([e for e in ev[i:j] if e[1].startswith("Transcribiendo")], [], ev)
+        self.assertTrue(ev[j + 1][1].startswith("Transcribiendo"), ev)  # y la vuelta, con lo hecho
 
     def test_cancelar_mientras_cede(self):
         cloud = engines.CloudEngine(os.path.join(self.data_dir, "tmp"))

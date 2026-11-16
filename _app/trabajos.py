@@ -536,13 +536,17 @@ class Jobs:
         en la nube, como mucho CEDER_DIRECTO_S en total (una reunion entera dejaria la anterior bloqueada, sin
         destinos ni resumen, y el directo suele usar otro modelo y otro cupo)."""
         motivo = self._nube_delante()
-        if motivo != "directo":
-            return motivo
         ahora = time.monotonic()
-        desde = getattr(job, "cede_directo_desde", None)
-        if desde is None:
-            desde = job.cede_directo_desde = ahora
-        return motivo if ahora - desde < CEDER_DIRECTO_S else None
+        if motivo != "directo":
+            job.cede_directo_ult = None
+            return motivo
+        # solo cuenta el rato cedido ante un directo (entre dos consultas seguidas, como mucho 2 s): no el reloj desde
+        # la primera vez, que cedia menos de lo dicho si el directo iba y venia (revision 2, P3-2)
+        ult, cedido = getattr(job, "cede_directo_ult", None), getattr(job, "cede_directo_s", 0.0)
+        if ult is not None:
+            cedido += min(ahora - ult, 2.0)
+        job.cede_directo_ult, job.cede_directo_s = ahora, cedido
+        return motivo if cedido < CEDER_DIRECTO_S else None
 
     def _pending(self):
         """Los repasos finales pendientes (PendingPasses), en el DATA_DIR vigente."""
@@ -956,7 +960,9 @@ class Jobs:
                     j.status, j.stage = "cancelled", "Cancelado: la nube se ha desactivado en Ajustes"
                     j.finished = time.time()
                 elif j.status == "running" and getattr(j, "fondo", False):  # el repaso retomado (quiza en pausa):
-                    j.cancel = True  # se queda el texto del directo (_run), como con uno que ya no se puede hacer
+                    # se queda el texto del directo (_run), como con uno que ya no se puede hacer, y con el los
+                    # destinos y el resumen ya (los de la cola, al volver a abrir)
+                    j.cancel, j.cancel_motivo = True, "la nube se ha desactivado en Ajustes"
         for j in cambiados:
             self._cloud_text().set(j.path, False)
             log(f"   directo {j.name}: modelo medium (la nube se ha desactivado en Ajustes)")
@@ -1539,7 +1545,9 @@ class Jobs:
         log(f"▶ {job.name}  [{preset['label']}]")
 
         def report(frac=None, stage=None, transcribing=False, pausa=0.0):
-            if pausa:  # lo que un repaso retomado ha esperado en pausa (fondo): no es tiempo de transcribir
+            # lo que un repaso retomado ha esperado en pausa (fondo) mientras transcribia: no es tiempo de transcribir.
+            # La de antes de empezar (antes de t_transcribe) no cae dentro de lo que se mide (revision 2, P2-1)
+            if pausa and job.t_transcribe is not None:
                 job.pausa_s += pausa
             if transcribing and job.t_transcribe is None:
                 job.t_transcribe = time.time()
@@ -1548,7 +1556,7 @@ class Jobs:
             if frac is not None:
                 job.progress = max(job.progress, frac)
                 if job.t_transcribe and job.progress > 0.03:
-                    el = time.time() - job.t_transcribe - job.pausa_s
+                    el = max(0.0, time.time() - job.t_transcribe - job.pausa_s)
                     base = 0.12 if job.engine == "cloud" else 0.0
                     done = (job.progress - base) / (1 - base)
                     if done > 0.02:
@@ -1622,8 +1630,9 @@ class Jobs:
             log(f"✔ {job.name}  {(time.time() - job.started) / 60:.1f} min"
                 + (f"  ({job.duration / max(el, 1):.1f}x tiempo real)" if job.duration else ""))
         except engines.Cancelled:
-            job.status, job.stage = "cancelled", "Cancelado"
-            log(f"■ {job.name}  cancelado")
+            motivo = getattr(job, "cancel_motivo", None)
+            job.status, job.stage = "cancelled", f"Cancelado: {motivo}" if motivo else "Cancelado"
+            log(f"■ {job.name}  cancelado" + (f" ({motivo})" if motivo else ""))
             if job.final_pass:
                 if getattr(self, "closing", False):  # al apagar: sigue pendiente y se retoma al volver a abrir
                     log("   el repaso final queda pendiente para el próximo arranque")
