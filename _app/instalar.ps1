@@ -97,6 +97,7 @@ function Ui-Log($text) {
 }
 function Say($text, $color = "Gray") { Write-Host $text -ForegroundColor $color; Ui-Log $text; Log-File $text }
 function Step($text) {
+    $script:pasoActual = $text  # para el latido de la ventana (Finish-Ui)
     Write-Host ""; Write-Host "  > $text" -ForegroundColor Cyan
     Log-File ""
     Log-File ("> $text  [" + (Get-Date -Format "HH:mm:ss") + "]")
@@ -134,7 +135,7 @@ function Finish-Ui($ok, $text) {
     $ui.done = $true
     Ui-Log $(if ($ok) { "Listo." } else { "X $text" })
     $ui.btnClose.Focus() | Out-Null
-    if ($script:latido) { Log-File ("ventana: lo más largo sin atenderla, {0:0.0} s" -f $script:hueco) }
+    if ($script:latido) { Log-File ("ventana: lo más largo sin atenderla, {0:0.0} s (en «{1}»)" -f $script:hueco, $script:huecoPaso) }
     $t0 = Get-Date
     while ($ui.form.Visible) {
         [System.Windows.Forms.Application]::DoEvents()
@@ -250,7 +251,9 @@ function New-InstallerWindow {
         $script:hueco = 0.0
         $tm = New-Object System.Windows.Forms.Timer
         $tm.Interval = 200
-        $tm.Add_Tick({ $g = $script:latido.Elapsed.TotalSeconds; if ($g -gt $script:hueco) { $script:hueco = $g }; $script:latido.Restart() })
+        # (y en que paso: el hueco es de lo que pasaba antes de este tick, en el paso en curso)
+        $script:huecoPaso = ""
+        $tm.Add_Tick({ $g = $script:latido.Elapsed.TotalSeconds; if ($g -gt $script:hueco) { $script:hueco = $g; $script:huecoPaso = $script:pasoActual }; $script:latido.Restart() })
         $script:ui.timer = $tm
         Open-Fondo  # el runspace de Invoke-Fondo, antes de ensenar la ventana (abrirlo en frio tarda)
         $f.Show()

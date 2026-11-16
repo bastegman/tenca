@@ -586,7 +586,9 @@ class InstaladorNoSeCongelaTests(unittest.TestCase):
 
     def test_el_log_dice_la_hora_de_cada_paso_y_lo_mas_largo_sin_atender(self):
         self.assertIn('Log-File ("> $text  [" + (Get-Date -Format "HH:mm:ss") + "]")', _funcion(self.ps1, "Step"))
-        self.assertIn('"ventana: lo más largo sin atenderla, {0:0.0} s"', _funcion(self.ps1, "Finish-Ui"))  # sin miles
+        # sin miles, y en que paso (para saber donde estuvo el hueco)
+        self.assertIn('"ventana: lo más largo sin atenderla, {0:0.0} s (en «{1}»)"', _funcion(self.ps1, "Finish-Ui"))
+        self.assertIn("$script:pasoActual = $text", _funcion(self.ps1, "Step"))
         self.assertIn("$tm.Add_Tick(", _funcion(self.ps1, "New-InstallerWindow"))
 
     def test_el_e2e_mide_si_la_ventana_responde(self):
@@ -596,7 +598,7 @@ class InstaladorNoSeCongelaTests(unittest.TestCase):
         self.assertIn("[E2E.Sonda]::Responde($h, 500)", run)
         self.assertIn('Check "$label.ventana_responde" ($peor -lt 2.5)', run)
         self.assertIn('Run-Installer $vExtr "v.chuleta_instalador" 20 $false', e2e)  # el de la Chuleta de antes, no
-        self.assertIn('Check "$label.ventana_latido" ($null -ne $hueco -and $hueco -lt 2.5)', run)
+        self.assertIn('Check "$label.ventana_latido" ($null -ne $hueco -and $hueco -lt 4.0)', run)
 
     def test_voces_memoria_se_lanza_con_estos_cambios(self):
         with open(os.path.join(os.path.dirname(APP), ".github", "workflows", "voces-memoria.yml"),

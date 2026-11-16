@@ -106,10 +106,68 @@ def make_tray(ico_path):
                               "inicio": (inicio_windows_leer, inicio_windows_poner)}, tray_estado)
 
 
+# Apagar termina el proceso en pocos segundos pase lo que pase (lookfeel-e2e: «e.apagar_proceso_muere_5s», que fallaba
+# de vez en cuando: el proceso seguia vivo a los 5 s de «apagado»). Cada paso que espera a otro hilo (cerrar la ventana
+# de pywebview, parar el servidor HTTP) tiene un tope, y el hilo principal, cuando la ventana se cierra al apagar, no
+# sale por su cuenta: la finalizacion de Python (pythonnet, hilos de fondo) podia tardar segundos y dejar a medias el
+# hilo que apaga, que es quien llama a os._exit.
+SALIDA_TOPE_S = 1.5         # cada paso que espera a otro hilo
+SALIDA_PRINCIPAL_S = 8.0    # el hilo principal termina el proceso si shutdown() no lo ha hecho en este tiempo
+SALIDA_TOTAL_S = 20.0       # y, pase lo que pase en shutdown() (tambien en shutdown_prepare), en este
+_APAGANDO = threading.Event()
+
+
+def apagando():
+    """shutdown() ya esta en marcha (de verdad: va a terminar el proceso)."""
+    return _APAGANDO.is_set()
+
+
+def arranca():
+    """main() al empezar: nada esta apagandose (en los tests, main() corre varias veces en el mismo proceso)."""
+    _APAGANDO.clear()
+
+
+def _con_tope(fn, que, tope=None):
+    """fn() en un hilo aparte, esperando como mucho `tope` s (sus errores, al log). Si no termina, lo dice en el log
+    (`que`) y se sigue. True si termino a tiempo."""
+    tope = SALIDA_TOPE_S if tope is None else tope
+
+    def correr():
+        try:
+            fn()
+        except Exception:
+            log_exc()
+    try:
+        t = threading.Thread(target=correr, daemon=True, name="apagado-paso")
+        t.start()
+        t.join(tope)
+    except Exception:  # (ni siquiera un hilo: se sigue, que lo importante es terminar)
+        log_exc()
+        return False
+    if t.is_alive():
+        log(f"   apagar: {que} no ha terminado en {tope:.1f} s; se sigue")
+        return False
+    return True
+
+
+def esperar_salida(tope=None, exit_fn=os._exit):
+    """El hilo principal, al volver de la ventana o del servidor durante un apagado: espera a que shutdown() termine
+    el proceso y, si en `tope` s no lo ha hecho, lo termina el (nunca deja que Python empiece a finalizar mientras el
+    otro hilo apaga)."""
+    time.sleep(SALIDA_PRINCIPAL_S if tope is None else tope)
+    exit_fn(0)
+
+
 def shutdown(reason, exit_fn=os._exit):
     """Apagado ordenado (Ajustes > Apagar): medidor/grabadora, trabajos y procesos de Whisper, servidor HTTP, ventana
     y fin del proceso. recorder.py, worker.py y voices.py mueren solos al quedarse sin padre. No llamarlo desde el
-    hilo que ejecuta serve_forever (SERVER.shutdown esperaria a si mismo)."""
+    hilo que ejecuta serve_forever (SERVER.shutdown esperaria a si mismo). Cerrar la ventana y parar el servidor
+    tienen un tope (SALIDA_TOPE_S cada uno): el proceso termina aunque se queden colgados."""
+    if exit_fn is os._exit:  # (los tests llaman con otro exit_fn: no es un apagado de verdad del proceso)
+        _APAGANDO.set()
+        ultimo = threading.Timer(SALIDA_TOTAL_S, exit_fn, args=(0,))  # pase lo que pase aqui abajo
+        ultimo.daemon = True
+        ultimo.start()
     log(f"apagando ({reason})")
     try:
         if Handler.app is not None:
@@ -122,18 +180,15 @@ def shutdown(reason, exit_fn=os._exit):
             WINDOW.tray.close()
     except Exception:
         log_exc()
+    if WINDOW is not None:
+        _con_tope(WINDOW.destroy, "cerrar la ventana")
+    if SERVER is not None:
+        _con_tope(SERVER.shutdown, "parar el servidor")
+    # «apagado», justo antes de terminar: si el proceso sigue vivo con esta linea en el log, lo lento es la salida misma
+    # (os._exit); sin ella, un paso de arriba. El hilo principal ya no sale por su cuenta (esperar_salida), asi que el
+    # log se puede cerrar al final
     log("apagado")
-    logging.shutdown()  # antes de parar el servidor: en cuanto serve_forever vuelve, el hilo principal sale solo
-    try:
-        if WINDOW is not None:
-            WINDOW.destroy()
-    except Exception:
-        pass
-    try:
-        if SERVER is not None:
-            SERVER.shutdown()
-    except Exception:
-        pass
+    logging.shutdown()
     exit_fn(0)
 
 

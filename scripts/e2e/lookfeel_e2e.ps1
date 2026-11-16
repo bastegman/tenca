@@ -148,6 +148,10 @@ function Run-Installer($dir, $label, $timeoutMin, $sondear = $true) {
     $end = $t0.AddMinutes($timeoutMin)
     $peor, $desde, $vista, $pids, $pidsT = 0.0, $null, $false, @(), [DateTime]::MinValue
     while (-not $p.HasExited -and (Get-Date) -lt $end) {
+        # sin sondear, solo se espera (como antes de 6310c92). Ojo: no es lo que hace lento al instalador viejo (su
+        # Find-Python recorre Program Files en el hilo de la ventana): sin sonda, 293 y 335 s (a292b1a); con ella,
+        # 182-1195 s; el 15/16-nov por la noche, 36-46 s. Un run lo corto a los 20 min (43880812211)
+        if (-not $sondear) { Start-Sleep -Milliseconds 500; continue }
         if (((Get-Date) - $pidsT).TotalSeconds -ge 2) {
             $pids = [int[]]@(Get-Process -Name powershell -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $PID } | ForEach-Object { $_.Id })
             $pidsT = Get-Date
@@ -165,14 +169,16 @@ function Run-Installer($dir, $label, $timeoutMin, $sondear = $true) {
     }
     $txt = "lo mas largo seguido sin responder: {0:N1} s" -f $peor
     if ($sondear -and $vista) { Check "$label.ventana_responde" ($peor -lt 2.5) $txt }
-    else { Note "$label.ventana_responde" $(if ($vista) { $txt } else { "sin ventana WinForms" }) }
+    else { Note "$label.ventana_responde" $(if (-not $sondear) { "sin sondear" } elseif ($vista) { $txt } else { "sin ventana WinForms" }) }
     if ($sondear -and $vista -and $p.HasExited) {
         # y lo que dice el propio instalador (su latido: un temporizador de la ventana; mide la cola de mensajes, que
         # es lo que mira Windows para darla por colgada). La "a" con tilde de "mas" no se escribe aqui: este script
         # no lleva BOM y PowerShell 5.1 lo lee como ANSI
         $m = [regex]::Match((Last-Run-Log), "ventana: lo m\S{1,2}s largo sin atenderla, ([\d.,]+) s")
         $hueco = $(if ($m.Success) { [double]($m.Groups[1].Value -replace ",", ".") } else { $null })
-        Check "$label.ventana_latido" ($null -ne $hueco -and $hueco -lt 2.5) $(if ($m.Success) { $m.Value } else { "sin la linea del latido en instalar.log" })
+        # puerta en 4 s (Windows la da por colgada a los 5): el temporizador es el mensaje de menos prioridad y, con la
+        # ventana repintando mucho (pip en una primera instalacion), su hueco sale algo mayor que el de la sonda
+        Check "$label.ventana_latido" ($null -ne $hueco -and $hueco -lt 4.0) $(if ($m.Success) { $m.Value } else { "sin la linea del latido en instalar.log" })
     }
     if (-not $p.HasExited) {
         Check "$label.termina" $false "INSTALAR.bat no termino en $timeoutMin min (se mata)"
@@ -197,8 +203,18 @@ function Ventana($cmd, $tag, $title = "") {
     if (-not $title) { $title = $App }
     $argv = @((Join-Path $Repo "scripts\e2e\ventana.py"), $cmd, $title)
     if ($cmd -eq "icons") { $argv += @((Join-Path $Out "iconos"), $tag) }
-    $raw = & $python @argv 2>&1
-    try { return ($raw | Out-String | ConvertFrom-Json) } catch { return @{ hwnd = $null; error = ($raw | Out-String) } }
+    # si el ayudante falla (su salida no es JSON: una excepcion), una vez mas a los 2 s; su error va al detalle del
+    # check (16-nov, nube-trozos 43883343549: e.ventana_visible sin hwnd ni titulo, con la ventana abierta)
+    # (ventana.py pone la excepcion en "error"; si ni siquiera hay JSON, el error es su salida)
+    $res = $null
+    for ($k = 0; $k -lt 2; $k++) {
+        $raw = & $python @argv 2>&1
+        try { $res = ($raw | Out-String | ConvertFrom-Json) } catch { $res = @{ hwnd = $null; error = ($raw | Out-String).Trim() } }
+        if (-not $res.error) { return $res }
+        Write-Host "  ventana.py ($cmd, intento $($k + 1)): $($res.error)"
+        Start-Sleep -Seconds 2
+    }
+    return $res
 }
 function Tail-Log($name, $n = 40) {
     $f = Join-Path $logDir $name
@@ -391,6 +407,11 @@ $rc = Run-Installer $dir1 "c.instalador" 25  # pip real (faster-whisper, sherpa-
 # "Abrir"; aqui, el autocierre) y el usuario pulsa ademas el acceso directo mientras arranca. Se comprueba en e)
 $deskDoble = Join-Path ([Environment]::GetFolderPath("Desktop")) "$App.lnk"
 $doble = $null
+# la copia que acaba de abrir el instalador: cual de las dos se queda depende de quien coge antes la marca de instancia
+# (las dos arrancan a la vez); en e) se comprueba que queda UNA y que la otra termina sola, sea cual sea
+$primeras = @(Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" | Where-Object { "$($_.CommandLine)" -like "*server.py*" } |
+    ForEach-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue } | Where-Object { $_ })
+foreach ($q in $primeras) { $null = $q.Handle }
 if (Test-Path -LiteralPath $deskDoble) {
     $ldoble = Get-Lnk $deskDoble
     $doble = Start-Process -FilePath $ldoble.TargetPath -ArgumentList $ldoble.Arguments -WorkingDirectory $ldoble.WorkingDirectory -PassThru
@@ -518,11 +539,27 @@ $appPid = $(if ($lis.Count -ge 1) { $lis[0].OwningProcess } else { 0 })
 $proc = $(if ($appPid) { Get-Process -Id $appPid -ErrorAction SilentlyContinue } else { $null })
 Check "e.proceso_pythonw" ($proc -and $proc.Name -ieq "pythonw") $(if ($proc) { "$($proc.Name) pid $appPid" } else { "sin proceso" })
 $w = Ventana "icons" "app"
-Check "e.ventana_visible" ($w.hwnd -and $w.visible) ("hwnd=$($w.hwnd) clase=$($w.class) visible=$($w.visible) pid=$($w.pid)")
+$wErr = ("$($w.error)" -replace "\s+", " ").Trim()
+if ($wErr.Length -gt 400) { $wErr = $wErr.Substring(0, 400) }
+Check "e.ventana_visible" ($w.hwnd -and $w.visible) ("hwnd=$($w.hwnd) clase=$($w.class) visible=$($w.visible) pid=$($w.pid)" + $(if ($wErr) { " error=$wErr" } else { "" }))
 Check "e.titulo" ($w.title -eq $App) "$($w.title)"
-# la segunda copia (el acceso directo pulsado durante el arranque) termina sola, sin aviso de error, y no deja Edge
-$dobleSalio = [bool]($doble -and $doble.WaitForExit(30000))
-Check "e.doble_apertura_segunda_termina" ($dobleSalio -and $doble.ExitCode -eq 0) $(if ($doble) { "pid $($doble.Id) exit=$(if ($dobleSalio) { $doble.ExitCode } else { 'sigue viva' })" } else { "sin acceso directo" })
+# de las dos copias (la que abrio el instalador y la del acceso directo pulsado durante el arranque) queda UNA, la que
+# sirve (cualquiera: gana la que coge antes la marca de instancia), y la otra termina sola, con 0, sin aviso de error y
+# sin dejar Edge. Antes se daba por hecho que perdia la del acceso directo, y a veces ganaba ella
+$copias = @(@($primeras) + @($doble) | Where-Object { $_ })
+$ganadoras = @($copias | Where-Object { $_.Id -eq $appPid })
+$perdedoras = @($copias | Where-Object { $_.Id -ne $appPid })
+$detalle = @(foreach ($q in $perdedoras) {
+    $fin = $q.WaitForExit(30000)
+    $quien = $(if ($doble -and $q.Id -eq $doble.Id) { "acceso directo" } else { "instalador" })
+    # que termino SOLA: su propia linea («ya estaba abierta» u «otra copia tiene la marca», con su pid), no porque
+    # alguien la apagara (eso tambien sale con 0)
+    $sola = @((Tail-Log "server.log" 300) -split "`n" | Where-Object { $_ -match "(ya estaba abierta|otra copia tiene la marca).*pid $($q.Id)(\D|$)" }).Count -gt 0
+    [pscustomobject]@{ ok = ($fin -and $q.ExitCode -eq 0 -and $sola); txt = "pid $($q.Id) ($quien) exit=$(if ($fin) { $q.ExitCode } else { 'sigue viva' }) sola=$sola" }
+})
+$apagadasAntes = @((Tail-Log "server.log" 300) -split "`n" | Where-Object { $_ -match "apagando \(" }).Count
+$quienGana = $(if ($doble -and $appPid -eq $doble.Id) { "acceso directo" } else { "instalador" })
+Check "e.doble_apertura_segunda_termina" ($doble -and $ganadoras.Count -eq 1 -and $perdedoras.Count -ge 1 -and @($detalle | Where-Object { -not $_.ok }).Count -eq 0 -and $apagadasAntes -eq 0) $(if ($doble) { "se queda pid $appPid ($quienGana, copias vistas: $($copias.Count)); termina: " + (($detalle | ForEach-Object { $_.txt }) -join ", ") + "; apagados en el log: $apagadasAntes" } else { "sin acceso directo" })
 $edgeApp = @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { "$($_.CommandLine)" -like "*--app=http://127.0.0.1:$Port*" })
 Check "e.doble_apertura_sin_edge" ($edgeApp.Count -eq 0) ("msedge --app: " + $edgeApp.Count)
 $slogDoble = Tail-Log "server.log" 200
