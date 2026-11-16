@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""E2E de «cambiar la carpeta en pleno directo» (B1c, msg 1198) con la app de verdad: el servidor arrancado como lo
+"""E2E de «cambiar la carpeta en pleno directo» (B1c) con la app de verdad: el servidor arrancado como lo
 arranca el acceso directo, la grabadora real (`recorder.py`) con la tarjeta de sonido falsa de tests/fake_soundcard
 (en la CI no hay dispositivos de audio), el directo, el repaso final y el resumen en un Groq falso en 127.0.0.1, y la
 interfaz en Chromium (Playwright):

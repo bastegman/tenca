@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Hoy (rediseño B7, msgs 1380 y 1390): la agenda de Outlook de un mes, la reunión de ahora que sale de ella, la
+"""Hoy (rediseño B7): la agenda de Outlook de un mes, la reunión de ahora que sale de ella, la
 caché en segundo plano, /api/hoy y las funciones puras de hoy.js. Con el COM falso de test_reunion/test_calendario:
 nada de aquí necesita Windows (lo de Windows de verdad, en test_calendario_windows).
 
-El B2 del 09/11/2026 («conecta bien al parecer, pero no veo las siguientes reuniones», msg 1380): la lectura COM era
+El B2 del 09/11/2026 (el calendario conectaba, pero no se veían las siguientes reuniones): la lectura COM era
 correcta (su «Probar» daba agenda, horas y asistentes bien), pero solo pedía HOY (agenda_hoy, 00:00-23:59) y de esa
 solo enseñaba una frase («próxima reunión 12:00»): ninguna pantalla listaba las citas. AgendaB2Tests lo deja escrito."""
 import json

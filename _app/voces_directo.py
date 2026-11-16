@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""«Quién habla» mientras se graba, solo con el directo en la nube (punto 56 del review del 14/11/2026; msg 1525 de
-Bernardo: «hazlo solo para nube»).
+"""«Quién habla» mientras se graba, solo con el directo en la nube (punto 56 del review del 14/11/2026). Con el
+directo en este PC, Whisper ya ocupa la CPU.
 
 Cada vez que la grabación completa un bloque de 30 min (voices.BLOQUE_S), se identifican las voces de lo grabado hasta
 ahí con el mismo subproceso de siempre (voices.py), en bloques fijos (--rejilla) y guardando lo de cada bloque
@@ -8,7 +8,7 @@ ahí con el mismo subproceso de siempre (voices.py), en bloques fijos (--rejilla
 del directo enseña quién habla en lo ya identificado. Al terminar, la identificación de siempre (trabajos._run_voices)
 usa esos bloques y solo diariza el último: «Quién habla» llega antes.
 
-El directo es la prioridad (condición de Bernardo: «no puede ir más lento»): con el directo en este PC no se hace
+El directo es la prioridad (no puede ir más lento por esto): con el directo en este PC no se hace
 nada (Whisper ya usa la CPU), y en la nube el subproceso va en prioridad de reposo (Windows; nice 19 fuera), con un
 solo hilo, y se corta en cuanto la grabación termina, el directo pasa a este PC o la app se cierra. Lo medido está en
 scripts/directo_bench.py (--con-voces) y en la nota de la rama."""

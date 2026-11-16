@@ -39,8 +39,8 @@ class Directo:
         return self.jobs.set_live_preset(b.get("id"), b.get("preset"), bool(b.get("restart")))
 
     def live_translate(self, b):
-        """Traducción del directo en la nube, por reunión (apagada por defecto): {id, on, to}. to: «es» o «en» (msg
-        1152); se recuerda para esa reunión (traduccion_destino), también con la traducción apagada. live.py hace el
+        """Traducción del directo en la nube, por reunión (apagada por defecto): {id, on, to}. to: «es» o «en» (ítem
+        13a); se recuerda para esa reunión (traduccion_destino), también con la traducción apagada. live.py hace el
         resto: con otro destino, vuelve a traducir lo último al idioma nuevo."""
         job = self.jobs._live_job(b.get("id"))
         to = b.get("to")

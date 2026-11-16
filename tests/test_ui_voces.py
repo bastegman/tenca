@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""El fallo del msg 1170 en un navegador real (Playwright + Chromium): una reunion en la que el micro marco como «Tú»
+"""El fallo S6 en un navegador real (Playwright + Chromium): una reunion en la que el micro marco como «Tú»
 a otra persona; clic en «Tú», escribir «Ana», Guardar → la etiqueta dice «Ana» y la persona del usuario no cambia.
 Tambien «No soy yo» y «Copiar texto» con hablantes. Se salta sin Playwright (la CI lo instala en `ui-smoke.yml`)."""
 import json
@@ -39,7 +39,7 @@ class VocesEnNavegadorTests(unittest.TestCase):
         with open(os.path.join(cls.datos, "settings.json"), "w", encoding="utf-8") as f:
             json.dump({"voices_enabled": True}, f)
         v = voices.Voices(os.path.join(cls.datos, "voces.json"))  # se cifra igual que en el servidor (mismo usuario)
-        cls.yo = v.create("Bernardo", es_usuario=True)["id"]
+        cls.yo = v.create("Diego", es_usuario=True)["id"]
         cls.port = puerto_libre()
         cls.log = open(os.path.join(cls.tmp, "salida.log"), "w", encoding="utf-8")
         cls.proc = subprocess.Popen([sys.executable, os.path.join(cls.root, "_app", "server.py"), "--port",
@@ -90,7 +90,7 @@ class VocesEnNavegadorTests(unittest.TestCase):
         with open(base + ".wav", "wb") as f:
             f.write(wav_bytes(1.0))
         with open(base + ".srt", "w", encoding="utf-8") as f:
-            f.write(srt_text([(0.5, 9.5, "Hola a todos."), (10.5, 19.5, "Yo no soy Bernardo."),
+            f.write(srt_text([(0.5, 9.5, "Hola a todos."), (10.5, 19.5, "Yo no soy Diego."),
                               (20.5, 29.5, "Seguimos.")]))
         voices.write_sidecar(base + voices.SIDECAR_EXT, {
             "version": 1, "tramos": TRAMOS, "tu": "h2", "micro": {"paso": 0.25, "activo": "0" * 40 + "1" * 40,
@@ -137,12 +137,12 @@ class VocesEnNavegadorTests(unittest.TestCase):
         time.sleep(1.5)  # la peticion y el repintado
         st = self.api("/api/voces")
         names = {p["id"]: (p["nombre"], p["es_usuario"]) for p in st["personas"]}
-        self.assertEqual(names[self.yo], ("Bernardo", True))  # el usuario sigue siendo el y con su nombre
+        self.assertEqual(names[self.yo], ("Diego", True))  # el usuario sigue siendo el y con su nombre
         pg.wait_for_function("document.querySelector(\"#txBody .spk[data-spk='h2']\").innerText === 'Ana'",
                              timeout=10000)
         self.assertIn(("Ana", False), names.values())
         texto = pg.evaluate("transcriptText()")  # lo que deja «Copiar texto» en el portapapeles
-        self.assertEqual(texto, "Persona 1: Hola a todos.\n\nAna: Yo no soy Bernardo.\n\nPersona 1: Seguimos.")
+        self.assertEqual(texto, "Persona 1: Hola a todos.\n\nAna: Yo no soy Diego.\n\nPersona 1: Seguimos.")
         self.assertEqual(self.limpio(errores, red), ([], []))
 
     def test_no_soy_yo(self):
@@ -158,7 +158,7 @@ class VocesEnNavegadorTests(unittest.TestCase):
         self.assertEqual(self.limpio(errores, red), ([], []))
 
     def test_es_el_mismo_que(self):
-        """«Es el mismo que…» (msg 1242): la app partio una voz en dos hablantes y se juntan desde la etiqueta (la
+        """«Es el mismo que…»: la app partio una voz en dos hablantes y se juntan desde la etiqueta (la
         revision de la integracion del 08/11/2026 vio que ningun test pulsaba el desplegable)."""
         nombre = "R unir"
         base = os.path.join(self.root, nombre)

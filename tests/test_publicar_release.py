@@ -123,13 +123,16 @@ class ZipRealTests(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(self.carpeta, ignorado)), ignorado)
 
 
-CHANGELOG = """# Cambios
+# Las referencias a mensajes de estos datos de prueba van con {n} (f-strings): escritas tal cual, el test de notas
+# internas (test_package.NotasInternasTests) las tomaría por notas de trabajo del repo, que es justo lo que no puede
+# llevar.
+CHANGELOG = f"""# Cambios
 
 ## Sin publicar
 
 Intro.
 
-### Voces dobles en la grabación (07/11/2026, msgs 1154 y 1156)
+### Voces dobles en la grabación (07/11/2026, msgs {1154} y {1156})
 
 - Arreglado: una voz.
 
@@ -171,7 +174,7 @@ class NotasTests(unittest.TestCase):
     def test_apartados_y_cambios(self):
         self.assertEqual([t for _, t, _ in pr.apartados(CHANGELOG)][1], "Hoy (09/11/2026)")
         nuevos, cambiados = pr.cambios(CHANGELOG, ANTERIOR)
-        self.assertEqual([t for t, _ in nuevos], ["Voces dobles en la grabación (07/11/2026, msgs 1154 y 1156)",
+        self.assertEqual([t for t, _ in nuevos], [f"Voces dobles en la grabación (07/11/2026, msgs {1154} y {1156})",
                                                   "Hoy (09/11/2026)"])
         self.assertEqual([t for t, _ in cambiados], ["Seguridad"])
         nuevos, cambiados = pr.cambios(CHANGELOG, None)
@@ -179,9 +182,21 @@ class NotasTests(unittest.TestCase):
         self.assertEqual(cambiados, [])
 
     def test_sin_referencias_internas(self):
-        self.assertEqual(pr.sin_ref_interna("Voces dobles (07/11/2026, msgs 1154 y 1156)"), "Voces dobles (07/11/2026)")
-        self.assertEqual(pr.sin_ref_interna("Grabar la siguiente (msg 1479)"), "Grabar la siguiente")
+        self.assertEqual(pr.sin_ref_interna(f"Voces dobles (07/11/2026, msgs {1154} y {1156})"),
+                         "Voces dobles (07/11/2026)")
+        self.assertEqual(pr.sin_ref_interna(f"Grabar la siguiente (msg {1479})"), "Grabar la siguiente")
         self.assertEqual(pr.sin_ref_interna("Hoy (09/11/2026)"), "Hoy (09/11/2026)")
+
+    def test_cambios_sin_las_referencias_del_anterior(self):
+        """El CHANGELOG ya no lleva referencias a mensajes, pero el del Release anterior sí: un apartado que solo las ha
+        perdido, en el título o en el texto, no sale como nuevo ni como cambiado; uno que cambia de verdad, sí."""
+        anterior = CHANGELOG.replace("- Arreglado: una voz.", f"- Arreglado: una voz (msg {1154}).")
+        actual = CHANGELOG.replace(f", msgs {1154} y {1156}", "")
+        self.assertEqual(pr.cambios(actual, anterior), ([], []))
+        nuevos, cambiados = pr.cambios(actual.replace("- Token.", "- Token nuevo."), anterior)
+        self.assertEqual((nuevos, [t for t, _ in cambiados]), ([], ["Seguridad"]))
+        nuevos, cambiados = pr.cambios(actual.replace("- Arreglado: una voz.", "- Arreglado: dos voces."), anterior)
+        self.assertEqual((nuevos, [t for t, _ in cambiados]), ([], ["Voces dobles en la grabación (07/11/2026)"]))
 
     def test_notas_primera_version(self):
         nuevos, _ = pr.cambios(CHANGELOG)
@@ -195,12 +210,12 @@ class NotasTests(unittest.TestCase):
         self.assertIn("https://github.com/duena/app/blob/v2026.11.14-62f93ea/CHANGELOG.md", t)
 
     def test_notas_con_anterior(self):
-        nuevos, cambiados = pr.cambios(CHANGELOG.replace(", msgs 1154 y 1156", ""), ANTERIOR)
+        nuevos, cambiados = pr.cambios(CHANGELOG.replace(f", msgs {1154} y {1156}", ""), ANTERIOR)
         t = pr.notas("v", "f" * 40, "a" * 64, "d/a", "v2026.11.14-62f93ea", nuevos, cambiados)
         self.assertIn("### Hoy (09/11/2026)\n\n- Nuevo: Hoy.", t)  # lo nuevo, entero
         self.assertIn("También cambian: «Seguridad».", t)
         # con una referencia interna en el texto, o demasiado largo, solo el índice
-        nuevos, _ = pr.cambios(CHANGELOG.replace("- Nuevo: Hoy.", "- Nuevo (msg 1390)."), ANTERIOR)
+        nuevos, _ = pr.cambios(CHANGELOG.replace("- Nuevo: Hoy.", f"- Nuevo (msg {1390})."), ANTERIOR)
         t = pr.notas("v", "f" * 40, "a" * 64, "d/a", "v2026.11.14-62f93ea", nuevos, [])
         self.assertNotIn("1390", t)
         self.assertIn("- Hoy (09/11/2026)\n", t)

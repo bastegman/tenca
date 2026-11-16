@@ -198,9 +198,9 @@ class AplicarTests(unittest.TestCase):
             self.assertEqual(t[x["pos"]:x["pos"] + len(x["a"])], x["a"])
 
     def test_lo_correcto_con_otras_tildes_tampoco(self):
-        """Revisión 2: «Telefonica Tech» ya contiene «Telefónica Tech» sin la tilde: no se duplica «Tech»."""
-        self.assertEqual(A.aplicar("con Telefonica Tech", [{"de": "telefonica", "a": "Telefónica Tech"}]),
-                         ("con Telefonica Tech", []))
+        """Revisión 2: «Quimica Tech» ya contiene «Química Tech» sin la tilde: no se duplica «Tech»."""
+        self.assertEqual(A.aplicar("con Quimica Tech", [{"de": "quimica", "a": "Química Tech"}]),
+                         ("con Quimica Tech", []))
         self.assertEqual(A._plano("Ñandú ß"), "nandu ß")
 
     def test_no_encadena(self):
@@ -684,7 +684,7 @@ class ServidorTests(TempTree):
         self.assertEqual(self.textos(b), ["con orbalia"])  # sin registro, sin cambio: nunca uno sin su marca
 
     def test_el_audio_y_el_original_no_se_tocan_nunca(self):
-        """Msg 1390: «nunca se toca el audio ni el original guardado», ni al aplicar ni al deshacer."""
+        """Nunca se toca el audio ni el original guardado, ni al aplicar ni al deshacer."""
         rel = "Cliente Alfa/r1.wav"
         b = self.reunion(rel, ["con orbalia"])
         self.corregir(rel, ["con orbalia, dijo"])  # la copia del original ya existe (corrección a mano)

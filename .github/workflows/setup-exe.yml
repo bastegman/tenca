@@ -3,7 +3,7 @@ name: setup-exe
 # Setup.exe, fase 1 (ítem 8 del backlog): un asistente de Inno Setup que envuelve instalar.ps1. Se compila con el ISCC
 # que traen los runners de Windows de GitHub (Inno Setup 6.7) y se prueba de verdad con PowerShell 5.1
 # (scripts/e2e/setup_e2e.ps1): instalación nueva en silencio, el asistente pulsado como el usuario (UI Automation, con
-# capturas), desinstalar, la Chuleta de main (CHULETA_SHA, la que tiene Bernardo) con el Setup encima y un fallo
+# capturas), desinstalar, la Chuleta de main (CHULETA_SHA, la ya instalada) con el Setup encima y un fallo
 # simulado. El Setup.exe (sin firma: Windows enseña SmartScreen) sale como artefacto «Tenca-Setup».
 on:
   workflow_dispatch:

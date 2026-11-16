@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Cambiar el idioma en pleno directo (ítem 12, msgs 1150-1151: «funcionó, pero tardó») y la traducción del directo a
-español o inglés (ítem 13a, msg 1152).
+"""Cambiar el idioma en pleno directo (ítem 12: funcionaba, pero tardaba) y la traducción del directo a español o
+inglés (ítem 13a).
 
 - Lo puro: desde qué frase se rehace (redo_start, nunca una corregida a mano), desde qué segundo (redo_from) y lo que
   dice el aviso (lang_switch_info: al día con su ~N s, poniéndose al día, en pausa).
@@ -768,7 +768,7 @@ class ServidorIdiomaTests(TempTree):
         self.assertEqual(server.TraduccionDestino(p).data, {})
 
     def test_repaso_final_con_los_idiomas_del_directo(self):
-        # msg 1150: empezó en inglés y pasó al portugués; el repaso final no pasa al portugués lo dicho en inglés
+        # empezó en inglés y pasó al portugués: el repaso final no pasa al portugués lo dicho en inglés
         self.assertIsNone(server.idioma_repaso(None))
         self.assertIsNone(server.idioma_repaso(["pt"]))  # no cambió: el de siempre
         self.assertEqual(server.idioma_repaso(["en", "pt"]), "en-pt")

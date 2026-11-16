@@ -1,4 +1,4 @@
-﻿; Setup.exe de Tenca, fase 1 (ítem 8 del backlog; aprobado por Bernardo en el msg 1296 del 08/11/2026).
+﻿; Setup.exe de Tenca, fase 1 (ítem 8 del backlog, 08/11/2026).
 ;
 ; Un asistente de Inno Setup que envuelve el instalador de siempre: copia a su carpeta temporal lo mismo que lleva el
 ; zip (Tenca\INSTALAR.bat, Tenca\_app\...) y ejecuta Tenca\_app\instalar.ps1 con -DesdeSetup. instalar.ps1 hace todo

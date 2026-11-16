@@ -108,7 +108,7 @@ def alias_of(rel):
     return new
 
 
-# Carpetas de listas conectadas (vocabulario desde una carpeta, msg 1148): sus listas .txt se leen en vivo, sin copiar
+# Carpetas de listas conectadas (vocabulario desde una carpeta, B2b): sus listas .txt se leen en vivo, sin copiar
 # nada. Van aparte de LINKS: no salen en el arbol de reuniones ni como destino de grabacion, y safe() no las resuelve
 # (ahi no se graba, ni se mueve, ni se transcribe nada). Las rutas internas de sus listas empiezan por ":v<id>" (el id
 # de LINKS es hexadecimal: nunca empieza por "v", asi que no chocan).

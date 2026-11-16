@@ -58,9 +58,9 @@ TRANSLATE_FINAL_S = 10      # al terminar el directo, el ultimo paso: como mucho
 TRANSLATE_LOCK_S = 2        # ...de ellos, como mucho 2 s esperando a que el hilo de la traduccion acabe la suya
 TRANSLATE_FINAL_ATTEMPTS = 3  # ...e intentos dentro del plazo (otra clave tras un 401, max_tokens tras un 400)
 TRANSLATION_PUBLIC = 60     # ultimos bloques traducidos que viajan en el estado del trabajo
-TRANSLATE_TO = ("es", "en")  # destinos de la traduccion del directo (msg 1152): espanol o ingles
+TRANSLATE_TO = ("es", "en")  # destinos de la traduccion del directo (ítem 13a): espanol o ingles
 
-# --- cambiar el idioma en pleno directo (msgs 1150-1151: «funcionó, pero tardó»)
+# --- cambiar el idioma en pleno directo (ítem 12: funcionaba, pero tardaba)
 REDO_BACK_S = 60            # se rehace en el idioma nuevo lo escrito en el ultimo minuto (desde una frase entera)
 SWITCH_BEHIND_CLOUD_S = 30  # con mas retraso que esto (nube / local) el aviso dice «va poniéndose al día»
 SWITCH_BEHIND_LOCAL_S = 90
@@ -490,7 +490,7 @@ def translate_to(job):
 
 class LiveTranslator:
     """Hilo que traduce lo ultimo que se ha transcrito, cada TRANSLATE_EVERY_S, mientras job.translate, al idioma de
-    job.translate_to (espanol o ingles, msg 1152). get_segs() devuelve (generacion, lista de frases); si la generacion
+    job.translate_to (espanol o ingles, ítem 13a). get_segs() devuelve (generacion, lista de frases); si la generacion
     cambia (rehacer desde el principio) o cambia el destino, empieza de cero. Lo traducido se acumula en
     job.translation (en memoria: es una ayuda para seguir la reunion). Solo se traduce lo dicho en los ultimos
     TRANSLATE_BACK_S: activada a mitad de reunion empieza por ahi, no por el minuto 0, y si se queda atras (un trozo
@@ -631,7 +631,7 @@ def run(job, path, opts, write, log):
     ajustes de la nube vigentes y se llama en cada vuelta (una clave pegada, cambiada o quitada en Ajustes vale
     desde el siguiente trozo; sin el, cloud_cfg tal cual).
 
-    El idioma, ademas, vale al momento (msgs 1150-1151): el trozo en vuelo se cancela (en local se mata el proceso de
+    El idioma, ademas, vale al momento (ítem 12): el trozo en vuelo se cancela (en local se mata el proceso de
     Whisper; una peticion a la nube que ya vuelve se descarta) y lo escrito en el ultimo minuto se rehace en el idioma
     nuevo (redo_start: desde una frase entera y nunca una corregida a mano). Hasta que llega el texto nuevo se sigue
     viendo el de antes; si el trozo que lo rehace falla, vuelve el de antes.

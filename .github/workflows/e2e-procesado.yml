@@ -1,6 +1,6 @@
 name: e2e-procesado
 
-# «Dónde se procesan tus reuniones» de punta a punta en Windows (07/11/2026, msgs 1169-1170 de Bernardo: con Groq
+# «Dónde se procesan tus reuniones» de punta a punta en Windows (07/11/2026; antes, con Groq
 # fallaba, con Claude no transcribía, «Modelo» parecía Groq y «Descargando modelo medium» no acababa). Elige cada modo
 # en Ajustes como él, descarga Whisper medium de verdad con su progreso en MB y %, lo carga, transcribe en directo y
 # desde la cola, y comprueba que lo que la interfaz enseña junto a «Modelo» cuadra con el modo. Groq, contra un falso en

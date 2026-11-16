@@ -225,7 +225,7 @@ DEFAULT_SETTINGS = {
     # 07/11/2026 project_folders era «la ultima elegida» para ese proyecto: lo que habia se queda como asignacion
     "project_folders": {},
     "workstream_folders": {},
-    # una carpeta por reunion, «AAAA-MM-DD Nombre», dentro de la principal (msg 1158): el audio y sus textos van dentro
+    # una carpeta por reunion, «AAAA-MM-DD Nombre», dentro de la principal: el audio y sus textos van dentro
     "carpeta_por_reunion": True,
     # plan de grabacion (plan.py, 07/11/2026): idioma por proyecto y por workstream (id de su lista), y si al grabar se
     # transcribe en directo por defecto (Ajustes › Al grabar; «Solo grabar» en la tarjeta vale para esa reunion)
@@ -235,7 +235,7 @@ DEFAULT_SETTINGS = {
     "favorites": [],          # [{"kind": "a"|"f", "path": ...}] (estilo Notion)
     "folder_icons": {},       # carpeta -> emoji
     "meeting_detect": True,   # avisar si Teams/Zoom/… usa el micro y no se esta grabando
-    # que la ventana no salga al compartir pantalla ni en capturas (window.py, msg 1242); se aplica al momento
+    # que la ventana no salga al compartir pantalla ni en capturas (window.py); se aplica al momento
     "ocultar_al_compartir": True,
     "outlook_on": False,      # leer la cita en curso de Outlook clasico (COM, pywin32): nombre, tema y asistentes
     # si Outlook deja leer los asistentes sin preguntar ("si"), pregunta ("pregunta": solos no se leen, solo con
@@ -458,8 +458,8 @@ def procesado_de(st):
 
 def proveedor_elegido(st):
     """Si ya hay un proveedor de la nube elegido: «API externa» elegida, o una clave, una direccion propia o una de
-    Azure guardadas. En una instalacion nueva no lo hay, y la interfaz no da ninguno por elegido (Bernardo, msg 1386:
-    «Lo que no quiero es sugerir Groq a un nuevo instalador»). cloud.provider sigue siendo "groq" por defecto en los
+    Azure guardadas. En una instalacion nueva no lo hay, y la interfaz no da ninguno por elegido: a quien instala
+    por primera vez no se le sugiere un servicio concreto. cloud.provider sigue siendo "groq" por defecto en los
     ajustes, para no cambiar nada a quien ya lo usa sin haberlo guardado nunca."""
     c = st.get("cloud") or {}
     # un proveedor que no es el de por defecto solo puede venir de una eleccion (aunque aun no tenga clave)
@@ -469,7 +469,7 @@ def proveedor_elegido(st):
 
 
 def reparar_proveedor(d):
-    """Al arrancar (fix-groq, msgs 1468-1474): unos ajustes con un proveedor de la nube que no existe (vacio o de una
+    """Al arrancar (fix-groq, 10/11/2026): unos ajustes con un proveedor de la nube que no existe (vacio o de una
     version anterior) pasan a Groq, que es lo que hacia el motor hasta fe29522 y otra vez desde fix-groq; asi Ajustes
     lo ensena elegido y «Guardar» no lo cambia. Con 0d5169b, en ese caso el desplegable no marcaba ninguno, el navegador
     marcaba el primero (Azure OpenAI) y un «Guardar» lo dejaba en Azure sin endpoint: si quedo asi (Azure sin endpoint

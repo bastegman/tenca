@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""E2E de «Dónde se procesan tus reuniones» con lo que hace Bernardo (07/11/2026, msgs 1169-1170): elegir el modo en
+"""E2E de «Dónde se procesan tus reuniones» con lo que hace el usuario (07/11/2026): elegir el modo en
 Ajustes, que el Whisper del PC se descargue con su progreso y cargue, transcribir una grabación en directo y un WAV
 corto, y comprobar que lo que la interfaz enseña junto a «Modelo» cuadra con el modo elegido.
 
@@ -308,7 +308,7 @@ class TresModosE2E(unittest.TestCase):
         pg.check(f".dialog.wz input[name='wzModo'][value='{modo}']")
         pg.click(".wz-foot [data-wz='sig']")
         if modo == "api":
-            if pg.locator("#wzProv").is_visible():  # en una instalación nueva no hay proveedor elegido (msg 1386)
+            if pg.locator("#wzProv").is_visible():  # en una instalación nueva no hay proveedor elegido (sin-groq)
                 pg.select_option("#wzProv", "groq")
                 pg.wait_for_selector("#wzKey", timeout=5000)
             pg.fill("#wzKey", CLAVE)
@@ -404,7 +404,7 @@ class TresModosE2E(unittest.TestCase):
         self.idioma_propuesto_local()
 
     def idioma_en_pleno_directo_local(self):
-        """Ítem 12 con el Whisper medium de verdad (msgs 1150-1151): con el directo en marcha y lo dicho ya escrito
+        """Ítem 12 con el Whisper medium de verdad: con el directo en marcha y lo dicho ya escrito
         en inglés, la reunión pasa a «Solo español»: el aviso trae el estado y lo ya escrito se rehace en español (se
         relee ese audio y Whisper lo transcribe con el idioma nuevo), sin esperar al final de la grabación."""
         rel = "Pruebas/" + time.strftime("%Y-%m-%d %H-%M-%S") + " - Directo idioma.wav"

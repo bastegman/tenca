@@ -679,7 +679,7 @@ class ReunionFrontendTests(unittest.TestCase):
         for s in ("function reunionFieldsetHtml", "function bindReunionSettings",
                   "/api/reunion/actual?outlook=1", 'id="rnOutlook"', 'id="rnAviso"', 'id="rnProbar"'):
             self.assertIn(s, js, s)
-        self.assertNotRegex(js, r"[\U0001F300-\U0001FAFF\u2600-\u26FF]")  # sin emojis (Steve los está quitando)
+        self.assertNotRegex(js, r"[\U0001F300-\U0001FAFF\u2600-\u26FF]")  # sin emojis (iconos I.*)
 
     @unittest.skipUnless(shutil.which("node"), "node no instalado")
     def test_linea_de_probar(self):

@@ -8,7 +8,7 @@
 #      sin hablar de una carpeta descomprimida, y abre la app
 #   u) desinstalar con su orden de Aplicaciones instaladas (-Silencioso): fuera la app, la entrada y los accesos; la
 #      reunion se queda
-#   v) la Chuleta de verdad (-Chuleta <sha>, la de main que tiene Bernardo), instalada con SU INSTALAR.bat, con una
+#   v) la Chuleta de verdad (-Chuleta <sha>, la de main ya instalada), instalada con SU INSTALAR.bat, con una
 #      reunion, un ajuste y «Arrancar con Windows»; y Setup.exe en silencio encima: la actualiza en su carpeta (que se
 #      sigue llamando Chuleta), sin nada con el nombre viejo, una sola entrada, reunion y ajuste intactos, y la app
 #      ensena la carpeta con su nombre («Se guarda en Chuleta\...»). Despues se desinstala

@@ -417,7 +417,7 @@ def perfil_vocab(st, sugerido=None):
 
 
 def idioma_repaso(usados):
-    """Idioma del repaso final de un directo en el que se cambió el idioma de la reunión (msg 1150: empezó en inglés y
+    """Idioma del repaso final de un directo en el que se cambió el idioma de la reunión (p. ej. empezó en inglés y
     pasó al portugués). Con el idioma del final para toda la grabación, lo dicho antes se pasaría a ese idioma; con
     los que se usaron, su mezcla si existe (en + pt → «en-pt»; es + en + pt → «es-en-pt») y si no, detectar ("").
     None: no cambió (el de siempre, el de la reunión al terminar). usados: los idiomas fijados en la sesión, en orden

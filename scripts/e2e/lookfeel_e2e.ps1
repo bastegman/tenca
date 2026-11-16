@@ -10,7 +10,7 @@
 # proposito (pantalla de error). Despues el desinstalador: ventana cancelada (no toca nada), con la app "grabando" (no
 # toca nada), -Silencioso con la app abierta (quita accesos directos, entrada y _app; la reunion sigue igual) y, tras
 # reinstalar en la misma carpeta, ventana con "Borrar tambien mis ajustes" (AudiosApp borrada; la reunion sigue igual).
-# Por ultimo (fase v), la Chuleta de verdad (-Chuleta <sha>, la de main que tiene Bernardo) instalada con su propio
+# Por ultimo (fase v), la Chuleta de verdad (-Chuleta <sha>, la de main ya instalada) instalada con su propio
 # instalador, abierta, con "Arrancar con Windows" y una reunion y un ajuste suyos, y Tenca instalada encima: la cierra,
 # la actualiza en su carpeta, no queda nada con el nombre viejo ni duplicado, la reunion y los ajustes siguen; y se
 # desinstala. Capturas de pantalla cada 5 s en paralelo y de la ventana del desinstalador.
@@ -322,7 +322,7 @@ if (Test-Path -LiteralPath (Join-Path $logDir "instalar.log")) { Remove-Item -Li
 $env:NOTAS_INSTALADOR_AUTOCERRAR = "15"
 $env:NOTAS_INSTALADOR_SIMULAR_FALLO = ""
 $rc = Run-Installer $dir1 "c.instalador" 25  # pip real (faster-whisper, sherpa-onnx, pywebview, pywin32): 5-14 min segun el runner
-# doble apertura (Bernardo, msg 1143: "se me abrian como 2 veces la app"): el instalador acaba de abrir la app (como
+# doble apertura (la app se abria 2 veces): el instalador acaba de abrir la app (como
 # "Abrir"; aqui, el autocierre) y el usuario pulsa ademas el acceso directo mientras arranca. Se comprueba en e)
 $deskDoble = Join-Path ([Environment]::GetFolderPath("Desktop")) "$App.lnk"
 $doble = $null
@@ -469,7 +469,7 @@ Check "e.icon_big_256" ($w.icons -and $w.icons.ICON_BIG.px -eq "256x256") "$($w.
 $slog = Tail-Log "server.log" 200
 Check "e.log_aumid" ($slog -match "AppUserModelID Bernardo\.Chuleta: fijado") ""
 Check "e.log_ventana" ($slog -match "ventana abierta \(WebView2") (($slog -split "`n" | Select-String "ventana abierta") -join "")
-# icono en la bandeja (item 2, msg 1143): se pone con la ventana propia y se quita al apagar (sin icono fantasma)
+# icono en la bandeja (item 2): se pone con la ventana propia y se quita al apagar (sin icono fantasma)
 Check "e.log_bandeja" ($slog -match "icono en la bandeja \(hwnd \d+\)") (($slog -split "`n" | Select-String "bandeja") -join " | ")
 # la ventana abre /?t=<token>: el servidor le da la cookie de sesion y la interfaz habla con la API sin ningun 403
 Check "e.log_cookie_interfaz" ($slog -match "cookie entregada a la interfaz") (($slog -split "`n" | Select-String "sesi.n:") -join " | ")
@@ -828,7 +828,7 @@ Check "u3.app_no_corre" ($servidores.Count -eq 0) ("procesos server.py=" + $serv
 $reunion3 = Get-Reunion
 Check "u3.reunion_intacta" ($reunion3 -eq $reunion0) $reunion3
 
-# ---- v) la Chuleta de verdad (-Chuleta <sha>: la version de main que tiene Bernardo), instalada con SU instalador,
+# ---- v) la Chuleta de verdad (-Chuleta <sha>: la version de main ya instalada), instalada con SU instalador,
 # abierta, con "Arrancar con Windows" puesto desde la propia app, un ajuste suyo y una reunion; y Tenca instalada
 # encima con la Chuleta abierta: la cierra, la encuentra por su entrada, la actualiza en su carpeta (que se sigue
 # llamando Chuleta), no deja nada con el nombre viejo ni duplicado, y la reunion y los ajustes siguen. Despues se
@@ -878,7 +878,7 @@ if (-not $Chuleta) {
     Start-Sleep -Seconds 3
     $vPidChuleta = $(if (@(Get-Listener).Count) { @(Get-Listener)[0].OwningProcess } else { 0 })
 
-    # Tenca encima, con la Chuleta abierta (como Bernardo: descomprime el zip nuevo y doble clic en INSTALAR.bat)
+    # Tenca encima, con la Chuleta abierta (como el usuario: descomprime el zip nuevo y doble clic en INSTALAR.bat)
     $rcv2 = Run-Installer $dir1 "v.instalador" 20
     Copy-Logs "v"
     $ilogv = Last-Run-Log 400

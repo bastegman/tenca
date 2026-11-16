@@ -31,8 +31,8 @@ IDIOMAS[IDIOMA_TRES[0]] = IDIOMA_TRES[1]
 MESES = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
 DIAS = ("lun", "mar", "mié", "jue", "vie", "sáb", "dom")
 CLAVES_CAMBIOS = ("carpeta", "idioma", "contexto", "mic", "sys", "live", "preset", "conservar")
-# qué pasa con el audio al terminar (punto 17 del review; conservar.py): solo para esta reunión, sin ajuste fijo (msg
-# de Bernardo: «que sea por reu, no fijo»). Copiado y no importado, como IDIOMA_RE (test_motor_lote2b: son los mismos)
+# qué pasa con el audio al terminar (punto 17 del review; conservar.py): solo para esta reunión, sin ajuste fijo (se
+# decide reunión a reunión). Copiado y no importado, como IDIOMA_RE (test_motor_lote2b: son los mismos)
 CONSERVAR = {"guardar": "Se guarda", "15-dias": "Se guarda 15 días y luego va a la papelera",
              "borrar": "A la papelera al terminar (cuando tenga texto y resumen)"}
 ALCANCES = ("reunion", "proyecto", "workstream", "ajustes")
@@ -40,7 +40,7 @@ ALCANCES = ("reunion", "proyecto", "workstream", "ajustes")
 # «es-en-pt» mientras se graba detectando. Copiado y no importado (plan no depende de engines); test_enganches comprueba
 # que son el mismo
 IDIOMA_RE = re.compile(r"^(auto|[a-z]{2}(-[a-z]{2})?|es-en-pt)$")
-# con un idioma fijo Whisper pasa a ese idioma lo que se diga en otro (msg 1150: una reunion que paso del ingles al
+# con un idioma fijo Whisper pasa a ese idioma lo que se diga en otro (p. ej. una reunion que paso del ingles al
 # portugues siguio saliendo en ingles): se dice en la tarjeta de grabar, con lo que hacer
 NOTA_IDIOMA_FIJO = ("Con un idioma fijo, lo que se diga en otro se traduce a este: si la reunión puede cambiar de "
                     "idioma, mejor una mezcla o «Detectar».")
@@ -139,7 +139,7 @@ def recientes(historial, listas_por_id, limite=40):
 def unir_participantes(nombres):
     """Los participantes de la reunión en una línea, como calendario.join_participants (revisión de la integración del
     08/11/2026): con «; » si algún nombre lleva coma (el directorio de una empresa en Outlook: «Apellido, Nombre») y,
-    si no, con «, ». Con «, », «Stegmaier, Bernardo, García, Ana» eran cuatro personas para quien lo lee y para la pista
+    si no, con «, ». Con «, », «Navarro, Diego, García, Ana» eran cuatro personas para quien lo lee y para la pista
     de quién habla. Con la rama fix-calendario, la suya (una sola regla); sin ella, la misma aquí (_unir_local)."""
     import calendario  # aquí y no arriba: plan.py sigue sin depender de calendario para lo demás
     if hasattr(calendario, "join_participants"):

@@ -533,7 +533,7 @@ class InterfazProcesadoTests(unittest.TestCase):
         self.assertIn("winget install Anthropic.ClaudeCode", wz)
         self.assertIn("escribe <code>claude</code>", wz)
         self.assertIn("Pro, Max, Ultra, Team, Enterprise o de Console", wz)
-        self.assertIn("Login successful", wz)  # el inicio de sesión en el navegador (claude-empresa, msg 1261)
+        self.assertIn("Login successful", wz)  # el inicio de sesión en el navegador (claude-empresa)
         self.assertIn('data-wz="powershell">Abrir PowerShell', wz)
         self.assertIn("localStorage.setItem('procElegido', '1')", wz)
         # en Ajustes, con la opción de Claude: el modelo y «Resumir solo al terminar», que se guardan al cambiarlos
@@ -562,7 +562,7 @@ class InterfazProcesadoTests(unittest.TestCase):
                       app)
         self.assertIn("Elegir dónde se procesa (Ajustes)", notas)
         self.assertIn("S.config.procesado === 'api' ? S.config.cloud?.has_key : true", notas)
-        # el permiso es por destino; sin config, el de por defecto (msg 1386: nada da la API por hecha)
+        # el permiso es por destino; sin config, el de por defecto (sin-groq: nada da la API por hecha)
         self.assertIn("'sumOk:' + (S.config?.procesado || 'local')", notas)
         self.assertIn("Elige dónde se procesan tus reuniones", notas)
         self.assertIn("|| S.config.procesado !== 'api') return '';", app)  # el aviso heredado habla de la API

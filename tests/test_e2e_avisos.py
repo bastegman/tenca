@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""E2E de los avisos de la franja del directo (B6, puntos 1-3; msg 1378) con la app de verdad: el servidor como lo
+"""E2E de los avisos de la franja del directo (B6, puntos 1-3) con la app de verdad: el servidor como lo
 arranca el acceso directo, la grabadora real con la tarjeta de sonido falsa de tests/fake_soundcard (el micro calla a
 los 6 s: FAKESC_MIC_MUDO), el directo en un Groq falso en 127.0.0.1 y la interfaz en Chromium (Playwright):
 
@@ -286,7 +286,7 @@ class AvisosDirectoE2E(unittest.TestCase):
         time.sleep(12)  # más que los 8 s de la cuenta atrás: sigue grabando
         self.assertTrue(pg.evaluate("S.rec.recording"), "«No terminar» no ha seguido")
         # otra llamada en la misma grabación (otra reunión); al colgar no se toca nada y la reunión SIGUIENTE empieza
-        # durante la cuenta atrás (msg 1479: «se me pasa a la siguiente»): no la cancela, para igual
+        # durante la cuenta atrás (se pasa a la siguiente): no la cancela, para igual
         self.poner_teams("uso", ["Seguimiento"])
         time.sleep(20)
         self.poner_teams("libre")

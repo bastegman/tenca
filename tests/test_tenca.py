@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Renombrado a Tenca (09/11/2026, Bernardo msg 1249): ninguna cadena que vea el usuario dice «Chuleta», y al instalar
+"""Renombrado a Tenca (09/11/2026): ninguna cadena que vea el usuario dice «Chuleta», y al instalar
 encima de una Chuleta no queda nada con el nombre viejo (accesos directos, «Arrancar con Windows», la entrada de
 «Aplicaciones instaladas», los .bat de la raíz) ni duplicados, sin mover los datos.
 

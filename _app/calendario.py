@@ -1050,9 +1050,9 @@ def _estado(activado, probar, now, env, session, fmt, timeout):
 
 # ----------------------------------------------------------------------------- la agenda de un mes (pantalla Hoy, B7)
 #
-# Bernardo, msg 1390: «que se carguen las siguientes (un mes al menos)». Hasta aquí la app solo leía la reunión de
+# Las siguientes reuniones, un mes al menos (09/11/2026). Hasta aquí la app solo leía la reunión de
 # ahora y la agenda de HOY (agenda_hoy), y de esa solo enseñaba una frase («próxima reunión 12:00»): ninguna pantalla
-# listaba las citas (msg 1380, «conecta bien, pero no veo las siguientes reuniones»). Se lee en segundo plano
+# listaba las citas: el calendario conectaba, pero no se veían las siguientes reuniones. Se lee en segundo plano
 # (server._agenda_watch: cada AGENDA_CADA s, y al abrir Hoy si es más vieja que AGENDA_VIEJA) y se guarda en memoria,
 # no en disco: Hoy la enseña sin esperar a Outlook, y la reunión de ahora sale de ella sin otra consulta COM
 # (cita_ahora). Solo lo no protegido (asunto, horas, lugar, categorías, si es periódica): leerla nunca abre el aviso
@@ -1311,7 +1311,7 @@ def _puntos(terms, hay):
 def join_participants(names):
     """Los participantes en una linea (la propiedad «Participantes» del .md): con «, » o, si algun nombre lleva coma
     (el directorio de una empresa en Outlook: «Apellido, Nombre»), con «; », que es como los separa Outlook. Si no,
-    «Stegmaier, Bernardo, García, Ana» eran cuatro personas para quien lo lee y para la pista de quien habla
+    «Navarro, Diego, García, Ana» eran cuatro personas para quien lo lee y para la pista de quien habla
     (voices.count_participants; revision de la integracion del 08/11/2026)."""
     names = [n for n in (names or []) if n]
     return ("; " if any("," in n for n in names) else ", ").join(names)

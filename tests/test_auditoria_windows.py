@@ -477,7 +477,7 @@ SIN_ARREGLO = ("import runpy, sys\n"
                "import window\n"
                "window.Window._hook_native = lambda self: False\n"
                f"runpy.run_path({os.path.join(APP, 'server.py')!r}, run_name='__main__')\n")
-# la app de verdad con la ventana de un PC lento (en el de Bernardo, 31 s entre «arranque» y «ventana abierta» el
+# la app de verdad con la ventana de un PC lento (en uno medido, 31 s entre «arranque» y «ventana abierta» el
 # 02/11/2026): CHULETA_LENTO_INIT s antes de crear la ventana (cuando alive aún es False) y CHULETA_LENTO_START s más
 # dentro de webview.start (ventana creada, sin enseñar). Anota en server.log cuándo entra en cada fase.
 LENTA = ("import os, runpy, sys, time\n"
@@ -654,7 +654,7 @@ class VentanaRealTests(unittest.TestCase):
         return found
 
     def doble_apertura(self, fase, **lento):
-        """Bernardo (msg 1143): «se me abrían como 2 veces la app». La primera copia, con la ventana de un PC lento; la
+        """La app se abría 2 veces. La primera copia, con la ventana de un PC lento; la
         segunda, el acceso directo otra vez cuando la primera entra en `fase` («initialize»: la ventana aún no existe;
         «start»: creada y sin enseñar). Una sola ventana, ningún Edge y la segunda termina sola, sin aviso de error."""
         self.start(code=LENTA, **lento)
@@ -710,7 +710,7 @@ class VentanaRealTests(unittest.TestCase):
         return cond()
 
     def test_bandeja_la_x_oculta_y_el_icono_la_vuelve_a_abrir(self):
-        """Ítem 2 (msg 1143): con la ventana propia, la app tiene icono en la bandeja. La X la oculta sin el aviso de
+        """Ítem 2: con la ventana propia, la app tiene icono en la bandeja. La X la oculta sin el aviso de
         la página (la primera vez, un globo en el icono) y la app sigue; un clic en el icono la vuelve a enseñar; al
         apagar, el icono se quita antes de terminar (si no, queda un icono fantasma)."""
         self.start()

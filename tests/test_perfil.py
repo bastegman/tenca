@@ -370,7 +370,7 @@ class LiveRereadTests(unittest.TestCase):
         self.assertEqual((second["language"], second["about"], second["prompt"]), ("pt", "Comité semanal", "API, SLA"))
         self.assertTrue(all(c["language"] == "pt" for c in cloud.calls[1:]))
         self.assertTrue(any("idioma pt desde ya" in l for l in logs), logs)
-        # el idioma cambió con el primer trozo en vuelo (msgs 1150-1151): su texto no se escribe y ese mismo audio se
+        # el idioma cambió con el primer trozo en vuelo (ítem 12): su texto no se escribe y ese mismo audio se
         # repite en portugués; el resto, un trozo por petición
         self.assertEqual(second["secs"], first["secs"])
         self.assertEqual(len(segs), len(cloud.calls) - 1)

@@ -7,7 +7,7 @@ alimentan lecturas que la app ya hace (el estado de la grabadora cada 0,25 s, el
 1. Callada: el micro o el sonido del ordenador llevan más de un minuto sin recibir nada («El micro no recibe sonido
    desde hace 1 min»). Ver la clase para el criterio y por qué no salta en los silencios normales de una reunión.
 2. FinDeLlamada: la llamada de Teams que se estaba grabando ha terminado (o se ha cerrado Teams): «paro en 30 s · No
-   terminar» (msg 1479). Nunca para si la llamada sigue o si la lectura duda.
+   terminar». Nunca para si la llamada sigue o si la lectura duda.
 3. Propuesta: con un idioma fijo, lo último suena a otro: «Lo último suena a portugués · Cambiar». Varios bloques
    seguidos, nunca uno suelto, y nunca lo ya rechazado en esa grabación.
 """
@@ -23,7 +23,7 @@ MUERTO_DB = -80.0   # por debajo: silencio digital (ceros). Un micro de verdad e
 #                     (picos de -65 a -45 dBFS): nunca baja de aquí salvo silenciado (tecla del portátil, Windows, el
 #                     permiso del micro) o con el nivel a 0. El audio del ordenador sí da ceros cuando no suena nada
 VOZ_DB = -45.0      # por encima, en el micro: alguien habla (la voz da picos de -35 a -6 dBFS)
-AVISO_S = 60.0      # «más de un minuto» (msg 1378, punto 1)
+AVISO_S = 60.0      # «más de un minuto» (B6, punto 1)
 PUERTA_S = 1.0      # un silencio digital de >= 1 s que se va solo...
 PUERTA_VUELTAS = 2  # ...dos veces: el micro tiene puerta de ruido (da ceros entre frases): sin aviso del micro
 HABLA_S = 5.0       # tras hablar por el micro, 5 s que aún son «hablando» (las pausas entre frases)
@@ -31,7 +31,7 @@ PASO_MAX_S = 2.0    # entre dos lecturas de 0,25 s: un hueco mayor (el PC se dur
 
 # --- 2. fin de la llamada
 CONFIRMA_S = 5.0    # el micro de Teams suelto y sin sus ventanas al menos esto antes de proponer (las dos señales a la
-#                     vez ya son fuertes; menos espera = menos reuniones seguidas que se cuelan, msg 1479)
+#                     vez ya son fuertes; menos espera = menos reuniones seguidas que se cuelan)
 VINCULO_S = 120.0   # la llamada empezó como mucho 2 min después de empezar a grabar: es la de esta grabación
 PARA_EN_S = 30.0    # «paro en 30 s»
 CUBRE = 0.6         # la llamada cubre al menos el 60 % de lo grabado hasta que terminó (no una llamada corta
@@ -169,7 +169,7 @@ class Callada:
 class FinDeLlamada:
     """¿Ha terminado la llamada de Teams que se estaba grabando? Se llama con cada lectura (tic) y devuelve lo que toca
     hacer: None, "propone" (enseñar «paro en 30 s»), "cancela" (la llamada sigue o ya no se sabe: se quita el aviso) o
-    "para" (pasados los 30 s sin «No terminar»: parar como un «Parar» normal; msg 1479).
+    "para" (pasados los 30 s sin «No terminar»: parar como un «Parar» normal).
 
     Señales: el micro de Teams en el registro de privacidad («uso»: lo tiene abierto; «libre»: lo soltó, con su hora
     de fin, o Teams se ha cerrado; «duda»: no se sabe qué procesos hay) y los títulos de las ventanas de reunión de

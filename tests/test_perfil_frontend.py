@@ -50,7 +50,7 @@ class PerfilCargaTests(unittest.TestCase):
 
     def test_textos_y_sin_nada_externo(self):
         js = read("perfil.js")
-        # «Importar listas…» pasó a «Copiar listas…» (en app.js) con las carpetas conectadas (backlog 10, msg 1148);
+        # «Importar listas…» pasó a «Copiar listas…» (en app.js) con las carpetas conectadas (backlog 10);
         # el diálogo Grabar viejo («Sin vocabulario», «Nuevo…», «Guardar como perfil por defecto») lo sustituye la
         # tarjeta de grabar.js (ux-grabar)
         for s in ("Usar las listas de una carpeta…", "/api/vocab/link/add", "/api/vocab/link/remove",

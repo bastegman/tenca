@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Icono de la app en la bandeja del sistema (la zona de notificacion de Windows, junto al reloj) mientras el proceso
-vive, con la ventana abierta u oculta (Bernardo, 02/11/2026, msg 1143, cuando la app se llamaba Chuleta: que quedase
-abierta como una app aquí corriendo aunque le ponga salir, y que solo se pueda cerrar desde ahí).
+vive, con la ventana abierta u oculta (02/11/2026, cuando la app se llamaba Chuleta: que siga abierta como una app
+aunque se cierre la ventana, y que se cierre de verdad solo desde ahí).
 
   - Clic en el icono: abre la ventana. Clic derecho: Abrir, Grabar o Parar (Ctrl+Alt+R), Arrancar con Windows y Salir.
     Salir es lo mismo que Ajustes > Apagar (server.tray_salir).

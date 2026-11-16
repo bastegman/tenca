@@ -172,7 +172,7 @@ class Ajustes:
         ruta = cls.find()
         if not ruta:
             raise ApiError(f"No encuentro {cls.label} en este PC. Haz los pasos 1 y 2 y vuelve a pulsar «Comprobar».")
-        # lo que tarda cada paso, al log (07/11/2026: en el PC de Bernardo «Comprobar» tardó minutos sin decir en que)
+        # lo que tarda cada paso, al log (07/11/2026: en un PC lento «Comprobar» tardó minutos sin decir en que)
         origen = cls.origen(ruta)  # «Claude Code de VS Code» si es la copia de la extension (07/11/2026)
         log(f"   agente: comprobando {origen} ({modelo})…" + (f" · {ruta}" if origen != cls.label else ""))
         ag, t0 = cls(settings_dir=DATA_DIR), time.time()
@@ -245,7 +245,7 @@ class Ajustes:
     @staticmethod
     def _prueba_motores(st):
         """(preset del directo, [modelos de Whisper que hacen falta]) de esa configuración, sin «API externa» siempre
-        en el PC: el del directo y el de la cola (los dos se descargan juntos, decisión de Claudia 07/11/2026)."""
+        en el PC: el del directo y el de la cola (los dos se descargan juntos y se prueban de una vez)."""
         out = []
         for key, local in (("live_preset", "medium"), ("preset", "rapido")):
             p = engines.PRESETS_BY_ID.get(st.get(key) or local)

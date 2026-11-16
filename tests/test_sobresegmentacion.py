@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""msg 1242 (08-nov-2026): «a una persona la cataloga como 10 personas distintas a lo largo de la reunion».
+"""Sobresegmentación (08-nov-2026): «a una persona la cataloga como 10 personas distintas a lo largo de la reunion».
 
 sherpa-onnx parte a cada persona en varios grupos; voices.consolidate los une al terminar (huellas parecidas, breves
 al mas parecido, numero de participantes como pista). Medido en reuniones reales con scripts/eval_voces.py; aqui,
@@ -69,7 +69,7 @@ class ConsolidateTests(unittest.TestCase):
         self.assertEqual(len(res["hablantes"]), 3)
 
     def test_una_persona_partida_en_muchos_grupos_vuelve_a_ser_una(self):
-        """El caso del msg 1242: diez grupos de la misma voz (con ruido) y otra persona."""
+        """El caso del 08-nov: diez grupos de la misma voz (con ruido) y otra persona."""
         rng = np.random.default_rng(7)
         base = unit(0)
         grupos = {}
@@ -176,8 +176,8 @@ class CountParticipantsTests(unittest.TestCase):
 
     def test_sugeridos_por_outlook(self):
         """Lo que escribe la app con los de Outlook (join_participants): «Apellido, Nombre» es una persona."""
-        for text, n in (("Stegmaier, Bernardo; García López, Ana", 2), ("Stegmaier, Bernardo;\nGarcía, Ana; Luis", 3),
-                        ("Ana, Luis", 2), ("Ortega y Gasset, José; Ana", 2), ("", 0),
+        for text, n in (("Navarro, Diego; García López, Ana", 2), ("Navarro, Diego;\nGarcía, Ana; Luis", 3),
+                        ("Ana, Luis", 2), ("Rivas y Mora, José; Ana", 2), ("", 0),
                         # una entrada que nombra a dos (una pareja, un buzon compartido): dos, nunca una (RF5)
                         ("Pérez, Ana y Luis; García, Pedro", 3), ("Ana y Luis Pérez, Pedro García", 3),
                         ("Equipo Ventas / Marketing, Ana López", 3),
@@ -207,10 +207,10 @@ class ParticipantesDeOutlookTests(unittest.TestCase):
 
     def test_de_la_cita_a_la_pista(self):
         import calendario
-        sug = calendario.suggest({"subject": "Comité", "organizer": "Stegmaier, Bernardo",
-                                  "attendees": ["García López, Ana", "Stegmaier, Bernardo"]}, [])
+        sug = calendario.suggest({"subject": "Comité", "organizer": "Navarro, Diego",
+                                  "attendees": ["García López, Ana", "Navarro, Diego"]}, [])
         texto = calendario.join_participants(sug["participants"])
-        self.assertEqual(texto, "Stegmaier, Bernardo; García López, Ana")
+        self.assertEqual(texto, "Navarro, Diego; García López, Ana")
         self.assertEqual(voices.count_participants(texto, sugeridos=True), 2)
 
     def test_sin_comas_como_siempre(self):
@@ -251,16 +251,16 @@ class ParticipantesDeOutlookTests(unittest.TestCase):
         """La tarjeta de grabar (ux-grabar; sustituye al dialogo de reunionPrefill) recibe los participantes ya unidos
         por el plan (plan.unir_participantes, igual que join_participants: test_plan) y los parte y los une igual."""
         out = node(js_defs(read("grabar.js"), ["grPartes", "grSep"]) + """
-const p = grPartes('Stegmaier, Bernardo; García, Ana'), q = grPartes('Ana, Luis');
+const p = grPartes('Navarro, Diego; García, Ana'), q = grPartes('Ana, Luis');
 console.log(JSON.stringify([p, p.join(grSep(p)), q, q.join(grSep(q)), grPartes('')]));
 """)
-        partes = ["Stegmaier, Bernardo", "García, Ana"]
+        partes = ["Navarro, Diego", "García, Ana"]
         self.assertEqual(json.loads(out[0]),
-                         [partes, "Stegmaier, Bernardo; García, Ana", ["Ana", "Luis"], "Ana, Luis", []])
+                         [partes, "Navarro, Diego; García, Ana", ["Ana", "Luis"], "Ana, Luis", []])
         import calendario
         import plan
-        self.assertEqual(plan._unir_local(["Stegmaier, Bernardo", "García, Ana"]),
-                         calendario.join_participants(["Stegmaier, Bernardo", "García, Ana"]))
+        self.assertEqual(plan._unir_local(["Navarro, Diego", "García, Ana"]),
+                         calendario.join_participants(["Navarro, Diego", "García, Ana"]))
 
 
 class PistaDeParticipantesTests(Reunion):
@@ -305,7 +305,7 @@ class PistaDeParticipantesTests(Reunion):
 
     def test_los_de_outlook_con_apellido_y_nombre(self):
         """El texto que escribio la app desde Outlook: «Apellido, Nombre» cuenta uno."""
-        texto = "Stegmaier, Bernardo; García López, Ana"
+        texto = "Navarro, Diego; García López, Ana"
         with mock.patch.object(server, "TEXTOS_SUGERIDOS", {texto}):
             self.assertEqual(self.correr({"participantes": texto, "participantes_origen": "outlook"}), 2)
 
@@ -321,11 +321,11 @@ class PistaDeParticipantesTests(Reunion):
     def test_editados_a_mano_del_lado_prudente(self):
         """Un texto que la app no escribio (editado a mano, o tras reiniciar) es texto libre: de mas, nunca de menos."""
         with mock.patch.object(server, "TEXTOS_SUGERIDOS", set()):
-            self.assertEqual(self.correr({"participantes": "Stegmaier, Bernardo; García López, Ana"}), 4)
+            self.assertEqual(self.correr({"participantes": "Navarro, Diego; García López, Ana"}), 4)
 
     def test_confirmados_sin_tocar(self):
         """«Confirmar» quita el origen pero no cambia el texto que escribio la app: se siguen contando bien."""
-        texto = "Stegmaier, Bernardo; García López, Ana"
+        texto = "Navarro, Diego; García López, Ana"
         with mock.patch.object(server, "TEXTOS_SUGERIDOS", {texto}):
             self.assertEqual(self.correr({"participantes": texto}), 2)
 
@@ -336,8 +336,8 @@ class PistaDeParticipantesTests(Reunion):
         from test_carpetas import FakeRec, make_app, rec
         os.makedirs(os.path.join(self.root, "Alfa"))
         a = make_app(self)
-        nombres = ["Stegmaier, Bernardo", "García López, Ana"]
-        texto = "Stegmaier, Bernardo; García López, Ana"
+        nombres = ["Navarro, Diego", "García López, Ana"]
+        texto = "Navarro, Diego; García López, Ana"
         largos = [f"Apellido{n:02d} Segundo, Nombre{n:02d}" for n in range(30)]
         a.vigia = types.SimpleNamespace(ultimo={"sugerencia": {"source": "outlook", "participants": nombres}},
                                         sugerencia=lambda fn: {"source": "outlook", "participants": nombres})
@@ -367,7 +367,7 @@ class PistaDeParticipantesTests(Reunion):
         sin Outlook: el texto se apunta igual (lecturas de la ultima hora, Vigia.participantes_recientes; RF5)."""
         from test_carpetas import make_app, rec
         os.makedirs(os.path.join(self.root, "Alfa"))
-        a, nombres = make_app(self), ["Stegmaier, Bernardo", "García López, Ana"]
+        a, nombres = make_app(self), ["Navarro, Diego", "García López, Ana"]
         texto = server.calendario.join_participants(nombres)
         a.vigia = server.calendario.Vigia()
         a.vigia.recordar({"sugerencia": {"source": "outlook", "participants": nombres}})  # /api/reunion/actual
@@ -405,7 +405,7 @@ class PistaDeParticipantesTests(Reunion):
         reunion.js) → la pista de la primera identificacion. Editado (quitar a uno), ya cuenta como texto libre."""
         from test_carpetas import make_app, rec
         os.makedirs(os.path.join(self.root, "Alfa"))
-        nombres = ["Stegmaier, Bernardo", "García López, Ana", "Ortega y Gasset, José"]
+        nombres = ["Navarro, Diego", "García López, Ana", "Rivas y Mora, José"]
         texto = server.calendario.join_participants(nombres)
         resultados = []
         with mock.patch.object(server, "TEXTOS_SUGERIDOS", set()):
@@ -421,7 +421,7 @@ class PistaDeParticipantesTests(Reunion):
                     a.notes_save({"path": r["path"], "props": {"participantes": editar(campo) if editar else campo}})
                 props = server.parse_notes(server.read_text(wav[:-4] + ".md"))[0]
                 resultados.append((antes, a.jobs._participant_hint(wav, {}), props.get("participantes_origen")))
-        self.assertEqual(resultados, [(3, 3, None), (3, 4, None)])  # editado: «Stegmaier, Bernardo; García López, Ana»
+        self.assertEqual(resultados, [(3, 3, None), (3, 4, None)])  # editado: «Navarro, Diego; García López, Ana»
 
     def test_al_reidentificar_si_los_sugirio_la_reunion(self):
         self.identificar(micro_en=None)

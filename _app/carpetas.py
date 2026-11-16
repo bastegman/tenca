@@ -24,7 +24,7 @@ from rutas import (AUDIO_EXT, DATA_DIR, LINKS, MARCA_SIN_AUDIO, ROOT, VOCAB_LINK
                    root_name, safe)
 
 
-# Donde se graba (msgs 1148 y 1158): una carpeta por reunion, «AAAA-MM-DD Nombre», dentro de la carpeta principal de su
+# Donde se graba (B1b y B2b): una carpeta por reunion, «AAAA-MM-DD Nombre», dentro de la carpeta principal de su
 # workstream o de su proyecto. La principal se asigna (workstream_folders / project_folders); sin asignar, es la carpeta
 # del proyecto en el arbol (la que tiene su carpeta Vocabulario). Sin tema: la fija del perfil y, si no, la ultima
 # usada. Lo grabado antes se queda donde esta: solo lo nuevo va en su carpeta.

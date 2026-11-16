@@ -427,7 +427,7 @@ class Jobs:
         job.informe = informe.ApuntesDirecto()  # lo que live.run apunta por trozo para el informe tecnico (punto 32)
         if cae:
             informe.caida_a_local(job)
-        job.translate_to = traduccion_destino(rel, st)  # el ultimo de esta reunion o el idioma del resumen (msg 1152)
+        job.translate_to = traduccion_destino(rel, st)  # el ultimo de esta reunion o el idioma del resumen (ítem 13a)
         # algun trozo en local (o, al retomar tras un reinicio, lo de antes sin constar que fuera en la nube): el
         # resumen automatico no lo sube a la nube sin permiso (CloudText, Jobs.auto_summary)
         retoma = os.path.isfile(os.path.splitext(abs_path)[0] + ".srt")

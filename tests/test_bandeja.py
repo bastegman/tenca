@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Icono en la bandeja del sistema (backlog del 7-8/11/2026, ítem 2; Bernardo, msg 1143: «que Chuleta quedase abierta
-como una app aquí corriendo aunque le ponga salir, solo se pueda cerrar si la cierro desde ahí al salir»).
+"""Icono en la bandeja del sistema (backlog del 7-8/11/2026, ítem 2: que la app siga abierta aunque se cierre la
+ventana, y que solo se cierre de verdad desde ahí, con «Salir»).
 
 En cualquier sistema, con un doble de WinForms: el menú (Abrir, Grabar o Parar, Arrancar con Windows, Salir), el clic,
 el texto del icono, el globo, el Dispose al apagar y la caída limpia a lo de antes si el icono no se puede poner; la

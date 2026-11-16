@@ -630,7 +630,7 @@ def teams_mic(entries, now=None, images=None):
     la llamada que se graba ha terminado (directo_avisos.FinDeLlamada):
       "uso"   alguna entrada de Teams lo tiene abierto (empezo hace menos de MIC_MAX_AGE_S y Teams esta en marcha);
       "libre" ninguna lo tiene: lo soltaron (con su hora de fin), nunca lo usaron, o figura abierto pero Teams ya no
-              esta en marcha (se cerro Teams: «cuando se cierra el Teams o la reunion», msg 1479; Windows no siempre
+              esta en marcha (se cerro Teams: cerrar Teams también es colgar; Windows no siempre
               apunta el fin si el proceso se va de golpe, y sin Teams no hay llamada en este PC);
       "duda"  figura abierto y no se sabe que procesos hay (tasklist fallo).
     Una entrada abierta de hace mas de MIC_MAX_AGE_S es rancia y no cuenta (como en mic_scan)."""

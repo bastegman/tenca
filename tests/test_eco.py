@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Voces dobles (backlog §14, msgs 1154 y 1156): copias entre salidas, el micro en una salida y el eco de los
+"""Voces dobles (backlog §14): copias entre salidas, el micro en una salida y el eco de los
 altavoces en el micro (_app/eco.py). Señales sinteticas parecidas a la voz y NO periodicas: con una voz periodica
 (silabas a ritmo fijo) hay picos iguales en varios retardos y nada se confirma, que no es lo que pasa con voz real."""
 import unittest

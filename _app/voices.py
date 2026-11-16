@@ -58,7 +58,7 @@ HUELLA_MAX_S = 90.0      # voz que se concatena para una huella (los tramos mas 
 # Lo mas que se le pasa de una vez al modelo de huellas (TitaNet): su memoria crece con la duracion del trozo y una
 # huella mas larga es la media de las de sus ventanas, ponderada por su duracion. Medido el 09/11/2026 (sherpa-onnx
 # 2.0.1, un proceso por medida): 10 s, +84 MB; 30 s, +265 MB; 90 s, +808 MB. Con tres hablantes de 90 s la
-# diarizacion de 11 min llegaba a 1,96 GB y en el portatil de Bernardo, con Teams y Outlook abiertos, se quedo sin
+# diarizacion de 11 min llegaba a 1,96 GB y en un portatil con Teams y Outlook abiertos se quedo sin
 # memoria («bad allocation» en /decoder/_pooling/Concat_4, el nodo que crece con el tiempo); por encima de ~123 s el
 # modelo ni funciona. Por ventanas de 30 s: coseno 0,999-1,0 con la huella de 90 s de golpe (tests/test_fix_memoria.py)
 HUELLA_VENTANA_S = 30.0
@@ -513,9 +513,9 @@ def count_participants(text, sugeridos=False):
     el texto es el que escribio la app con los de Outlook o Teams (calendario.join_participants), un trozo por
     destinatario: con «; » si algun nombre lleva coma («Apellido, Nombre»), si no con «, ». Cada destinatario cuenta
     una persona, o una por cada nombre detras de la primera coma (separados por comas, salvo sufijos como «Jr.», o
-    por «y/and/&» o «/»: «Pérez, Ana y Luis» son dos; el «y» de «Ortega y Gasset, José» no separa). Lo que va entre
+    por «y/and/&» o «/»: «Pérez, Ana y Luis» son dos; el «y» de «Rivas y Mora, José» no separa). Lo que va entre
     parentesis («(Madrid)», «(Ventas)») no cuenta, y una lista de distribucion cuenta una. Dos destinatarios que solo
-    se distinguen por el parentesis (homonimos) son dos. En un trozo sin coma, «y» separa («José Ortega y Gasset»
+    se distinguen por el parentesis (homonimos) son dos. En un trozo sin coma, «y» separa («José Rivas y Mora»
     cuenta dos: de mas) (revision de la integracion del 08/11/2026)."""
     text, sep = str(text or ""), r"\s+(?:y|e|and|&)\s+|/"
     if not sugeridos:
@@ -1375,7 +1375,7 @@ class Voices:
         """La persona que ya se llama asi (sin distinguir mayusculas, tildes ni espacios de mas), o None. Asi elegir
         «Ana» de la lista asigna la Ana que ya existe en vez de crear otra. Nunca devuelve la del usuario: un compañero
         puede llamarse como el, y antes del 07/11/2026 la persona del usuario pudo quedarse con el nombre de otra
-        (el fallo del msg 1170); el usuario se marca con «Soy yo»."""
+        (el fallo S6); el usuario se marca con «Soy yo»."""
         key = name_key(nombre)
         if not key:
             return None
@@ -1726,7 +1726,7 @@ def assign(data, h, pid, usuario=None):
 
 
 def join_speakers(data, h, con, usuario=None, names=None):
-    """«Es el mismo que…» (msg 1242): el hablante h de esta reunion es la misma voz que `con`, que la app partio en
+    """«Es el mismo que…»: el hablante h de esta reunion es la misma voz que `con`, que la app partio en
     dos. Los tramos de h pasan a `con`, que conserva quien es (o toma lo que se sabia de h si `con` no lo sabia), y h
     desaparece. Si ya se sabe que son dos personas distintas (dos personas, o tu y otra), ValueError: eso no es unir,
     sino corregir a uno de los dos. `names`: ids de las personas que siguen en voces.json. Modifica data."""

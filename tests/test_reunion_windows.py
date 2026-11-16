@@ -246,7 +246,7 @@ class AvisoTests(unittest.TestCase):
         return []
 
     def test_con_ocultar_captura_no_sale_al_compartir_pantalla(self):
-        """«Al compartir pantalla» (msg 1242): el aviso, que sale justo al empezar una llamada con el nombre de la
+        """«Al compartir pantalla» (ítem 18): el aviso, que sale justo al empezar una llamada con el nombre de la
         reunión y «Grabar», lleva WDA_EXCLUDEFROMCAPTURE como la ventana de la app; sin la opción, no."""
         p, est = self.abrir("ocultar", "--ocultar-captura", segundos=4)
         e = self.estado(est)
@@ -497,7 +497,7 @@ class FinDeLlamadaWindowsTests(unittest.TestCase):
         with open(os.path.join(ART, "teams_mic_coste.json"), "w", encoding="utf-8") as f:
             json.dump({"con_tasklist_ms": round(primera * 1000, 1), "con_cache_ms": round(cacheada * 1000, 2)}, f)
         # se cierra Teams sin que Windows apunte el fin: la entrada sigue «en uso» sin proceso; sin Teams no hay
-        # llamada (msg 1479: «cuando se cierra el Teams o la reunión»)
+        # llamada (cerrar Teams también es colgar)
         self.proc.kill()
         self.proc.wait(10)
         rec._IMAGES.update(at=-1e9, set=None)

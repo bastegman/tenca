@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Hoy (rediseño B7, msgs 1380 y 1390) en un navegador real (Playwright + Chromium), con la app de verdad.
+"""Hoy (rediseño B7) en un navegador real (Playwright + Chromium), con la app de verdad.
 
 - Biblioteca vacía: «Graba tu primera reunión» con las tres formas de grabar y la de subir un audio; sin Outlook, la
   agenda dice por qué en una línea y la pantalla funciona igual.
@@ -307,7 +307,7 @@ class HoyLlenoTests(Base):
         # «ver resumen» de la última vez abre esa reunión
         pg.click("[data-act='hoy-ultima']")
         pg.wait_for_function("location.hash.startsWith('#/a/') && location.hash.includes('Comit')", timeout=5000)
-        # Calendario (donde se buscaban «las siguientes reuniones», msg 1380): las citas de Outlook que vienen
+        # Calendario (donde se buscaban «las siguientes reuniones»): las citas de Outlook que vienen
         pg.click("#btnSide")  # el lateral, encima del contenido
         pg.click("[data-nav='c']")
         pg.wait_for_selector(".cday .cev.outlook:has-text('Comité de seguimiento')", timeout=10000)
@@ -567,7 +567,7 @@ class HoyCambiosTests(Base):
 
 
 class SiguienteReunionTests(Base):
-    """«Ya ha empezado «X» · Grabar · Ahora no» al parar una grabación (msg 1479), en el navegador: encima de la tarjeta
+    """«Ya ha empezado «X» · Grabar · Ahora no» al parar una grabación (B7), en el navegador: encima de la tarjeta
     en Hoy y, en las demás páginas, junto a los avisos. La propuesta la decide el servidor (test_hoy.Siguiente*); aquí
     se inyecta en /api/rec/status como si se acabara de parar, y «Grabar» y «Ahora no» van a /api/rec/siguiente."""
 

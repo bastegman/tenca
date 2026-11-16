@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""«Comprobar» con Claude Code tardó minutos en el PC de Bernardo (07/11/2026, msgs 1185-1187). Lo que se arregla aquí:
+"""«Comprobar» con Claude Code tardó minutos en un PC con Windows (07/11/2026). Lo que se arregla aquí:
 
 - AgenteLocal.run espera a que SALGA el proceso, no a que se cierren sus tuberías: en Windows un hijo que las herede y
   siga vivo (el actualizador de Claude Code, por ejemplo) alargaba la llamada hasta que ese hijo acababa.
@@ -158,7 +158,7 @@ class ErroresDeClaudeTests(unittest.TestCase):
 
 
 class ExplicarClaudeTests(unittest.TestCase):
-    """Las tres frases de ClaudeCode._why salen igual por explicar.py (Steve, ux-configurar), con su botón: en la Cola,
+    """Las tres frases de ClaudeCode._why salen igual por explicar.py (ux-configurar), con su botón: en la Cola,
     en «Probar» del asistente y en «Comprobar» de Ajustes."""
     CASOS = (("API Error: 407 Proxy Authentication Required", "no puede conectar con Anthropic", "reintentar"),
              ("API Error: Connection error. (unable to get local issuer certificate)",
@@ -185,7 +185,7 @@ class ExplicarClaudeTests(unittest.TestCase):
             self.assertEqual(ex["accion"]["tipo"], esperada, texto)
             self.assertIn(ex["accion"]["etiqueta"], ("Probar otra vez", "Abrir PowerShell", "Copiar diagnóstico"))
             self.assertTrue(ex["frase"].endswith("y vuelve a probar."), ex["frase"])  # vale en Ajustes y en «Probar»
-        # sin sesión sigue con la frase y el botón de Steve
+        # sin sesión sigue con la frase y el botón de ux-configurar
         ex = explicar.explicar(self.error("Not logged in · Please run /login"))
         self.assertTrue(ex["frase"].startswith("Claude Code no tiene la sesión iniciada"), ex["frase"])
         self.assertEqual(ex["accion"]["tipo"], "abrir_powershell")
@@ -319,7 +319,7 @@ class ArrancarConWindowsTests(unittest.TestCase):
         self.assertIn('"/api/inicio-windows": lambda q: {"activado": inicio_windows_leer()}', src)
         self.assertIn('"/api/inicio-windows": lambda b: {"activado": inicio_windows_poner(b.get("activado") is True)}',
                       src)
-        # y las rutas de Steve siguen en la tabla GET (el conflicto de la integración)
+        # y las rutas de ux-configurar siguen en la tabla GET (el conflicto de la integración)
         for r in ('"/api/probar": a.probar_estado', '"/api/agente/estado": a.agente_estado'):
             self.assertIn(r, src)
 

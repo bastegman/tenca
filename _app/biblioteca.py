@@ -599,7 +599,7 @@ class Temas:
 
 class Movimientos:
     """Reuniones que se moveran a otra carpeta en cuanto la app deje de escribir en ellas (cambiar la carpeta en pleno
-    directo, msg 1198): ruta interna del audio -> {"to": la carpeta principal elegida, "at": cuando, y tras un intento
+    directo, B1c): ruta interna del audio -> {"to": la carpeta principal elegida, "at": cuando, y tras un intento
     fallido "target" (la carpeta de la reunion ya elegida: el siguiente va a la misma), "intentos", "next" y "error"}.
     En DATA_DIR/movimientos_pendientes.json: si la app se cierra antes, se hace al volver a abrirla."""
 
@@ -783,7 +783,7 @@ def traduccion_destinos():
 
 def traduccion_destino(rel, st):
     """A que idioma se traduce el directo de una reunion: el ultimo elegido en ella; si no, el idioma del resumen de
-    Ajustes si es español o inglés; si no («el de la reunión»), español (msg 1152)."""
+    Ajustes si es español o inglés; si no («el de la reunión»), español (ítem 13a)."""
     to = traduccion_destinos().get(rel)
     if to in live.TRANSLATE_TO:
         return to

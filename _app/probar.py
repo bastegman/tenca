@@ -4,7 +4,7 @@ se está eligiendo, sin guardarla.
 
 Graba 3 s del micro («Di: hola, esto es una prueba»), los transcribe con el modo elegido y, si el modo resume, le pide
 el resumen a Claude (con la cuenta del usuario) o a la API. Si no se oye voz, o el micro no se puede usar, prueba la
-cadena con 1 s de silencio y lo dice (decisión de Claudia: así se prueba también el micro, sin audio empaquetado ni
+cadena con 1 s de silencio y lo dice (así se prueba también el micro, sin audio empaquetado ni
 licencias). Se para en el primer fallo, con la frase de explicar.py y su botón.
 
 El trabajo de verdad lo hacen las funciones que le pasa el servidor (hacer): aquí solo el orden, los estados y los

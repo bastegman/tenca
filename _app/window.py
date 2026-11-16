@@ -17,8 +17,9 @@ ventana mas de Edge. Si pywebview no esta instalado o no puede crear la ventana,
   - Desde que se crea Window hasta que la ventana se ensena (evento shown) esta «en camino» (pending): en un PC lento
     son decenas de segundos y el usuario vuelve a pulsar el acceso directo. Si en ese rato otra copia pide
     /api/mostrar, no se abre Edge (eran las «2 veces la app» del 02/11/2026): la ventana sale sola y se trae al frente.
-  - Ocultarse al compartir pantalla (msg 1242, como Minutes): SetWindowDisplayAffinity con WDA_EXCLUDEFROMCAPTURE en la
-    ventana de nivel superior, que tapa tambien lo que pinta WebView2 dentro (comprobado con capturas en windows-real).
+  - Ocultarse al compartir pantalla (como otras apps de notas): SetWindowDisplayAffinity con WDA_EXCLUDEFROMCAPTURE en
+    la ventana de nivel superior, que tapa tambien lo que pinta WebView2 dentro (comprobado con capturas en
+    windows-real).
     Teams, Zoom y las capturas de pantalla ven lo que hay detras; el usuario la sigue viendo. Ajuste
     «ocultar_al_compartir» (por defecto, si), que se aplica al momento. Necesita Windows 10 2004 (build 19041) o
     posterior: en uno anterior Windows la pintaria en negro (WDA_MONITOR), asi que no se aplica y se dice.
@@ -162,7 +163,7 @@ LET_CLOSE = QUIT_REASONS + ("ApplicationExitCall",)  # Application.Exit: la app 
 END_SESSION_WAIT = 5.0  # s que el hilo de la ventana espera al apagado limpio mientras Windows espera la respuesta
 _END_SESSION = []  # [fn]: el apagado limpio de server.py, shutdown(motivo) (Window.set_end_session)
 # s que la ventana puede estar «en camino» sin ensenarse: pasado ese tiempo se da por perdida y /api/mostrar abre Edge
-# (en el PC de Bernardo tardo 31 s el 02/11/2026; un arranque normal, 2-10 s)
+# (en un PC lento tardo 31 s el 02/11/2026; un arranque normal, 2-10 s)
 PENDING_MAX = 120.0
 
 

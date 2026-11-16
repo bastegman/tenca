@@ -3,25 +3,25 @@ name: ui-smoke
 # La interfaz en un navegador real (Playwright + Chromium): arranque con token, ⚙ Ajustes, Reuniones, Calendario,
 # Inicio y el dialogo de Grabar sin errores de JavaScript; el aviso de «version anterior abierta» y el de servidor
 # lento. Hasta el 02/11/2026 ningun test abria la interfaz y una pantalla con los botones muertos pasaba la suite.
-# test_ui_voces: poner nombre a un «Tú» equivocado, «No soy yo» y «Copiar texto» con hablantes (msg 1170, 07/11/2026).
+# test_ui_voces: poner nombre a un «Tú» equivocado, «No soy yo» y «Copiar texto» con hablantes (S6, 07/11/2026).
 # test_e2e_carpetas: grabar de verdad (grabadora real con la tarjeta de sonido falsa de tests/fake_soundcard), cambiar
 # la carpeta en pleno directo y comprobar que, al acabar el repaso final y el resumen (Groq falso), se mueve todo
-# (B1b y B1c, msgs 1158 y 1198). PyAV: lo usa el directo para remuestrear.
-# test_sin_groq: una instalación nueva no sugiere ni preselecciona Groq (msg 1386), y quien ya lo usa no nota nada.
+# (B1b y B1c). PyAV: lo usa el directo para remuestrear.
+# test_sin_groq: una instalación nueva no sugiere ni preselecciona Groq, y quien ya lo usa no nota nada.
 # test_fix_groq: unos ajustes con un proveedor que no existe (o el Azure sin endpoint que dejaba 0d5169b) vuelven a
-# Groq al arrancar, Ajustes lo enseña y «Guardar» lo deja así, con la clave cifrada como estaba (msgs 1468-1474).
+# Groq al arrancar, Ajustes lo enseña y «Guardar» lo deja así, con la clave cifrada como estaba.
 # test_fix_lento: la huella de «Recordar» decodifica solo sus tramos (también m4a y flac, con PyAV) y el cuadro del
-# hablante dice «Guardando…» al momento (msg 1479: «tarda minutos y no aparece nada»).
-# test_ui_movil: «Subir audio › Desde el móvil» (QR, msg 1390) con un iPhone emulado y un audio de WhatsApp.
-# test_subir_audio: «Subir audio» (msg 1296, 09/11/2026): los formatos del móvil y de WhatsApp leídos con PyAV (también
+# hablante dice «Guardando…» al momento (antes tardaba minutos sin decir nada).
+# test_ui_movil: «Subir audio › Desde el móvil» (QR) con un iPhone emulado y un audio de WhatsApp.
+# test_subir_audio: «Subir audio» (09/11/2026): los formatos del móvil y de WhatsApp leídos con PyAV (también
 # en Windows), cada uno subido y transcrito de punta a punta contra un Groq falso, y el botón, la tarjeta y soltar.
-# test_e2e_idioma: cambiar el idioma en pleno directo (lo del último minuto se rehace al momento, msgs 1150-1151) y la
-# traducción al español o al inglés (msg 1152), grabando de verdad contra un Groq falso que escribe el idioma pedido.
-# test_ui_hoy: la pantalla Hoy (B7, msgs 1380 y 1390) vacía y llena, con una agenda de Outlook falsa de un mes
+# test_e2e_idioma: cambiar el idioma en pleno directo (lo del último minuto se rehace al momento, ítem 12) y la
+# traducción al español o al inglés (ítem 13a), grabando de verdad contra un Groq falso que escribe el idioma pedido.
+# test_ui_hoy: la pantalla Hoy (B7) vacía y llena, con una agenda de Outlook falsa de un mes
 # (CHULETA_PRUEBAS_OUTLOOK: el hilo y la caché de verdad leyendo citas de un fichero) y capturas a 1500×920 y 900×600.
 # test_ui_aprender: aprender de tus correcciones (ítem 17, 09/11/2026): la propuesta al pulsar «Listo», añadir a una
 # lista (también conectada y de solo lectura) y la regla aplicada al transcribir con el Groq falso, subrayada y deshecha.
-# test_e2e_avisos: los avisos de la franja del directo (B6, msg 1378): el micro que se calla, «Lo último suena a…» con
+# test_e2e_avisos: los avisos de la franja del directo (B6): el micro que se calla, «Lo último suena a…» con
 # «Cambiar» y «No», y «La llamada ha terminado: paro en N s» con «Seguir grabando» y la parada sola (Teams falso).
 # test_ui_grabadora: la grabadora que se corta sola (franja roja, aviso que no caduca, «(continuación)» y la reunión
 # marcada) y «Tenca no responde» con el servidor caído o colgado (review del 14/11/2026, punto 1).

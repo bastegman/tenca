@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""E2E del idioma y la traducción en pleno directo (ítems 12 y 13a; msgs 1150-1152) con la app de verdad: el servidor
+"""E2E del idioma y la traducción en pleno directo (ítems 12 y 13a) con la app de verdad: el servidor
 como lo arranca el acceso directo, la grabadora real con la tarjeta de sonido falsa de tests/fake_soundcard, el
 directo en un Groq falso en 127.0.0.1 que escribe en el texto el idioma que le piden («Texto en pt») y traduce según
 el prompt («EN: …», «ES: …»), y la interfaz en Chromium (Playwright):

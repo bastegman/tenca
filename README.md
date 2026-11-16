@@ -560,6 +560,11 @@ seguridad están activadas.
   sin ejecutar» en el resumen del run; ningún job falla por eso. En local, con la lista en un fichero fuera del repo:
   `NOTAS_EXIGIR_VETADAS=1 NOTAS_PALABRAS_VETADAS="$(cat ~/tenca-vetadas.txt)" .venv/bin/python tests/run.py` (en
   Windows, ver el comentario de ese test).
+- Sin notas internas: `NotasInternasTests` (`tests/test_package.py`), en la suite y en su propio paso del job
+  `agnosticismo`, sin secreto: falla si un fichero versionado lleva una referencia a un mensaje (`msg` y su número),
+  el nombre del autor fuera de `LICENSE`, del AppUserModelID y del editor del instalador, el del asistente que
+  coordinaba el trabajo o una ruta personal de macOS. `_app/static/` queda fuera hasta que su limpieza llegue a
+  `main`. Los commits anteriores al 16/11/2026 siguen teniendo esas notas: la historia no se reescribe.
 
 ### Banco de pruebas del directo en la nube
 

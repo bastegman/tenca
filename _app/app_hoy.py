@@ -185,7 +185,7 @@ class Hoy:
             citas = ag.citas() if ag is not None and st.get("outlook_on") and ag.fresca() else []
         return calendario.reunion_de_ahora(lect, citas, self._vocab_terms, excluir=excluir)
 
-    # --- «Ya ha empezado «X» · Grabar · Ahora no» al parar una grabación (msg 1479)
+    # --- «Ya ha empezado «X» · Grabar · Ahora no» al parar una grabación (B7)
     SIGUIENTE_S = 600  # tras parar, 10 min para ver empezar otra reunión; la que se propone, mientras dure
 
     # /api/rec/status llega cada 1,5 s (y cada 2 s de cada aviso flotante): la reunión de ahora, que lee Teams y las

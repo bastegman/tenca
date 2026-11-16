@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""«Subir audio» (09/11/2026, msg 1296 de Bernardo: «poder subir un audio, independiente de donde venga»).
+"""«Subir audio» (09/11/2026): subir un audio, venga de donde venga.
 
 - Los formatos del móvil y de los mensajeros se leen con la cadena de la cola (engines.decode_16k, PyAV): los audios
   de `audio_formatos/` (señal sintética de tres pitidos, ver generar.py) se decodifican enteros y en su sitio.
@@ -145,7 +145,7 @@ class FormatosTests(unittest.TestCase):
         wav24(p)
         self.comprobar(p, "WAV de 24 bits")
         vistos.add(".wav")
-        # lo pedido (msg 1296): m4a, opus/ogg, mp3, wav, aac, webm, flac y mp4, y más
+        # los formatos de partida: m4a, opus/ogg, mp3, wav, aac, webm, flac y mp4, y más
         self.assertTrue({".m4a", ".opus", ".ogg", ".mp3", ".wav", ".aac", ".webm", ".flac", ".mp4"} <= vistos)
 
     def test_amr_que_empieza_en_silencio_se_acepta(self):

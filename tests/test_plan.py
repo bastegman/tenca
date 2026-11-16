@@ -108,13 +108,13 @@ class CapasTests(unittest.TestCase):
         """Outlook de empresa: «Apellido, Nombre». Se unen con «; » para no contar el doble, como
         calendario.join_participants (rama fix-calendario); y dan lo mismo que ella, si está."""
         sug = {"name": "Comité", "source": "outlook", "vocab": "",
-               "participants": ["Stegmaier, Bernardo", "García, Ana"]}
-        self.assertEqual(resolver(sug=sug, pedido={})["rec"]["participantes"], "Stegmaier, Bernardo; García, Ana")
+               "participants": ["Navarro, Diego", "García, Ana"]}
+        self.assertEqual(resolver(sug=sug, pedido={})["rec"]["participantes"], "Navarro, Diego; García, Ana")
         sug["participants"] = ["Ana", "", "Luis"]
         self.assertEqual(resolver(sug=sug, pedido={})["rec"]["participantes"], "Ana, Luis")
         import calendario
         unir = getattr(calendario, "join_participants", None)
-        for nombres in (["Stegmaier, Bernardo", "García, Ana"], ["Ana", "Luis"], ["Ana", ""], [], None):
+        for nombres in (["Navarro, Diego", "García, Ana"], ["Ana", "Luis"], ["Ana", ""], [], None):
             if unir:  # con fix-calendario, la regla de reserva de aquí da lo mismo que la suya
                 self.assertEqual(plan._unir_local(nombres), unir(nombres), nombres)
 

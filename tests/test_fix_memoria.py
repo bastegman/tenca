@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""fix-subir-memoria (09/11/2026, msg 1378): al subir un audio viejo de 55 min, «Quién habla» se quedó sin memoria en el
-portátil de Bernardo («bad allocation» en /decoder/_pooling/Concat_4 de TitaNet) y la interfaz enseñó la traza de ONNX
+"""fix-subir-memoria (09/11/2026): al subir un audio viejo de 55 min, «Quién habla» se quedó sin memoria en un
+portátil («bad allocation» en /decoder/_pooling/Concat_4 de TitaNet) y la interfaz enseñó la traza de ONNX
 dos veces, una como «No se pudo transcribir» con la transcripción hecha.
 
 - Al modelo de huellas nunca le llegan más de HUELLA_VENTANA_S de una vez (antes, 90 s: +808 MB por huella).

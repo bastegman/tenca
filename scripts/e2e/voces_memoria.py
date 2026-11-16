@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """«Quién habla» con una reunión larga: pico de memoria del subproceso de voces, con la app de este commit y, si se da,
-con la de antes (fix-subir-memoria, 09/11/2026: con un audio de 55 min, la de `fe29522` llegaba a ~2,3 GB y en el
-portátil de Bernardo acabó en «bad allocation»).
+con la de antes (fix-subir-memoria, 09/11/2026: con un audio de 55 min, la de `fe29522` llegaba a ~2,3 GB y en un
+portátil acabó en «bad allocation»).
 
     python scripts/e2e/voces_memoria.py --salida DIR [--minutos 55] [--antes DIR_APP] [--tope MB]
 

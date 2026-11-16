@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""fix-lento (10-11/11/2026, msgs 1479 y 1481: «cuando intento guardar los nombres de las voces, me peta y se tarda
-mucho mucho en guardar. Funciona finalmente pero tarda minutos y no aparece nada»).
+"""fix-lento (10-11/11/2026): guardar los nombres de las voces fallaba o tardaba minutos sin que apareciera nada;
+al final se guardaba.
 
-Medido en el Mac (memory/projects/notas_fix_lento_IMPL_LINUS_2026-11-10.md): «Guardar» con «Recordar» (también
+Medido en un Mac: «Guardar» con «Recordar» (también
 «Confirmar», que lo trae marcado) calculaba la huella en un subproceso que decodificaba la reunión ENTERA, en
 prioridad «en reposo» y sin enseñar nada: 6 s en una de 1 h en WAV y 40 s en una de 3 h en m4a en un Mac rápido;
 minutos en un portátil ocupado. Ahora:

@@ -10,6 +10,21 @@ nada de ningún proyecto concreto.
 empresa. Entre paréntesis va el número de cada hallazgo, el mismo que citan los commits; el informe de la auditoría no
 está en este repositorio. «Desarrollo y CI» es para quien mantiene el repositorio: no cambia nada en la app instalada.
 
+### Sin notas de trabajo en el repositorio (16/11/2026)
+
+Punto 50 del review del 14/11/2026. No cambia nada en la app instalada.
+
+- Los comentarios, docstrings, tests, scripts, workflows y este CHANGELOG ya no llevan notas de trabajo: referencias
+  a mensajes, quién pidió qué, nombres de personas o empresas reales en los datos de prueba (ahora inventados) ni
+  rutas a notas que no están en el repo. Cada cambio conserva su porqué técnico. La historia de git no se reescribe:
+  los commits anteriores siguen teniendo esas notas.
+- **Nuevo test, sin secreto**: `NotasInternasTests` falla si vuelve a aparecer una (referencias a mensajes, el
+  nombre del autor fuera de `LICENSE`, del AppUserModelID y del editor del instalador, el del asistente que
+  coordinaba el trabajo, rutas personales de macOS). Corre en la suite y en su propio paso del job `agnosticismo`.
+  `_app/static/` queda fuera hasta que llegue su propia limpieza.
+- `scripts/publicar_release.py` compara el CHANGELOG con el del Release anterior sin esas referencias: un apartado
+  que solo las ha perdido no sale como nuevo.
+
 ### El audio de cada reunión, «Mis pendientes» en Hoy y «Quién habla» mientras se graba (16/11/2026)
 
 Rama `motor-lote2b` (puntos 17, 28 y 56 de la revisión del 14/11/2026).
@@ -231,8 +246,8 @@ Puntos 12 y 37 del review del 14/11/2026. Rama `ajustes-uno`.
 
 ### Hoy, con un mes de agenda de Outlook (09/11/2026)
 
-Bernardo, msg 1380: el calendario «conecta bien al parecer, pero no veo las siguientes reuniones»; msg 1390: «que se
-carguen las siguientes (un mes al menos)». Rama `hoy` (rediseño B7).
+El calendario conectaba, pero no se veían las siguientes reuniones; hacían falta las de un mes, al menos. Rama `hoy`
+(rediseño B7).
 
 - **Causa del «no veo las siguientes reuniones»**: la lectura de Outlook estaba bien (su «Probar» daba la agenda, las
   horas y los asistentes bien), pero solo pedía las citas de hoy y de ellas solo enseñaba una frase («próxima reunión
@@ -250,8 +265,8 @@ carguen las siguientes (un mes al menos)». Rama `hoy` (rediseño B7).
 - Sin Teams, la reunión de ahora (para el nombre y el proyecto al grabar, también con Ctrl+Alt+R y el aviso) sale de
   la agenda ya leída, sin otra consulta a Outlook.
 - Sin reuniones: «Graba tu primera reunión», con el botón, Ctrl+Alt+R, el aviso de Teams y «o arrastra aquí un audio».
-- **Nuevo: «Ya ha empezado «X» · 10:00–11:00 · Grabar · Ahora no»** (msg 1479: «que al terminar le proponga grabar la
-  siguiente reunión si ya ha empezado»). Al parar una grabación (a mano o con «paro en 30 s»), si hay otra reunión en
+- **Nuevo: «Ya ha empezado «X» · 10:00–11:00 · Grabar · Ahora no»** (al terminar, proponer grabar la siguiente reunión
+  si ya ha empezado). Al parar una grabación (a mano o con «paro en 30 s»), si hay otra reunión en
   curso que no es la grabada, se propone encima de la tarjeta de Hoy, en las demás páginas junto a los avisos y en el
   aviso flotante (si está activado). Es la misma regla de «la reunión de ahora» (la ventana de Teams o la cita de
   Outlook) sin la que se acaba de grabar (mismo asunto y misma hora de inicio; si la grabación se llamaba de otra
@@ -277,8 +292,7 @@ carguen las siguientes (un mes al menos)». Rama `hoy` (rediseño B7).
 
 ### Poner nombre a una voz ya no tarda minutos (11/11/2026)
 
-Bernardo (msg 1479): «cuando intento guardar los nombres de las voces […] tarda minutos y no aparece nada». Rama
-`fix-lento`.
+Guardar los nombres de las voces tardaba minutos y, mientras, no aparecía nada. Rama `fix-lento`.
 
 - **Arreglado**: «Guardar» con «Recordar» (y «Confirmar», que lo trae marcado) calculaba la huella de voz decodificando
   la reunión entera, en un proceso en prioridad «en reposo» y sin enseñar nada mientras: 6 s con una reunión de 1 h y
@@ -300,15 +314,15 @@ Bernardo (msg 1479): «cuando intento guardar los nombres de las voces […] tar
 
 ### Avisos del directo (10/11/2026)
 
-Rediseño B6, puntos 1-3 (msgs 1378 y 1479). Rama `directo-avisos`. En la cabecera del directo, con lo que la app ya lee:
+Rediseño B6, puntos 1-3. Rama `directo-avisos`. En la cabecera del directo, con lo que la app ya lee:
 
 - **Fuente callada**: «El micro no recibe sonido desde hace 1 min» si el micro da silencio digital (silenciado con la
   tecla del portátil o en Windows, sin permiso, con el nivel a 0) más de un minuto. Escuchar callado no avisa: un
   micro de verdad da el ruido de la sala. Un micro con puerta de ruido (ceros entre frases) se reconoce y no avisa.
   «El ordenador no suena desde hace 1 min» solo en una llamada, después de haber oído algo y sin contar el rato en
   que hablas tú (en una reunión presencial o en la sala de espera no avisa).
-- **«La llamada ha terminado: paro en 30 s · No terminar»** (msg 1479: «que me sugiera cortar automáticamente la
-  reunión cuando se cierra el teams o la reunión»): cuando Teams suelta el micro (el registro de privacidad apunta el
+- **«La llamada ha terminado: paro en 30 s · No terminar»** (proponer cortar la grabación cuando se cuelga o se
+  cierra Teams): cuando Teams suelta el micro (el registro de privacidad apunta el
   fin) o se cierra, y ninguna ventana de esa reunión sigue abierta, durante 5 s. Solo si esa llamada era la de la
   grabación: empezó como mucho 2 min después de empezar a grabar, cubre el 60 % de lo grabado y dura 2 min o más (una
   llamada a mitad de una reunión presencial no para nada). Sin pulsar nada, para como «Parar» y el aviso flotante puede
@@ -337,7 +351,7 @@ Rediseño B6, puntos 1-3 (msgs 1378 y 1479). Rama `directo-avisos`. En la cabece
 
 ### Memoria con audios largos (09/11/2026)
 
-Bernardo subió un audio viejo de 55 min (msg 1378): la transcripción en la nube salió bien, pero «Quién habla» se quedó
+Al subir un audio viejo de 55 min, la transcripción en la nube salió bien, pero «Quién habla» se quedó
 sin memoria y la app enseñó la traza de ONNX dos veces, una como «No se pudo transcribir». Rama `fix-subir-memoria`.
 
 - **Arreglado**: «Quién habla» llegaba a 2,3 GB con una reunión de 55 min o de 1 h (medido): cada huella de voz le
@@ -365,8 +379,7 @@ sin memoria y la app enseñó la traza de ONNX dos veces, una como «No se pudo 
 
 ### Sin Groq por defecto en una instalación nueva (09/11/2026)
 
-Bernardo, msg 1386: «Lo que no quiero es sugerir Groq a un nuevo instalador». Hecho por Steve en la rama
-`sin-groq-por-defecto`.
+A quien instala por primera vez no se le sugiere un servicio concreto. Rama `sin-groq-por-defecto`.
 
 - Por defecto, «Solo en este PC» (ya lo era: `procesado_de` sin clave es local), y ahora nada lo empuja hacia la nube:
   la portada ya no dice «Conecta Groq» ni «Conecta la nube para ir mucho más rápido»; el asistente y Ajustes ›
@@ -385,8 +398,7 @@ Bernardo, msg 1386: «Lo que no quiero es sugerir Groq a un nuevo instalador». 
 
 ### Subir audio desde el móvil con un código QR (09/11/2026)
 
-La lámina que validó Bernardo con sus cuatro decisiones por defecto (msg 1390: «1. Si»). Hecho por Steve en la rama
-`qr-movil`.
+Con cuatro decisiones de diseño por defecto (las de `_app/movil.py`). Rama `qr-movil`.
 
 - «Subir audio» abre un menú: «Desde este PC» (como antes) y «Desde el móvil». Con el móvil, la tarjeta de subir sin
   archivos: eliges proyecto, carpeta e idioma (decisión 1) y «Mostrar el código» enseña un QR, cuánto le queda, lo que
@@ -429,9 +441,9 @@ La lámina que validó Bernardo con sus cuatro decisiones por defecto (msg 1390:
 
 ### Idioma y traducción en pleno directo; oculta al compartir pantalla (09/11/2026)
 
-Ítems 12, 13a y 18 del backlog (msgs 1150-1152 y 1242). Rama `idioma-directo`.
+Ítems 12, 13a y 18 del backlog. Rama `idioma-directo`.
 
-- **Cambiar el idioma en pleno directo vale al momento** (msg 1151: «funcionó, pero tardó»). Antes valía desde el
+- **Cambiar el idioma en pleno directo vale al momento** (funcionaba, pero tardaba). Antes valía desde el
   siguiente trozo y lo ya escrito seguía en el idioma de antes hasta el repaso final. Ahora el trozo que se estaba
   transcribiendo se corta (en local se para Whisper y se recarga; una petición a la nube que ya vuelve se descarta) y
   se repite con el idioma nuevo, y lo escrito en el último minuto se rehace en él: se relee ese audio y sale en una
@@ -449,12 +461,12 @@ La lámina que validó Bernardo con sus cuatro decisiones por defecto (msg 1390:
     del cambio saldría traducido).
 - **Nota en la tarjeta de grabar** con un idioma fijo: lo que se diga en otro idioma se traduce a ese; si la reunión
   puede cambiar de idioma, mejor una mezcla o «Detectar».
-- **Traducción del directo al español o al inglés** (msg 1152): «Traducir al ▾ español / inglés». El destino se
+- **Traducción del directo al español o al inglés**: «Traducir al ▾ español / inglés». El destino se
   recuerda por reunión (`traduccion_destino.json` en los datos de la app, no en la cabecera del `.md`, que las
   versiones anteriores tomarían por notas); sin él, el idioma del resumen si es español o inglés. Al cambiarlo se
   vuelve a traducir lo último en el idioma nuevo, sin esperar a la siguiente vuelta. Al inglés va con su propio prompt,
   escrito en inglés. Sigue sin guardarse. `POST /api/live/traducir {id, on, to}`.
-- **Tenca no sale al compartir pantalla** (de la research de competencia; Minutes lo hace por defecto): la ventana
+- **Tenca no sale al compartir pantalla** (otras apps de notas de reuniones lo hacen por defecto): la ventana
   lleva `WDA_EXCLUDEFROMCAPTURE` desde antes de enseñarse. Lo que pinta WebView2 dentro también queda fuera
   (comprobado con capturas en Windows). Activado por defecto, con el interruptor «Al compartir pantalla» en Ajustes →
   Calendario y Teams (se aplica al momento, `POST /api/ocultar-captura`; las reglas de «Al grabar» ya llenan una
@@ -471,9 +483,8 @@ La lámina que validó Bernardo con sus cuatro decisiones por defecto (msg 1390:
 
 ### Aprender de tus correcciones (09/11/2026)
 
-Ítem 17 del backlog, de la research de competencia (Quill: «remembers the substitution»), aprobada por Bernardo en el
-msg 1242; las sustituciones, también en las reuniones futuras y en un diccionario personal reversible (msg 1390). Hecho
-por Steve en la rama `aprender-correcciones`, con tres revisiones de contexto fresco.
+Ítem 17 del backlog (otras apps de notas de reuniones ya recuerdan las sustituciones), también en las reuniones
+futuras y en un diccionario personal reversible. Rama `aprender-correcciones`, con tres revisiones.
 
 - Al terminar de corregir una transcripción («Listo»), encima del texto: «¿Añadir «Orvalia» al vocabulario de
   Finanzas?». Solo nombres propios, siglas y términos (`aprender.py`: mayúsculas en mitad de frase, siglas, letras y
@@ -498,8 +509,7 @@ por Steve en la rama `aprender-correcciones`, con tres revisiones de contexto fr
 
 ### Subir audio (09/11/2026)
 
-Ítem 7 del backlog (Bernardo, msg 1296: «poder subir un audio, independiente de donde venga»). Hecho por Steve en la
-rama `subir-audio` (`da525ab`, tres revisiones de contexto fresco); detalle en su informe.
+Ítem 7 del backlog: subir un audio, venga de donde venga. Rama `subir-audio` (`da525ab`, tres revisiones).
 
 - **Subir audio**: el botón junto a Grabar (y «Subir audio aquí» en cada carpeta, o soltar audios en la ventana) sube
   un audio que ya tengas, del móvil, de WhatsApp o de otra grabadora, con su proyecto, su fecha y su carpeta, y lo pone
@@ -517,7 +527,7 @@ rama `subir-audio` (`da525ab`, tres revisiones de contexto fresco); detalle en s
 
 ### Setup.exe: otra forma de instalar, con un asistente (09/11/2026)
 
-Fase 1 del instalador «de verdad» (aprobada por Bernardo, msg 1296; research de Harvey del 02/11/2026). El zip sigue
+Fase 1 del instalador «de verdad». El zip sigue
 siendo la forma principal.
 
 - **`Tenca - Setup.exe`** (Inno Setup 6.7): doble clic, una bienvenida con el icono de Tenca y «Instalar»; después, la
@@ -572,7 +582,7 @@ siendo la forma principal.
 
 ### Renombrado a Tenca (09/11/2026)
 
-La app pasa a llamarse **Tenca** (Bernardo, msg 1249). Lo de abajo, con «Chuleta», es el historial de antes.
+La app pasa a llamarse **Tenca**. Lo de abajo, con «Chuleta», es el historial de antes.
 
 - **Nombre**: `common.APP_NAME = "Tenca"`: título de la ventana y de la pestaña, raíz del árbol, mensajes, avisos y
   toasts, el icono de la bandeja, el diagnóstico, la cabecera `Server`, el zip (`Tenca - instalador.zip`) y su carpeta
@@ -616,7 +626,7 @@ La app pasa a llamarse **Tenca** (Bernardo, msg 1249). Lo de abajo, con «Chulet
   «Invitar a un café» al pie de Ajustes. El desinstalador quita también las fuentes y su licencia.
 
 ### Ajustes por lo que haces: «Al grabar» primero, «Proyectos» y «Calendario y Teams» (07/11/2026)
-Lo que pidió: Ajustes era «un listado sin fin» y no se sabía si lo configurado es lo que se usa (msg 1196).
+Lo que se pedía: Ajustes era un listado sin fin y no se sabía si lo configurado es lo que se usa.
 - Ajustes abre en **«Al grabar»**: arriba, «Así se graba ahora una reunión de [proyecto]», el mismo cálculo que la
   tarjeta de grabar y Ctrl+Alt+R, que cambia al momento con lo que escribas debajo aunque aún no lo hayas guardado.
   Debajo, solo las reglas, una por línea: reuniones sin proyecto, idioma por defecto, proyecto al grabar, contexto,
@@ -746,8 +756,7 @@ Lo que pidió: Ajustes era «un listado sin fin» y no se sabía si lo configura
   de la grabadora, que queda al pasar el ratón.
 
 ### Grabar: una tarjeta que dice qué va a pasar, y lo mismo con Ctrl+Alt+R (07/11/2026)
-Lo que pidió: grabar «no es nada amigable» y no estaba claro si lo que se configura es lo que de verdad se usa
-(msg 1196).
+Lo que se pedía: grabar no era nada amigable y no estaba claro si lo que se configura es lo que de verdad se usa.
 - «● Grabar» abre una tarjeta: la reunión (el nombre sale de Teams, de Outlook o de lo que escribas, con tus reuniones
   recientes como sugerencia), el proyecto › workstream y, debajo, **«Así se va a grabar»**: dónde se guarda, idioma,
   vocabulario, quién transcribe, quién resume y el audio, cada línea con **de dónde sale** (esta reunión, el
@@ -769,7 +778,7 @@ Lo que pidió: grabar «no es nada amigable» y no estaba claro si lo que se con
   escrito y el cuerpo de /api/rec/start es el plan pintado).
 
 ### Calendario de Outlook: funciona con el clásico y, si no puede, dice por qué (07/11/2026)
-Lo que vio: «La conexión al calendario no está funcionando» (msg 1196), con el Outlook clásico (msg 1210).
+El problema: la conexión al calendario no funcionaba, con el Outlook clásico.
 - **Las citas se leían con una hora de más (dos en verano)**, así que la reunión en curso quedaba fuera de la hora
   buscada y la app decía «Outlook no tiene ninguna reunión a esta hora» con Outlook conectado. pywin32 entrega las
   fechas de COM con la zona UTC pegada pero sin convertirlas (`PyTime.cpp` de pywin32 312), y la app las convertía a
@@ -796,7 +805,7 @@ Lo que vio: «La conexión al calendario no está funcionando» (msg 1196), con 
   procesos y el registro. `lookfeel-e2e` comprueba que el pywin32 que instala INSTALAR.bat se importa y llega a COM.
 
 ### Cambiar la carpeta en pleno directo (07/11/2026)
-Lo que pidió: «Quiero poder cambiar la carpeta durante la reunión. Es posible?» (msg 1198).
+Lo que se pedía: poder cambiar la carpeta durante la reunión.
 - En la cabecera del directo, **«Se guarda en \\Proyecto\\AAAA-MM-DD Nombre\\ · Cambiar»** (sustituye a la miga). Se
   elige entre las carpetas principales de tus proyectos u **«Otra carpeta…»** con el selector de Windows (si está
   fuera de Chuleta, se conecta como con «Conectar carpeta»).
@@ -817,8 +826,8 @@ Lo que pidió: «Quiero poder cambiar la carpeta durante la reunión. Es posible
   moverá a la del proyecto nuevo al terminar (si la elegiste a mano, o elegiste otra con «Cambiar», se queda esa).
 
 ### Una carpeta por reunión, dentro de la de su proyecto (07/11/2026)
-Lo que pidió: «Que se cree una carpeta por reu. Esto que sea automático dentro de la main folder asignada por el
-proyecto o workstream» (msg 1158).
+Lo que se pedía: una carpeta por reunión, automática, dentro de la carpeta principal asignada al proyecto o al
+workstream.
 - Cada grabación nueva va en su carpeta, **`AAAA-MM-DD Nombre`** (sin nombre, `AAAA-MM-DD HH-MM`; si ese día ya hay otra
   igual, `… (2)`), con el audio y sus textos dentro con el nombre de siempre. Lo grabado antes **se queda donde está**.
 - La carpeta de la reunión va dentro de la **carpeta principal** de su workstream o de su proyecto. Sin asignar, es la
@@ -852,7 +861,7 @@ proyecto o workstream» (msg 1158).
   false`).
 
 ### Vocabulario desde una carpeta conectada (07/11/2026)
-Lo que pidió: «me gustaría poder conectar a una carpeta, no tener que pegarlo o escribirlo ahí mismo» (msg 1148).
+Lo que se pedía: conectar una carpeta con las listas, en vez de pegarlas o escribirlas en la app.
 - **«Usar las listas de una carpeta…»** (Ajustes → Proyectos; en ● Grabar, al final del selector de proyecto y, sin
   listas, en el panel del vocabulario): eliges la carpeta donde ya tienes tus listas y la app las lee de allí **en vivo**, sin copiarlas.
   Lo que cambies en esos `.txt` vale desde la siguiente grabación (en directo, desde el siguiente trozo). Ajustes
@@ -914,7 +923,7 @@ así llegaba al correo (auditoría de UX del rediseño, A5; mock 08).
   formatos «HTML Format» y CF_UNICODETEXT del portapapeles de Windows.
 
 ### «Quién habla»: una persona ya no sale como varias (08/11/2026)
-Lo que vio: «a una persona la cataloga como 10 personas distintas a lo largo de la reunión» (msg 1242).
+El problema: una misma persona salía como 10 personas distintas a lo largo de la reunión.
 - Medido con reuniones reales de 4 personas con los hablantes anotados (AMI Meeting Corpus, CC BY 4.0) y
   `scripts/eval_voces.py`: la versión anterior partía a cada persona en 4 grupos de media (hasta 11) y enseñaba 36
   hablantes para 12 personas (48 para 16 en las de prueba).
@@ -940,7 +949,7 @@ Lo que vio: «a una persona la cataloga como 10 personas distintas a lo largo de
   borrada).
 
 ### «Con tu cuenta de Claude» en Windows: «Comprobar» sin esperas ocultas (07/11/2026)
-Lo que vio: «Comprobar» tardó unos minutos en su PC antes de responder (msg 1187).
+El problema: «Comprobar» tardaba unos minutos en responder en un PC con Windows.
 - La app espera a que Claude Code **termine**, no a que se cierre su salida: en Windows un proceso que Claude Code deja
   en marcha (el actualizador en segundo plano, por ejemplo) heredaba esa salida y la llamada esperaba hasta que acabara.
   Si pasa, queda una línea en `server.log`.
@@ -959,9 +968,9 @@ Lo que vio: «Comprobar» tardó unos minutos en su PC antes de responder (msg 1
   caliente.
 
 ### «Con tu cuenta de Claude» con la cuenta de la empresa (SSO) y Claude Code de VS Code (08/11/2026)
-Lo que pidió: que funcione con su cuenta de Claude de empresa, con SSO, y él usa Claude Code en VS Code (msgs 1224-1228).
+Lo que se pedía: que funcione con una cuenta de Claude de empresa, con SSO, y con Claude Code en VS Code.
 - El camino principal es **Claude Code instalado aparte** y su inicio de sesión **en el navegador**, con el de la empresa
-  si la cuenta es de empresa (msg 1261). «Abrir PowerShell» abre la ventana con Claude Code ya en su PATH (el
+  si la cuenta es de empresa. «Abrir PowerShell» abre la ventana con Claude Code ya en su PATH (el
   instalador oficial no lo pone en el PATH de Windows: «…\.local\bin is not in your PATH», medido) y, sin sesión, la
   frase dice que se escriba `claude` y se entre en el navegador que se abre. La app no inicia sesión por nadie.
 - Sin Claude Code instalado aparte, la app usa (como respaldo) la copia que trae la **extensión de VS Code** (también Cursor, Windsurf y
@@ -984,7 +993,7 @@ Lo que pidió: que funcione con su cuenta de Claude de empresa, con SSO, y él u
   VSX) y «pasarela» (una pasarela falsa en el runner, puesta en el registro con la app abierta: Claude Code real
   contesta a través de ella, sin Anthropic ni credenciales).
 
-### Voces dobles en la grabación (07/11/2026, msgs 1154 y 1156)
+### Voces dobles en la grabación (07/11/2026)
 - La grabadora pone cada fuente (micro y salidas) en una línea de tiempo común según cuándo llega su audio. Antes cada
   fuente se tomaba por la cabeza de su cola: tras un corte (reabrir el dispositivo al cambiar de cascos o de salida,
   o audio perdido con el PC cargado) esa fuente quedaba adelantada para siempre, y con altavoces el eco de la sala
@@ -1010,7 +1019,7 @@ Lo que pidió: que funcione con su cuenta de Claude de empresa, con SSO, y él u
   (fijo: copia digital o eco estable; cambiante: eco que se mueve o los cortes de antes).
 
 ### Configuración en tres pasos: dónde se procesa, a la vista y con las mismas palabras (07/11/2026)
-Bernardo, 06/11/2026: «Lo de config es un desastre. El UX es muy difícil y malo de seguir.»
+Lo que se pedía (06/11/2026): la configuración era difícil y mala de seguir.
 - **La línea del modo.** El diálogo Grabar, la cabecera del directo, la Cola y el chip «EN VIVO» dicen lo mismo y con
   las mismas palabras: «Se transcribe en este PC (Normal) y al terminar la resume Claude con tu cuenta», «Se transcribe
   en este PC (Normal). Sin resumen con IA» o «Se transcribe con Groq y al terminar la resume Groq». Cada modelo tiene
@@ -1044,7 +1053,7 @@ Bernardo, 06/11/2026: «Lo de config es un desastre. El UX es muy difícil y mal
   técnico sigue en `server.log`.
 
 ### Transcribir con los tres modos: descarga de Whisper con progreso y la verdad sobre el motor (07/11/2026)
-Lo que vio el 06/11/2026: con Groq «fallaba la conexión», con «Con tu cuenta de Claude» no transcribía, al grabar
+El problema (06/11/2026): con Groq «fallaba la conexión», con «Con tu cuenta de Claude» no transcribía, al grabar
 «Modelo» parecía seguir en Groq y «Descargando modelo medium» no acababa.
 - **Whisper se descarga con progreso de verdad.** Antes lo bajaba faster-whisper dentro del proceso de Whisper la
   primera vez que hacía falta: un único «Descargando modelo medium (solo la primera vez)…» durante minutos (medium son
@@ -1153,8 +1162,8 @@ Lo que vio el 06/11/2026: con Groq «fallaba la conexión», con «Con tu cuenta
   recordatorios.
 
 ### Icono en la bandeja del sistema (07/11/2026)
-Lo que pidió Bernardo el 02/11/2026: «que Chuleta quedase abierta como una app aquí corriendo aunque le ponga salir,
-solo se pueda cerrar si la cierro desde ahí al salir».
+Lo que se pedía el 02/11/2026: que Chuleta siga abierta como una app aunque se cierre la ventana, y que solo se
+cierre de verdad desde ahí, con «Salir».
 - **Chuleta tiene su icono en la bandeja** (la zona de notificación, junto al reloj) mientras está abierta, con la
   ventana a la vista u oculta. Un clic la abre. El clic derecho abre un menú con «Abrir Chuleta», «Grabar» (o
   «Parar la grabación», según toque; lo mismo que Ctrl+Alt+R), «Arrancar con Windows» y «Salir». El texto del icono

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Pasar audios del móvil al PC con un código QR («Subir audio › Desde el móvil», 09/11/2026). Bernardo validó la
-propuesta con sus cuatro decisiones por defecto (msg 1390):
+"""Pasar audios del móvil al PC con un código QR («Subir audio › Desde el móvil», 09/11/2026). Cuatro decisiones
+de diseño:
 
 1. El proyecto se elige en el PC, antes de que salga el código, como al subir un audio: el móvil solo manda.
 2. Cada código vale 10 minutos, para todos los audios que quieras, desde un solo móvil (el primero que lo abre).

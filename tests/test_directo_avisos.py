@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Avisos de la franja del directo (rediseño B6, puntos 1-3; msg 1378):
+"""Avisos de la franja del directo (rediseño B6, puntos 1-3):
 
 1. Fuente callada (directo_avisos.Callada): el micro o el ordenador sin sonido más de un minuto, pero no por los
    silencios normales de una reunión (escuchar callado, la sala de espera, una reunión presencial, presentar tú).
 2. Fin de la llamada (FinDeLlamada + recording.teams_mic): «paro en 30 s · No terminar»; nunca para si la llamada
-   sigue, si la ventana de la reunión sigue abierta o si no se puede saber (cerrar Teams sí es colgar, msg 1479).
+   sigue, si la ventana de la reunión sigue abierta o si no se puede saber (cerrar Teams sí es colgar).
 3. Idioma propuesto (Propuesta + worker._Escucha + live.run): con un idioma fijo, «Lo último suena a …» con varios
    trozos seguidos, nunca uno suelto, y nunca lo rechazado en esa grabación.
 Y el servidor: /api/rec/status, la parada (igual que «Parar»), /api/rec/seguir y /api/live/propuesta.
@@ -289,7 +289,7 @@ class FinTests(unittest.TestCase):
         self.assertEqual(self.tic("duda", dt=1.0), "cancela")
 
     def test_la_reunion_siguiente_no_cancela(self):
-        # cuelgas y entras en la siguiente antes de que acabe la cuenta (msg 1479): con su ventana (otro título), la
+        # cuelgas y entras en la siguiente antes de que acabe la cuenta: con su ventana (otro título), la
         # cuenta sigue y para; la reunión siguiente no acaba en la misma grabación
         for hueco in (6, 20, 29):
             self.setUp()
@@ -416,7 +416,7 @@ class TeamsMicTests(unittest.TestCase):
         pk = "MSTeams_8wekyb3d8bbwe"
         en_uso = [(pk, self.ft(600), 0)]
         self.assertEqual(recording.teams_mic(en_uso, self.now, {"ms-teams.exe"}), "uso")
-        # figura en uso pero Teams ya no está en marcha: se ha cerrado Teams, y eso también es colgar (msg 1479)
+        # figura en uso pero Teams ya no está en marcha: se ha cerrado Teams, y eso también es colgar
         self.assertEqual(recording.teams_mic(en_uso, self.now, {"explorer.exe"}), "libre")
         self.assertEqual(recording.teams_mic([(pk, self.ft(600), self.ft(5))], self.now, {"ms-teams.exe"}), "libre")
         self.assertEqual(recording.teams_mic([], self.now, set()), "libre")

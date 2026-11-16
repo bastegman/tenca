@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""«Con tu cuenta de Claude» con la cuenta de la empresa (07/11/2026, msgs 1224-1228: Bernardo entra en Claude con el
-SSO de su empresa y usa Claude Code en VS Code). Lo que se prueba aquí:
+"""«Con tu cuenta de Claude» con la cuenta de la empresa (07/11/2026: quien entra en Claude con el SSO de
+su empresa y usa Claude Code en VS Code). Lo que se prueba aquí:
 
 - Chuleta encuentra la copia de Claude Code que trae la extensión de VS Code (la extensión no pone `claude` en el PATH)
   y dice de dónde salió.
@@ -440,11 +440,11 @@ class RegistroTests(unittest.TestCase):
                "HKCU": {"HTTPS_PROXY": "http://u:pa$$w0rd%x@proxy:8080",
                         "NODE_EXTRA_CA_CERTS": ("%USERPROFILE%\\certs\\empresa.pem", 2),
                         "OTRO": ("%NO_EXISTE%\\x", 2)}}
-        env, _ = self.env(reg, {"PATH": "/h", "USERNAME": "bernardo", "USERPROFILE": "C:\\Users\\b"})
+        env, _ = self.env(reg, {"PATH": "/h", "USERNAME": "diego", "USERPROFILE": "C:\\Users\\b"})
         self.assertEqual(env["HTTPS_PROXY"], "http://u:pa$$w0rd%x@proxy:8080")  # REG_SZ: tal cual
         self.assertEqual(env["NODE_EXTRA_CA_CERTS"], "C:\\Users\\b\\certs\\empresa.pem")  # REG_EXPAND_SZ
         self.assertEqual(env["OTRO"], "%NO_EXISTE%\\x")
-        self.assertEqual(env["USERNAME"], "bernardo")  # no el SYSTEM del registro de sistema
+        self.assertEqual(env["USERNAME"], "diego")  # no el SYSTEM del registro de sistema
 
     def test_sin_registro_lo_heredado(self):
         env, _ = self.env({}, {"PATH": "/heredado", "OTRA": "1"})
@@ -456,7 +456,7 @@ class RegistroTests(unittest.TestCase):
 
 
 class InicioDeSesionTests(ServidorComprobarTests):
-    """El camino principal (msg 1261): Claude Code instalado aparte, «Abrir PowerShell», `claude` y el inicio de sesión
+    """El camino principal: Claude Code instalado aparte, «Abrir PowerShell», `claude` y el inicio de sesión
     en el navegador (con el SSO de la empresa). La app no inicia sesión por nadie: solo guía."""
 
     def test_la_frase_lleva_al_navegador_con_el_boton_de_powershell(self):

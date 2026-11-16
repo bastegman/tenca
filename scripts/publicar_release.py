@@ -40,7 +40,8 @@ TXT_PERMITIDOS = {"LEEME.txt", "_app/export/LEEME.txt", "_app/version.txt", "_ap
 OBLIGATORIOS = {"INSTALAR.bat", "LEEME.txt", "_app/server.py", "_app/instalar.ps1", "_app/version.txt"}
 TAG_RE = re.compile(r"^v\d{4}\.\d{2}\.\d{2}-[0-9a-f]{7,40}$")
 LIMITE_NOTAS = 60000  # GitHub admite 125.000 caracteres; con más, solo el índice de apartados
-# «(07/11/2026, msgs 1154 y 1156)» -> «(07/11/2026)»: referencias de trabajo que no dicen nada a quien descarga
+# «(07/11/2026, msgs N y M)» -> «(07/11/2026)»: referencias de trabajo que no dicen nada a quien descarga. El
+# CHANGELOG ya no las lleva, pero el de un Release anterior puede llevarlas: cambios() compara sin ellas
 REF_INTERNA_RE = re.compile(r",?\s*\bmsgs?\.?\s+\d+(?:\s*(?:,|y)\s*\d+)*", re.I)
 HAY_REF_INTERNA_RE = re.compile(r"\bmsgs?\.?\s+\d{3,}", re.I)
 
@@ -200,12 +201,14 @@ def apartados(changelog):
 
 
 def sin_ref_interna(texto):
-    return re.sub(r"\(\s*\)", "", REF_INTERNA_RE.sub("", texto)).strip()
+    # con el blanco de delante: «una voz (msg N).» -> «una voz.», no «una voz .»
+    return re.sub(r"\s*\(\s*\)", "", REF_INTERNA_RE.sub("", texto)).strip()
 
 
 def cambios(changelog, anterior=None):
     """(nuevos, cambiados): apartados del primer «## » (el de lo aún sin publicar) que no estaban en el CHANGELOG del
-    Release anterior, y los que estaban con otro texto. Sin Release anterior, todos son nuevos."""
+    Release anterior, y los que estaban con otro texto (título y texto comparados sin referencias internas). Sin
+    Release anterior, todos son nuevos."""
     todos = apartados(changelog)
     if not todos:
         return [], []
@@ -213,9 +216,11 @@ def cambios(changelog, anterior=None):
     actuales = [(t, c) for s, t, c in todos if s == primera]
     if anterior is None:
         return actuales, []
-    antes = {t: c for _, t, c in apartados(anterior)}
-    nuevos = [(t, c) for t, c in actuales if t not in antes]
-    cambiados = [(t, c) for t, c in actuales if t in antes and antes[t] != c]
+    # sin las referencias internas: un apartado que solo ha perdido su «(msgs N y M)» no es nuevo ni ha cambiado
+    antes = {sin_ref_interna(t): sin_ref_interna(c) for _, t, c in apartados(anterior)}
+    nuevos = [(t, c) for t, c in actuales if sin_ref_interna(t) not in antes]
+    cambiados = [(t, c) for t, c in actuales
+                 if sin_ref_interna(t) in antes and antes[sin_ref_interna(t)] != sin_ref_interna(c)]
     return nuevos, cambiados
 
 

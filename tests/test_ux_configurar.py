@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Configuración en tres pasos (07/11/2026, Steve): errores en una frase (explicar.py), la línea del modo y
+"""Configuración en tres pasos (07/11/2026): errores en una frase (explicar.py), la línea del modo y
 «Preparando…» de la interfaz (configurar.js, con node) y, más abajo, «Probar» (probar.py)."""
 import json
 import os

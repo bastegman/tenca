@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Cambiar la carpeta en pleno directo (B1c del rediseño, msg 1198): la grabacion sigue donde empezo, el destino queda
+"""Cambiar la carpeta en pleno directo (B1c del rediseño): la grabacion sigue donde empezo, el destino queda
 apuntado (sobrevive a un cierre de la app) y la reunion entera se mueve cuando ya no queda nada en marcha (grabacion,
 directo, repaso final, voces y resumen: D4b), con reintentos si un archivo esta en uso, un alias de la ruta vieja para
 lo que llegue tarde y «Deshacer» mientras no se ha movido. Con dobles: sin grabadora, sin red, sin Windows."""

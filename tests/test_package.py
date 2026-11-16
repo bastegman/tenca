@@ -286,6 +286,98 @@ class TemplatesTests(unittest.TestCase):
         self.assertEqual(buscar_palabras(["marca$"], rels, root), [("a.txt", 2, 1), ("b.bat", 2, 1), ("c.md", 1, 1)])
 
 
+class NotasInternasTests(unittest.TestCase):
+    """El repo es público: nada de notas de trabajo internas en ningún fichero versionado. A diferencia de
+    test_sin_rastro_de_clientes, los patrones son genéricos y públicos (NOTAS_INTERNAS), así que corre siempre, sin
+    secreto: en la suite de cada plataforma y en su propio paso del job `agnosticismo` de tests.yml."""
+
+    def test_sin_notas_internas(self):
+        """Sin referencias a mensajes («msg» con su número), sin el nombre del autor fuera de la licencia, de los
+        identificadores que no pueden cambiar y del editor del instalador (NOTAS_EXENTAS), sin el nombre del asistente
+        que coordinaba el trabajo ni del sistema de agentes y sin rutas personales de macOS."""
+        hits = buscar_notas_internas(ficheros_del_repo())
+        if hits:
+            lineas = [f"  {rel}:{n} ({tipo}: {texto!r})" for rel, n, tipo, texto in hits[:80]]
+            if len(hits) > 80:
+                lineas.append(f"  … y {len(hits) - 80} más")
+            self.fail(f"{len(hits)} notas internas en el repo público (reescríbelas con el porqué técnico, sin "
+                      "quién lo pidió ni dónde):\n" + "\n".join(lineas))
+
+    def test_notas_internas_casa_y_respeta_las_exentas(self):
+        """Los patrones casan con cada tipo de nota (también en mayúsculas, en un fichero CRLF y en el CHANGELOG) y
+        dejan pasar lo exento: LICENSE, _app/static/ (de momento), el AppUserModelID y el editor como valor literal."""
+        root = tempfile.mkdtemp(prefix="tenca-notas-")
+        nombre, apellido = "Ber" + "nardo", "Stegm" + "aier"  # en trozos: el propio test se revisa a sí mismo
+        asistente, sistema = "Clau" + "dia", "Open" + "Claude"
+        ficheros = {
+            "CHANGELOG.md": f"uno\nlo pidió (ms{''}g 1479)\nms{''}gs 1150-1152 y MS{''}G 1386\n",
+            "_app/a.py": f"# en el portátil de {nombre}\nx = 1  # decisión de {asistente}\n",
+            "tests/b.py": f'ruta = "/Us{""}ers/alguien/Projects/tenca"\nusers = "/users/x"  # minúsculas: una URL\n',
+            "scripts/c.ps1": f'$AppId = "{nombre}.Chuleta"\r\n$Publisher = "{nombre} {apellido}"\r\n'
+                             f'Check "x" ($l -match "{nombre}\\.Chuleta")\r\n{nombre} {apellido} lo pidió\r\n',
+            "scripts/setup/d.iss": f"AppPublisher={nombre} {apellido}\n"
+                                   f"VersionInfoCopyright={nombre} {apellido} (MIT)\n",
+            "README.md": f"el daemon de {sistema}\nmsgs NNNN y una versión 2026.11 sin número de mensaje\n",
+            "LICENSE": f"Copyright (c) 2026 {nombre} {apellido}\n",
+            "_app/static/e.js": f"// ms{''}g 1242 de {nombre}\n",
+        }
+        for rel, texto in ficheros.items():
+            os.makedirs(os.path.dirname(os.path.join(root, rel)) or root, exist_ok=True)
+            with open(os.path.join(root, rel), "w", encoding="utf-8", newline="") as f:
+                f.write(texto)
+        hits = [(rel, n, tipo) for rel, n, tipo, _ in buscar_notas_internas(sorted(ficheros), root)]
+        self.assertEqual(hits, [("CHANGELOG.md", 2, "mensaje"), ("CHANGELOG.md", 3, "mensaje"),
+                                ("CHANGELOG.md", 3, "mensaje"), ("README.md", 1, "sistema de agentes"),
+                                ("_app/a.py", 1, "nombre del autor"), ("_app/a.py", 2, "asistente"),
+                                ("scripts/c.ps1", 4, "nombre del autor"), ("scripts/c.ps1", 4, "nombre del autor"),
+                                ("tests/b.py", 1, "ruta personal")])
+
+
+# Notas internas que no van en un repo público (punto 50 del review del 14/11/2026). Cada patrón lleva una letra entre
+# corchetes para no casar consigo mismo en este fichero. _app/static/ queda fuera DE MOMENTO: lo limpia la rama
+# frontend-modulos, que al entrar en main tiene que quitar esa excepción (y si entra antes que repo-limpio, la quita
+# repo-limpio); test_notas_internas_casa_y_respeta_las_exentas también la nombra.
+NOTAS_INTERNAS = (
+    ("mensaje", re.compile(r"\bms[g]s?\.?\s*\d{3,4}\b", re.I)),
+    ("nombre del autor", re.compile(r"\bber[n]ard|\bstegm[a]ier\b", re.I)),
+    ("asistente", re.compile(r"\bclau[d]ia\b", re.I)),
+    ("sistema de agentes", re.compile(r"\bopencla[u]de\b", re.I)),
+    ("ruta personal", re.compile(r"/Us[e]rs/")),  # con mayúscula, como en macOS: /users/ es parte de muchas URL
+)
+NOTAS_FICHEROS_EXENTOS = ("LICENSE",)
+NOTAS_CARPETAS_EXENTAS = ("_app/static/",)
+# Lo único que puede llevar el nombre del autor, porque cambiarlo cambiaría la app: el AppUserModelID de Windows
+# (common.APP_ID; los accesos directos ya creados y la barra de tareas lo llevan, ver test_tenca) y el que usó la
+# prueba de WebView2 de scripts/, también con la barra escapada de una expresión regular de PowerShell; y el editor
+# como valor literal, justo detrás de una comilla o de un «=» (Publisher del registro, con el que desinstalar.ps1
+# reconoce sus entradas, y AppPublisher/VersionInfo del Setup.exe), igual que en LICENSE.
+NOTAS_EXENTAS = re.compile(r"\bBer[n]ardo\\?\.(?:Chuleta|Notas)\b|(?<=[\"'=])Ber[n]ardo Stegm[a]ier\b")
+
+
+def buscar_notas_internas(rels, root=REPO):
+    """[(fichero, línea, tipo, texto)] de cada nota interna de NOTAS_INTERNAS en los ficheros `rels` (relativos a
+    `root`, con «/»), saltando binarios, NOTAS_FICHEROS_EXENTOS, NOTAS_CARPETAS_EXENTAS y lo que casa con
+    NOTAS_EXENTAS. Ordenado por fichero, línea y posición."""
+    import bisect
+    hits = []
+    for rel in rels:
+        if rel in NOTAS_FICHEROS_EXENTOS or rel.startswith(NOTAS_CARPETAS_EXENTAS):
+            continue
+        path = os.path.join(root, rel)
+        if not os.path.isfile(path):
+            continue  # en el índice de git pero borrado de la copia de trabajo
+        with open(path, "rb") as f:
+            data = f.read()
+        if b"\0" in data[:8192]:
+            continue  # binario (iconos, imágenes, audios de prueba)
+        text = data.decode("utf-8-sig", "replace").replace("\r\n", "\n")
+        text = NOTAS_EXENTAS.sub(lambda m: "·" * len(m.group(0)), text)  # mismo largo: no cambia ninguna posición
+        saltos = [m.start() for m in re.finditer("\n", text)]
+        encontrados = sorted((m.start(), tipo, m.group(0)) for tipo, rx in NOTAS_INTERNAS for m in rx.finditer(text))
+        hits += [(rel, bisect.bisect_left(saltos, i) + 1, tipo, texto) for i, tipo, texto in encontrados]
+    return hits
+
+
 def palabras_vetadas():
     """La lista privada de NOTAS_PALABRAS_VETADAS: expresiones regulares separadas por comas o por saltos de línea."""
     return [p.strip() for p in re.split(r"[,\n]", os.environ.get("NOTAS_PALABRAS_VETADAS", "")) if p.strip()]

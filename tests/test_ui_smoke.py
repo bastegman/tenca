@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Humo de la interfaz en un navegador real (Playwright + Chromium): la app arranca, se abre con su token y lo que
-Bernardo pulsa primero (⚙ Ajustes, Reuniones, Calendario, Inicio, ● Grabar) responde sin errores de JavaScript.
+el usuario pulsa primero (⚙ Ajustes, Reuniones, Calendario, Inicio, ● Grabar) responde sin errores de JavaScript.
 
 Hasta el 02/11/2026 ningún test abría la interfaz en un navegador: una pantalla con los botones muertos pasaba la
 suite entera. Se salta si Playwright no está instalado (la CI lo instala en `ui-smoke.yml`):
@@ -308,7 +308,7 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         pg.select_option("[data-panel='idioma'] select", "pt")
         pg.wait_for_function("document.querySelector('[data-fila=idioma] .gr-origen').classList.contains('cambiado')",
                              timeout=5000)
-        # con un idioma fijo, la nota de que lo que se diga en otro se traduce a este (msg 1150, ítem 12)
+        # con un idioma fijo, la nota de que lo que se diga en otro se traduce a este (ítem 12)
         pg.wait_for_selector("[data-fila='idioma'] .gr-nota", timeout=5000)
         self.assertIn("lo que se diga en otro se traduce a este", pg.inner_text("[data-fila='idioma'] .gr-nota"))
         pg.check("input[name='grAlc_idioma'][value='proyecto']")
@@ -332,7 +332,7 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         self.assertEqual(red, [])
 
     def test_ajustes_ocultar_al_compartir(self):
-        """«Al compartir pantalla» en Ajustes › Calendario y Teams (ítem 18, msg 1242). Aquí no hay ventana propia (el
+        """«Al compartir pantalla» en Ajustes › Calendario y Teams (ítem 18). Aquí no hay ventana propia (el
         servidor va con --no-browser): el interruptor sale apagado y dice por qué. Con un servidor que sí puede
         (respuesta simulada), marcarlo lo aplica al momento y dice «Guardado ✓» a su lado."""
         pg, errores, red = self.pagina()
@@ -1122,7 +1122,7 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         self.assertEqual(red, [], red)
 
     def test_tarjeta_con_listas_de_una_carpeta_conectada(self):
-        """Rama vocab-carpeta (msg 1148): si existe vocabConectar (perfil.js de esa rama), la tarjeta ofrece «Usar las
+        """Rama vocab-carpeta (B2b): si existe vocabConectar (perfil.js de esa rama), la tarjeta ofrece «Usar las
         listas de una carpeta…» en Proyecto y en el panel del vocabulario; elegirla no cambia el proyecto y, al volver,
         la tarjeta sigue con lo escrito. Aquí vocabConectar es de prueba, con su firma: vocabConectar(after)."""
         pg, errores, red = self.pagina()
@@ -1215,7 +1215,7 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         return json.load(urllib.request.urlopen(req, timeout=10))
 
     def test_vocabulario_desde_una_carpeta_conectada(self):
-        """Ajustes › Proyectos, Listas de vocabulario (msg 1148): la carpeta conectada sale con sus listas y lo que se
+        """Ajustes › Proyectos, Listas de vocabulario (B2b): la carpeta conectada sale con sus listas y lo que se
         salta; sus workstreams, con «carpeta conectada»; «quitar» la quita sin borrar nada. La conexión va por la API:
         el selector de carpetas de Windows no se puede pulsar desde aquí."""
         listas = os.path.join(self.tmp, "Listas de prueba")
@@ -1348,7 +1348,7 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         self.assertEqual(errores, [])
 
     def test_fallo_de_las_voces_no_sale_como_de_la_transcripcion(self):
-        """fix-subir-memoria (09/11/2026, msg 1378): con la reunión ya transcrita, un fallo de «Quién habla» salía
+        """fix-subir-memoria (09/11/2026): con la reunión ya transcrita, un fallo de «Quién habla» salía
         también como «No se pudo transcribir» con «Reintentar» (lastJobFor no miraba el tipo) y con la traza de ONNX
         en crudo. Ahora: la transcripción sigue «Transcrito», el error va solo en la barra de voces y en su aviso, y
         en una frase."""

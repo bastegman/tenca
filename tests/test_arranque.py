@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Lo que falló el 02/11/2026 en el PC de Bernardo al probar la Entrega 2 (server.log de las 10:22-10:36):
+"""Lo que falló el 02/11/2026 en un PC con Windows al probar la Entrega 2 (server.log de las 10:22-10:36):
 
 - la interfaz 8 minutos con los botones muertos: /api/config importaba faster_whisper (model_cached) a la vez que el
   hilo del directo, y la importación tardó eso en su PC tras la actualización (cerrojo de importación compartido);

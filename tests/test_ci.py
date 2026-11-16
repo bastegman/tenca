@@ -563,6 +563,25 @@ class WorkflowsDependenciasTests(unittest.TestCase):
         self.assertIn("tests.yml", vistos)
 
 
+class NotasInternasCITests(unittest.TestCase):
+    """Punto 50 del review: el job `agnosticismo` de tests.yml tiene su propio paso para NotasInternasTests, sin secreto
+    y sin nada que lo deje en verde con un fallo; así sale en rojo con su nombre aunque falte la lista privada."""
+
+    def test_paso_sin_notas_internas(self):
+        wf = workflow("tests.yml")
+        self.assertIn("push", eventos(wf["on"]))
+        job = wf["jobs"]["agnosticismo"]
+        pasos = [p for p in job["steps"] if "test_package.NotasInternasTests" in (p.get("run") or "")]
+        self.assertEqual(len(pasos), 1)
+        paso = pasos[0]
+        self.assertEqual(paso.get("working-directory"), "tests")
+        self.assertEqual(paso["run"].strip(), "python -m unittest -v test_package.NotasInternasTests")
+        self.assertFalse(paso.get("env"))  # patrones públicos: ningún secreto
+        for d in (job, paso):
+            self.assertNotIn("continue-on-error", d)
+            self.assertNotIn("if", d)
+
+
 class AgnosticismoCITests(unittest.TestCase):
     """P2-39: el test de agnosticismo corre en la CI con la lista privada (el secreto NOTAS_PALABRAS_VETADAS) y falla si
     encuentra algo. Sin el secreto no se ejecuta, y el propio test lo avisa en el resumen del run (::warning, con

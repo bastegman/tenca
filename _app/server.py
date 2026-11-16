@@ -276,7 +276,7 @@ class App(Grabar, Reuniones, Listas, Carpetas, Hoy, Textos, Directo, Ajustes, Vo
         self.library = Library(Durations(os.path.join(DATA_DIR, "durations.json")))
         self.transcripts = Transcripts()
         self.jobs = Jobs(self.settings, self.library)
-        # cambiar la carpeta en pleno directo (msg 1198): se mueve cuando la reunion queda libre (al acabar su ultimo
+        # cambiar la carpeta en pleno directo (B1c): se mueve cuando la reunion queda libre (al acabar su ultimo
         # trabajo o en la vuelta de 3 s, que tambien hace los que quedaron de antes de un cierre)
         self.jobs.on_idle, self.jobs.on_tick = self._al_quedar_libre, self._tick_movimientos
         # grabadora propia: una grabacion y, mientras la ventana de "Grabar" esta abierta, un medidor
@@ -292,7 +292,7 @@ class App(Grabar, Reuniones, Listas, Carpetas, Hoy, Textos, Directo, Ajustes, Vo
         # «La llamada ha terminado: paro en 30 s · No terminar» (B6); parada: la última parada por eso (la interfaz
         # la avisa al ver que ya no se graba)
         self.fin_llamada, self.parada_auto = directo_avisos.FinDeLlamada(), None
-        # «Ya ha empezado «X» · Grabar · Ahora no» al parar una grabación (msg 1479): lo que se grababa (para no
+        # «Ya ha empezado «X» · Grabar · Ahora no» al parar una grabación (B7): lo que se grababa (para no
         # proponerla otra vez) y hasta cuándo se mira (_siguiente)
         self.grabada, self.siguiente, self._siguiente_cache = [], None, (0.0, None)
         # lo que ya se sabe de los asistentes de Outlook (si pregunta, no se le vuelve a preguntar solo al arrancar)
@@ -411,7 +411,7 @@ class App(Grabar, Reuniones, Listas, Carpetas, Hoy, Textos, Directo, Ajustes, Vo
 
     def movil_abrir(self, b):
         """POST /api/movil/abrir {folder, vocab, language, contexto, preset}: un código nuevo (el anterior deja de
-        valer). Solo en una red privada de Windows (decisión 3 de la lámina, msg 1390)."""
+        valer). Solo en una red privada de Windows (decisión 3 de movil.py)."""
         datos = self._movil_datos(b)
         cuando, red = App._movil_red
         if not red or time.time() - cuando > 120:  # la de hace un momento (al abrir la tarjeta) vale; una mala, no

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Ocultar Tenca al compartir pantalla (ítem 18; msg 1242, de la research de competencia: Minutes lo hace por defecto).
+"""Ocultar Tenca al compartir pantalla (ítem 18; otras apps de notas de reuniones lo hacen por defecto).
 
 window.py pone SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE) en la ventana propia, en el hilo de la ventana, antes
 de enseñarla; Ajustes › Al grabar lo apaga y lo enciende al momento (POST /api/ocultar-captura). En un Windows anterior

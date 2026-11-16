@@ -1,10 +1,10 @@
 name: claude-windows
 
-# «Con tu cuenta de Claude» con Claude Code de verdad en Windows, sin sesión iniciada (07/11/2026, msgs 1185-1187:
-# «Comprobar» tardó minutos en el PC de Bernardo). Instalador nativo oficial y npm (claude.cmd por cmd.exe, en una
+# «Con tu cuenta de Claude» con Claude Code de verdad en Windows, sin sesión iniciada (07/11/2026:
+# «Comprobar» tardó minutos en un PC con Windows). Instalador nativo oficial y npm (claude.cmd por cmd.exe, en una
 # carpeta con espacios, «&» y «%» que solo está en el PATH del registro). La app arranca antes de instalar. Mide cuánto
 # tarda cada llamada en frío y en caliente, y si quedan procesos con la salida abierta. Sin login ni credenciales.
-# Cuenta de empresa (07/11/2026, msgs 1224-1228): «vscode», solo la copia que trae la extensión de VS Code (paquete de
+# Cuenta de empresa (07/11/2026): «vscode», solo la copia que trae la extensión de VS Code (paquete de
 # Open VSX); «pasarela», una pasarela de empresa falsa en el propio runner puesta en el registro con la app ya abierta
 # (token falso, sin Anthropic).
 on:

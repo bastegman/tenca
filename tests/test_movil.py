@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""«Subir audio › Desde el móvil» (movil.py, 09/11/2026; la lámina validada en el msg 1390): qué red vale (solo una
+"""«Subir audio › Desde el móvil» (movil.py, 09/11/2026; sus cuatro decisiones de diseño): qué red vale (solo una
 privada de Windows), el código QR, y el servidor de la wifi: solo el código, un solo móvil, 10 minutos, nada de la API
 de la app, y lo recibido por el mismo camino que «Subir audio». Sin red de verdad: todo en 127.0.0.1. La interfaz (el
 menú, la tarjeta, el móvil emulado) la prueba test_ui_movil."""

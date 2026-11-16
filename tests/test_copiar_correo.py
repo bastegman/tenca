@@ -168,7 +168,7 @@ console.log(JSON.stringify(actaInfo({date: new Date(2025, 0, 2, 9, 0).getTime(),
   props: {participantes: 'Ana', participantes_origen: 'outlook'}})));
 console.log(JSON.stringify(actaInfo({props: {}})));
 console.log(JSON.stringify(actaInfo(undefined)));
-console.log(JSON.stringify(actaInfo({stem: 'Llamada con Iberdrola', props: {}})));
+console.log(JSON.stringify(actaInfo({stem: 'Llamada con Orvalia', props: {}})));
 console.log(JSON.stringify(actaInfo({date: NaN, stem: '2026-13-01 10-00-00 - X', label: 'X', props: {}})));
 console.log(JSON.stringify(actaInfo({date: new Date(2026, 10, 6, 10, 5).getTime(), props: {}}, 'en')));""")
         lines = [json.loads(x) for x in out.splitlines()]
@@ -179,7 +179,7 @@ console.log(JSON.stringify(actaInfo({date: new Date(2026, 10, 6, 10, 5).getTime(
         self.assertEqual(lines[2], {"title": "Reunión", "when": "", "people": ""})
         self.assertEqual(lines[3], {"title": "Reunión", "when": "", "people": ""})
         # un audio sin fecha lleva su nombre (como la página); una fecha imposible no rompe la copia; en inglés
-        self.assertEqual(lines[4], {"title": "Llamada con Iberdrola", "when": "", "people": ""})
+        self.assertEqual(lines[4], {"title": "Llamada con Orvalia", "when": "", "people": ""})
         self.assertEqual(lines[5], {"title": "X", "when": "", "people": ""})
         self.assertEqual(lines[6]["when"], "Friday 6 Nov, 10:05")
 

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Vocabulario desde una carpeta conectada (msg 1148): las listas .txt de una carpeta del PC se leen en vivo, sin copiar
+"""Vocabulario desde una carpeta conectada (B2b): las listas .txt de una carpeta del PC se leen en vivo, sin copiar
 nada, en tres formas (<carpeta>\\*.txt sueltas, <carpeta>\\Vocabulario\\*.txt y
 <carpeta>\\<Proyecto>\\Vocabulario\\*.txt). Ids con prefijo propio (":v<id>/…"), fuera del árbol de reuniones y de
 safe(), filtros (transcripciones, ocultas, solo en OneDrive, demasiado grandes), codificaciones de Windows, validación

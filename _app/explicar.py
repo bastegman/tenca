@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """Errores en una frase: qué ha pasado, qué hacer y, si hay uno, el botón que lo hace (07/11/2026).
 
-Bernardo se perdía en la configuración entre errores como «HTTP 401: …», «ConnectionError» o «No module named …»
-(msg 1169). Esta función los convierte en lo que ve la interfaz: la Cola, los avisos, «Comprobar» y «Probar».
+En la configuración era fácil perderse entre errores como «HTTP 401: …», «ConnectionError» o «No module named …».
+Esta función los convierte en lo que ve la interfaz: la Cola, los avisos, «Comprobar» y «Probar».
 - Las frases que ya dan engines.connection_error y engines.cloud_http_error (descarga de modelos y nube) se dejan
   como están y solo se les añade el botón. No se duplican aquí.
 - Las de Claude Code, la instalación y el proxy que contesta con HTML tienen aquí su frase.
@@ -25,7 +25,7 @@ ACCIONES = {
 }
 
 # Mensajes con los que Claude Code avisa de que el plan ha llegado a su límite (salen del CLI por stdout con código 1;
-# la lista es la que usa el daemon de OpenClaude, sacada del propio CLI). En minúsculas.
+# la lista sale de los textos del propio CLI). En minúsculas.
 LIMITE_CLAUDE = ("you've hit your", "you've reached your", "you're out of usage credits", "you're out of extra usage",
                  "requires usage credits", "your org is out of usage", "usage limit reached")
 INSTALACION = ("no module named", "importerror", "dll load failed", "modulenotfounderror")
@@ -70,7 +70,7 @@ def explicar(err, proveedor=None):
         return out
     if "sin sesión iniciada" in low or "please run /login" in low or "not logged in" in low:
         # el inicio de sesión es el de Claude Code, en el navegador (con el SSO de la empresa si es su cuenta): la app
-        # no inicia sesión por nadie (claude-empresa, 08/11/2026, msg 1261)
+        # no inicia sesión por nadie (claude-empresa, 08/11/2026)
         out["frase"] = ("Claude Code no tiene la sesión iniciada: pulsa «Abrir PowerShell», escribe claude y entra con "
                         "tu cuenta en el navegador que se abre (con el inicio de sesión de tu empresa, si es la que "
                         "usas); luego vuelve a probar.")
@@ -137,7 +137,7 @@ def explicar(err, proveedor=None):
         out["accion"] = _accion("reintentar_descarga")
         return out
     # --- sin memoria (09/11/2026): «bad allocation» de onnxruntime (std::bad_alloc en Windows), MemoryError de numpy…
-    # Bernardo recibió la traza de ONNX en crudo en dos avisos al identificar las voces de un audio subido (msg 1378).
+    # antes, la traza de ONNX salía en crudo en dos avisos al identificar las voces de un audio subido.
     # Después de la instalación y de la descarga de modelos (no les quita su frase ni su botón) y nunca la de un
     # servidor («HTTP 500 … CUDA out of memory» es de la nube, no del PC)
     if ("MemoryError" in names or any(k in low for k in SIN_MEMORIA)) and not re.search(r"\bhttp \d{3}\b|cuda", low):

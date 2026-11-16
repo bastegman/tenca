@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Claude Code real en Windows, sin sesión iniciada (CI: claude-windows.yml). Mide y comprueba lo que hace Tenca con
-«Con tu cuenta de Claude» (07/11/2026, msgs 1185-1187: «Comprobar» tardó minutos en el PC de Bernardo).
+«Con tu cuenta de Claude» (07/11/2026: «Comprobar» tardó minutos en un PC con Windows).
 
     python scripts/e2e/claude_windows.py nativo|npm|vscode|pasarela
 
@@ -11,12 +11,12 @@
 3. Mide a mano `claude --version` y la petición mínima de «Comprobar» (`-p … --tools ""`), en frío y en caliente, con y
    sin CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: cuándo sale el proceso y cuándo se cierran sus tuberías (un hijo que
    las herede y siga vivo, p. ej. el actualizador, haría esperar a quien lee hasta EOF), y qué procesos quedan.
-4. Lo que hace Bernardo, por la API de la app: «Comprobar» dos veces y un resumen de una reunión ya transcrita.
+4. Lo que hace el usuario, por la API de la app: «Comprobar» dos veces y un resumen de una reunión ya transcrita.
 5. Escribe resultados.json y copia server.log en NOTAS_ARTEFACTOS. Falla si Tenca no encuentra claude, si la
    invocación no llega a «sin sesión iniciada» (argumentos rotos por cmd.exe, por ejemplo) o si algo se cuelga.
 Sin login ni credenciales: Claude Code no tiene sesión y debe decirlo.
 
-Cuenta de empresa (07/11/2026, msgs 1224-1228):
+Cuenta de empresa (07/11/2026):
 - vscode: sin programa suelto, solo la extensión de VS Code tal como la deja VS Code al instalarla (el paquete
   win32-x64 de Open VSX, extension/ en %USERPROFILE%\\.vscode\\extensions\\anthropic.claude-code-<versión>-win32-x64).
   Tenca debe encontrar su copia, decir «Claude Code de VS Code» y pedir que se entre en VS Code.
@@ -358,7 +358,7 @@ def main():
             e = dict(base_env, **extra)
             paso(f"version_{etiqueta}", **medir([ruta, "--version"], env=e, cwd=cwd, tope=120))
             paso(f"peticion_{etiqueta}", **medir(chat, entrada, env=e, cwd=cwd, tope=240))
-        # lo que hace Bernardo, por la API de la app
+        # lo que hace el usuario, por la API de la app
         for i in (1, 2):
             code, out, secs = app.post("/api/agente/comprobar", {"tipo": "claude", "modelo": "sonnet"})
             paso(f"comprobar_{i}", http=code, segundos=round(secs, 1), respuesta=out)

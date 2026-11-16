@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Doble apertura al arrancar (backlog del 7-8/11/2026, ítem 1; Bernardo, msg 1143: «se me abrían como 2 veces la
-app»). Dos lanzamientos seguidos (doble clic, o el acceso directo otra vez porque la ventana tarda: en su PC, 31 s
+"""Doble apertura al arrancar (backlog del 7-8/11/2026, ítem 1: la app se abría 2 veces). Dos
+lanzamientos seguidos (doble clic, o el acceso directo otra vez porque la ventana tarda: en un PC lento, 31 s
 entre «arranque» y «ventana abierta» el 02/11) no pueden dejar dos ventanas.
 
 Aquí, en cualquier sistema: dos server.py de verdad con un pywebview falso que reproduce lo que importa del 6.2.1
@@ -327,7 +327,7 @@ class DobleAperturaTests(unittest.TestCase):
             self.assertEqual(len(r["show"]), 1, msg)
 
     def test_segundo_lanzamiento_durante_el_arranque(self):
-        lento = {"crear": 3, "mostrar": 2}  # en el PC de Bernardo: 31 s entre «arranque» y «ventana abierta»
+        lento = {"crear": 3, "mostrar": 2}  # en un PC lento: 31 s entre «arranque» y «ventana abierta»
         res = self.correr([
             dict(nombre="a la vez", retraso=0.0, tiempos=lento),
             dict(nombre="antes de que la ventana exista", retraso=1.5, tiempos=lento),

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Aprender de tus correcciones (ítem 17 del backlog, 09/11/2026; la idea es de Quill, en la research de competencia
-que aprobó Bernardo en el msg 1242).
+"""Aprender de tus correcciones (ítem 17 del backlog, 09/11/2026; otras apps de notas de reuniones ya recuerdan
+las sustituciones).
 
 Al corregir una transcripción, Tenca guarda lo que escribió Whisper (DATA_DIR/originales). Comparando las dos versiones
 salen las palabras que has cambiado y, de ellas, solo cuentan los nombres propios, las siglas y los términos de cliente:

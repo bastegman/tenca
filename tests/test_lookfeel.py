@@ -229,7 +229,7 @@ class ServidorHttpTests(unittest.TestCase):
         open_ui.assert_not_called()
 
     def test_mostrar_con_la_ventana_en_camino_no_abre_edge(self):
-        """Doble apertura (msg 1143): el acceso directo otra vez mientras la ventana propia se abre. Ni Edge ni
+        """Doble apertura: el acceso directo otra vez mientras la ventana propia se abre. Ni Edge ni
         nada: sale sola."""
         win = mock.Mock()
         win.request_show.return_value = "pending"
@@ -305,8 +305,8 @@ class ServidorHttpTests(unittest.TestCase):
 
     def test_invitar_a_un_cafe(self):
         """Donaciones discretas: un enlace de PayPal al correo del autor en Ajustes, el README y el LEEME (y su
-        plantilla), sin ventanas emergentes ni recordatorios. En Ajustes, dos sitios y ninguno más (msg 1248,
-        08/11/2026: «algo más visible pero discreto»): al pie de la columna de secciones y en Acerca de."""
+        plantilla), sin ventanas emergentes ni recordatorios. En Ajustes, dos sitios y ninguno más (08/11/2026:
+        algo más visible, pero discreto): al pie de la columna de secciones y en Acerca de."""
         self.assertTrue(server.DONAR_URL.startswith("https://www.paypal.com/donate?business="), server.DONAR_URL)
         raiz = os.path.dirname(APP)
         for n in ("README.md", "LEEME.txt", os.path.join("_app", "export", "LEEME.txt")):

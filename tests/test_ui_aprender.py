@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""«Aprender de tus correcciones» en un navegador de verdad (Playwright + Chromium), como lo usa Bernardo: corrige una
+"""«Aprender de tus correcciones» en un navegador de verdad (Playwright + Chromium), como lo usa el usuario: corrige una
 transcripción, pulsa «Listo» y encima del texto le sale «¿Añadir «Orvalia» al vocabulario de Finanzas?»; con un clic el
 término va a la lista (también a una carpeta de listas conectada, o le dice por qué no puede) y, si lo deja marcado,
 Tenca lo cambia en las próximas reuniones del proyecto: subrayado, con «Deshacer» y con la pregunta de si dejar de
@@ -232,7 +232,7 @@ class AprenderEnLaInterfazTests(unittest.TestCase):
         self.assertEqual(card.locator(".apr-term").all_text_contents(), ["Orvalia", "TSA"])  # ni «Lo que» ni «Juan»
         f0 = card.locator(".apr-fila[data-k='0']")
         self.assertIn("Whisper escribió «orbalia» (2 veces)", f0.text_content())
-        # marcada: Bernardo quiere que lo que confirma valga también en las futuras (msg 1390); la casilla lo dice
+        # marcada: lo que se confirma vale también en las reuniones futuras; la casilla lo dice
         self.assertTrue(f0.locator("input[type=checkbox]").is_checked())
         self.assertIn("Y en las próximas reuniones de Cliente Alfa, cambiar «orbalia» por «Orvalia» (se guarda en tu "
                       "diccionario)", f0.locator(".apr-regla").text_content())

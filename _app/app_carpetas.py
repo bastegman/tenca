@@ -157,8 +157,8 @@ class Carpetas:
         return {"path": rel_of(target)}
 
     def subir(self, handler, q):
-        """POST /api/subir?folder&name&fecha&vocab&language&contexto&preset&archivo (09/11/2026, msg 1296: «poder subir
-        un audio, independiente de donde venga»). El cuerpo es el archivo tal cual (el del móvil, un audio de WhatsApp,
+        """POST /api/subir?folder&name&fecha&vocab&language&contexto&preset&archivo (09/11/2026: subir un audio, venga
+        de donde venga). El cuerpo es el archivo tal cual (el del móvil, un audio de WhatsApp,
         otra grabadora); lo demás es lo que da POST /api/grabar/plan con subir. Entra como una grabación hecha con la
         tarjeta: «AAAA-MM-DD HH-MM-SS - Nombre» con la fecha del audio, en su carpeta de reunión dentro de la principal,
         con el proyecto, el idioma y el contexto en su .md, y a la cola de transcripción. Antes de guardarlo se
@@ -475,7 +475,7 @@ class Carpetas:
         if getattr(self.jobs, "settings", None) is not None:  # el documento de los destinos dice de donde sale
             self.jobs.schedule_outputs(new)
 
-    # --- cambiar la carpeta en pleno directo (B1c, msg 1198): se mueve al terminar todo
+    # --- cambiar la carpeta en pleno directo (B1c): se mueve al terminar todo
     MOV_ESPERAS = (3, 10, 30, 60, 120)  # segundos entre reintentos si un archivo esta en uso (OneDrive, antivirus)
 
     MOV_INTENTOS = 12  # ~20 min: despues se deja donde esta y se dice

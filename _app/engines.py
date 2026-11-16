@@ -2285,8 +2285,8 @@ class AgenteLocal:
 
     @classmethod
     def find_extension(cls):
-        """La copia del programa que trae la extension del editor (07/11/2026: Bernardo usa Claude Code en VS Code con
-        la cuenta de su empresa y puede no tener el programa suelto; la extension no lo pone en el PATH). Carpeta
+        """La copia del programa que trae la extension del editor (07/11/2026: quien usa Claude Code en VS Code con
+        la cuenta de su empresa puede no tener el programa suelto; la extension no lo pone en el PATH). Carpeta
         «<id>-<version>[-<plataforma>]» (p. ej. anthropic.claude-code-2.1.319-win32-x64, con el ejecutable en
         resources\\native-binary\\claude.exe: paquete win32-x64 de Open VSX, 07/11/2026). La version mas alta de
         todos los editores; sin las que el editor ya ha dado de baja (su fichero .obsolete). None si no hay."""
@@ -2632,7 +2632,7 @@ class ClaudeCode(AgenteLocal):
         model = model or self.MODELO
         self.origen_ruta = self.origen(path)
         self.aviso = None  # si el modelo elegido no estaba y se ha usado el de su Claude Code (en la respuesta de
-        # «Comprobar» y en server.log; la interfaz aun no lo pinta: Steve)
+        # «Comprobar» y en server.log; la interfaz aun no lo pinta)
 
         def cmd(m):
             return self.argv0(path) + ["-p", "--output-format", "json", "--tools", "", "--no-session-persistence",
@@ -2941,7 +2941,7 @@ class Summarizer:
         "si una frase ya está en español, cópiala tal cual). Conserva nombres propios, siglas, cifras, fechas y "
         "términos técnicos. El fragmento puede empezar o acabar a mitad de frase: tradúcelo igual, sin inventar "
         "el resto. Devuelve solo la traducción, sin comillas ni notas.")
-    # al ingles (msg 1152), escrito en ingles: con las instrucciones en espanol, un modelo pequeno tiende a contestar en
+    # al ingles (ítem 13a), escrito en ingles: con las instrucciones en espanol, un modelo pequeno tiende a contestar en
     # espanol
     TRANSLATE_SYSTEM_EN = (
         "You are a simultaneous interpreter for work meetings. Translate into English, faithfully and without "

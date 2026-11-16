@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Carpeta principal por proyecto o workstream y una carpeta por reunion (B1b del rediseño; backlog 11a′ y 11b, msgs
-1148 y 1158): donde se graba (la regla, rec_folder_origin), la carpeta «AAAA-MM-DD Nombre» que crea rec_start, como la
+"""Carpeta principal por proyecto o workstream y una carpeta por reunion (B1b del rediseño; backlog 11a′ y
+11b): donde se graba (la regla, rec_folder_origin), la carpeta «AAAA-MM-DD Nombre» que crea rec_start, como la
 reconoce la app (meeting_dir_matches, own_meeting_dir, scan), mover y renombrar con su carpeta (o todo o nada) y que lo
 grabado antes se queda donde esta. Con dobles: sin grabadora, sin red, sin Windows."""
 import json
@@ -102,7 +102,7 @@ class CarpetaPrincipalTests(TempTree):
               "workstream_folders": {"Alfa/Vocabulario/Infra.txt": "Alfa/Infra"}}
         self.assertEqual(server.rec_folder_origin(self.infra, st), ("Alfa/Infra", "workstream"))
         self.assertEqual(server.rec_folder_origin(self.alfa, st), ("Alfa/Reuniones", "proyecto"))
-        # con tema, la carpeta del proyecto gana a la fija del perfil (msg 1158); sin tema, la del perfil
+        # con tema, la carpeta del proyecto gana a la fija del perfil (B1b); sin tema, la del perfil
         self.assertEqual(server.rec_folder_origin(dict(self.alfa, project="Gamma", id="x"), st)[1], "carpeta_proyecto")
         self.assertEqual(server.rec_folder_origin(None, st), ("Fija", "perfil"))
         self.assertEqual(server.rec_folder_origin(None, {"rec_folder": "Otra"}), ("Otra", "ultimo"))
@@ -218,7 +218,7 @@ class ProyectoDeUnaCarpetaConectadaTests(TempTree):
         self.assertEqual(server.rec_folder_origin(self.b, self.a.settings.get()), ("Cliente B 2", "proyecto"))
 
     def test_tambien_desde_el_plan(self):
-        """Decidido (Claudia, 09/11/2026): un proyecto sin carpeta en el arbol usa la carpeta que se eligio a mano para
+        """Decidido el 09/11/2026: un proyecto sin carpeta en el arbol usa la carpeta que se eligio a mano para
         el, tambien cuando se graba desde el plan («plan»: true, el dialogo nuevo de ux-grabar, cuyo rec_start no apunta
         lo demas cuando viene del plan): una eleccion explicita manda. En esta rama «plan» todavia no cambia nada; al
         fusionar ux-grabar, el bloque sin_casa de rec_start tiene que seguir corriendo con «plan»: true, y este test es
@@ -655,17 +655,17 @@ class MigracionTests(TempTree):
         self.wav("Gamma/2026-10-01 Kick-off/2026-10-01 09-00-00 - Kick-off.wav")
         os.makedirs(os.path.join(self.root, "Beta", "Reuniones"))
         for n in ("2025-09-01 10-00-00 - A.wav", "2025-10-02 10-00-00 - B.wav"):  # un proyecto que empieza por fecha
-            self.wav(f"Clientes/2025-09-01 Proyecto Iberdrola/{n}")
+            self.wav(f"Clientes/2025-09-01 Proyecto Orvalia/{n}")
         os.makedirs(os.path.join(self.root, "Clientes", "2026-10-30 Kickoff", "Grabaciones"))  # sin audio dentro
         d = {"project_folders": {"Alfa": "Alfa/2026-11-03 Comité", "Beta": "Beta/Reuniones",
                                  "Gamma": "Gamma/2026-10-01 Kick-off", "Delta": ":ab12cd",
-                                 "Iberdrola": "Clientes/2025-09-01 Proyecto Iberdrola",
+                                 "Orvalia": "Clientes/2025-09-01 Proyecto Orvalia",
                                  "Eta": "Clientes/2026-10-30 Kickoff"},
              "rec_folder": "Alfa/2026-11-03 Comité"}
         cambios = server.migrate_main_folders(d)
         self.assertEqual(d["project_folders"], {"Alfa": "Alfa", "Beta": "Beta/Reuniones", "Gamma": "Gamma",
                                                 "Delta": ":ab12cd",
-                                                "Iberdrola": "Clientes/2025-09-01 Proyecto Iberdrola",
+                                                "Orvalia": "Clientes/2025-09-01 Proyecto Orvalia",
                                                 "Eta": "Clientes/2026-10-30 Kickoff"})
         self.assertEqual(d["rec_folder"], "Alfa")
         self.assertEqual(d["carpetas_v"], 1)

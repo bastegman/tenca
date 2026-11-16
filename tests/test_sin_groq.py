@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Sin Groq por defecto (Bernardo, msg 1386: «Lo que no quiero es sugerir Groq a un nuevo instalador»). En una
+"""Sin Groq por defecto: a quien instala por primera vez no se le sugiere un servicio concreto. En una
 instalación nueva lo de por defecto es «Solo en este PC» y nada sugiere ni preselecciona Groq: ni la portada, ni el
 asistente, ni Ajustes. Groq sigue dentro de «API externa» para quien lo elija, y quien ya lo usa no nota nada.
 El servidor de verdad y la interfaz en Chromium (como test_ui_smoke; en ui-smoke.yml, Ubuntu y Windows)."""
@@ -240,7 +240,7 @@ def _claro(v):
 
 @unittest.skipUnless(sync_playwright, "Playwright no instalado")
 class ActualizarConGroqTests(unittest.TestCase):
-    """Quien ya usa Groq (como Bernardo) instala esta versión encima: su configuración sigue igual al arrancar y
+    """Quien ya usa Groq instala esta versión encima: su configuración sigue igual al arrancar y
     también después de abrir Ajustes › Procesado y pulsar «Guardar» sin tocar nada (integración del 09/11/2026)."""
 
     @classmethod

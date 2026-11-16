@@ -120,7 +120,7 @@ class Grabar:
         """La carpeta base de una grabación nueva: la que decide rec_folder_for. Con proyecto, si esa no es suya (la
         fija de Ajustes, que es la de las reuniones sin proyecto, o la última usada, que puede ser la de otro cliente),
         la del proyecto: la del workstream, la asignada al proyecto o, sin asignar, la carpeta del proyecto en el árbol
-        (la que contiene su Vocabulario; 11a′ del rediseño, msg 1158). Con la regla de la rama de carpetas
+        (la que contiene su Vocabulario; 11a′ del rediseño). Con la regla de la rama de carpetas
         (rec_folder_origin), su rec_folder_for ya lo decide así y esto no hace nada: una sola regla."""
         fv = full.get(v["id"]) if v else None
         # con las listas ya leídas (full): si no, cada lista de una carpeta conectada las volvía a leer todas
@@ -453,7 +453,7 @@ class Grabar:
             label = clean_name(b["name"]) if b.get("name") else ""
             name = time.strftime("%Y-%m-%d %H-%M-%S", lt) + (f" - {label}" if label else "")
             cont = _cont  # la grabacion se corto: se sigue en la misma carpeta (_rec_terminada)
-            # una carpeta por reunion, «AAAA-MM-DD Nombre», dentro de la principal (msg 1158); se crea al grabar
+            # una carpeta por reunion, «AAAA-MM-DD Nombre», dentro de la principal; se crea al grabar
             mname = fit_meeting_dir(folder, label, lt, name) if por_reunion(self.settings.get()) and not cont else None
             mdir = free_dir(folder, mname) if mname else None
             path = os.path.join(cont["dir"] if cont else mdir or folder, name + ".wav")
@@ -564,7 +564,7 @@ class Grabar:
                         d["rec_folder"] = rel_of(folder)
                     # si el proyecto no tiene «la suya» en el arbol (solo tiene listas de una carpeta de vocabulario
                     # conectada: project_home), la elegida a mano pasa a ser su carpeta principal (9f49590). Tambien
-                    # desde el plan: una eleccion explicita manda (decision de Claudia, 09/11/2026); pero no si en la
+                    # desde el plan: una eleccion explicita manda (es lo que se acaba de pedir); pero no si en la
                     # tarjeta se eligio «solo esta reunion» (recordar_carpeta), que tambien es explicita
                     if sin_casa and b.get("recordar_carpeta", True):
                         d["project_folders"] = dict(d.get("project_folders") or {}, **{v["project"]: rel_of(folder)})

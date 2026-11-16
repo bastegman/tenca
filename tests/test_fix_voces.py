@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""S6 (msg 1170, 06-nov-2026): «a veces pongo un nombre de quien ha dicho qué, y asume que soy yo».
+"""S6 (06-nov-2026): «a veces pongo un nombre de quien ha dicho qué, y asume que soy yo».
 
 Poner nombre a un hablante (o fusionarlo) no puede convertirlo en «Tú» ni tocar la persona del usuario: ni
 renombrarla, ni guardarle la huella de otra voz, ni hacer «usuario» a otra persona. Y un «Tú» mal puesto por la
@@ -61,7 +61,7 @@ class Reunion(TempTree):
         self.write("r.srt", srt_text([(0.5, 9.5, "frase de h1"), (10.5, 19.5, "frase de h2"),
                                       (20.5, 29.5, "otra de h1"), (30.5, 39.5, "frase de h3")]))
 
-    def usuario(self, nombre="Bernardo"):
+    def usuario(self, nombre="Diego"):
         """La persona del usuario, ya con una huella suya (de «Soy yo» + «Recordar» en otra reunion)."""
         yo = self.v.create(nombre, es_usuario=True, consentimiento=RECORDAR)
         self.v.remember(yo["id"], unit(0), 60, "antes.wav", RECORDAR)
@@ -107,7 +107,7 @@ class NombrarAlHablanteTuTests(Reunion):
         self.assertEqual((data["tu"], data["hablantes"]["h2"]["persona"]), ("h2", yo))  # punto de partida
         self.app.voices_person({"id": yo, "path": "r.wav", "h": "h2", "nombre": "Ana",
                                 "recordar": True, "consentimiento": True})
-        self.assertEqual(self.v.find(yo)["nombre"], "Bernardo")  # el usuario no cambia de nombre
+        self.assertEqual(self.v.find(yo)["nombre"], "Diego")  # el usuario no cambia de nombre
         self.assertEqual(len(self.v.find(yo)["huellas"]), 1)  # ni se le guarda la voz de otra persona
         self.assertTrue(self.v.find(yo)["es_usuario"])
         ana = self.persona("Ana")
@@ -135,7 +135,7 @@ class NombrarAlHablanteTuTests(Reunion):
         r = self.app.voices_reassign({"path": "r.wav", "h": "h2", "persona": None})
         self.assertIsNone(r["tu"])
         self.assertEqual((r["hablantes"]["h2"]["label"], r["hablantes"]["h2"]["usuario"]), ("Persona 2", False))
-        self.assertEqual(self.v.find(yo)["nombre"], "Bernardo")
+        self.assertEqual(self.v.find(yo)["nombre"], "Diego")
 
     def test_fusionar_desde_tu_no_hace_usuario_a_otra_persona(self):
         """«Fusionar con… Ana» en la etiqueta «Tú» fundia la persona del usuario DENTRO de Ana: Ana pasaba a ser
@@ -161,7 +161,7 @@ class NombrarAlHablanteTuTests(Reunion):
         self.identificar()
         self.app.voices_person({"id": yo, "path": "r.wav", "h": "h1", "es_usuario": True, "nombre": "Ana",
                                 "recordar": False, "consentimiento": False})
-        self.assertEqual(self.v.find(yo)["nombre"], "Bernardo")
+        self.assertEqual(self.v.find(yo)["nombre"], "Diego")
         labels, data = self.etiquetas()
         self.assertEqual(data["tu"], "h1")
         self.assertEqual(labels["h1"], ("Tú", True))
@@ -188,7 +188,7 @@ class NombrarOtrosHablantesTests(Reunion):
         self.assertEqual(labels["h3"], ("Tú", True))
         self.app.voices_person({"id": yo, "path": "r.wav", "h": "h3", "nombre": "Carlos", "recordar": True,
                                 "consentimiento": True})
-        self.assertEqual((self.v.find(yo)["nombre"], len(self.v.find(yo)["huellas"])), ("Bernardo", 1))
+        self.assertEqual((self.v.find(yo)["nombre"], len(self.v.find(yo)["huellas"])), ("Diego", 1))
         labels, _ = self.etiquetas()
         self.assertEqual(labels["h3"], ("Carlos", False))
 
@@ -226,11 +226,11 @@ class NombrarOtrosHablantesTests(Reunion):
         """Refutador P1-a: un compañero que se llama como el usuario no es «Tú» (el usuario se marca con «Soy yo»)."""
         yo = self.usuario()
         self.identificar()
-        r = self.app.voices_person({"path": "r.wav", "h": "h1", "nombre": "bernardo", "recordar": True,
+        r = self.app.voices_person({"path": "r.wav", "h": "h1", "nombre": "diego", "recordar": True,
                                     "consentimiento": True})
         self.assertNotEqual(r["id"], yo)
         labels, data = self.etiquetas()
-        self.assertEqual((labels["h1"], labels["h2"], data["tu"]), (("bernardo", False), ("Tú", True), "h2"))
+        self.assertEqual((labels["h1"], labels["h2"], data["tu"]), (("diego", False), ("Tú", True), "h2"))
         self.assertEqual(len(self.v.find(yo)["huellas"]), 1)
 
     def test_corregir_el_nombre_solo_si_se_pide(self):
@@ -250,7 +250,7 @@ class NombrarOtrosHablantesTests(Reunion):
         yo = self.usuario()
         self.identificar()
         self.app.voices_person({"id": yo, "path": "r.wav", "h": "h2", "nombre": "Ana", "renombrar": True})
-        self.assertEqual(self.v.find(yo)["nombre"], "Bernardo")
+        self.assertEqual(self.v.find(yo)["nombre"], "Diego")
         self.assertEqual(self.leer()["hablantes"]["h2"]["persona"], self.persona("Ana")["id"])
 
     def test_ajustes_sigue_renombrando_por_id(self):
@@ -262,7 +262,7 @@ class NombrarOtrosHablantesTests(Reunion):
 
 class EtiquetaTests(unittest.TestCase):
     """label(): la persona asignada manda sobre la heuristica del micro; «Tú» es la persona del usuario."""
-    names = {"pu": "Bernardo", "pa": "Ana"}
+    names = {"pu": "Diego", "pa": "Ana"}
 
     def data(self, **h2):
         return {"tu": "h2", "hablantes": {"h1": {}, "h2": dict({"segundos": 30}, **h2)}}
@@ -274,7 +274,7 @@ class EtiquetaTests(unittest.TestCase):
     def test_usuario_es_tu(self):
         d = {"tu": None, "hablantes": {"h1": {"persona": "pu"}}}
         self.assertEqual(voices.label("h1", d, self.names, usuario="pu"), "Tú")
-        self.assertEqual(voices.label("h1", d, self.names, for_llm=True, usuario="pu"), "Bernardo")
+        self.assertEqual(voices.label("h1", d, self.names, for_llm=True, usuario="pu"), "Diego")
         d["hablantes"]["h1"]["provisional"] = True
         self.assertEqual(voices.label("h1", d, self.names, usuario="pu"), "¿Tú?")
 
@@ -290,7 +290,7 @@ class EtiquetaTests(unittest.TestCase):
 class MergeUsuarioTests(TempTree):
     def test_el_modelo_no_funde_al_usuario_en_otra_persona(self):
         v = voices.Voices(os.path.join(self.data_dir, "voces.json"))
-        yo = v.create("Bernardo", es_usuario=True)["id"]
+        yo = v.create("Diego", es_usuario=True)["id"]
         ana = v.create("Ana")["id"]
         with self.assertRaises(ValueError):
             v.merge(ana, yo)
@@ -482,10 +482,10 @@ class DatosDeAntesDelArregloTests(Reunion):
         self.usuario()
         self.identificar(micro_en=None)
         javi = self.app.voices_person({"path": "r.wav", "h": "h1", "nombre": "Javi"})["id"]
-        self.app.voices_person({"id": javi, "path": "r.wav", "h": "h1", "nombre": "Bernardo", "renombrar": True})
+        self.app.voices_person({"id": javi, "path": "r.wav", "h": "h1", "nombre": "Diego", "renombrar": True})
         labels, _ = self.etiquetas()
-        self.assertEqual(labels["h1"], ("Bernardo", False))
-        self.assertEqual(self.v.find(javi)["nombre"], "Bernardo")
+        self.assertEqual(labels["h1"], ("Diego", False))
+        self.assertEqual(self.v.find(javi)["nombre"], "Diego")
 
     def sidecar_de_main(self, yo, **extra):
         """Sidecar como lo dejaba main: sin «origen»; h2 del usuario por el micro."""
@@ -605,7 +605,7 @@ class PopoverTests(unittest.TestCase):
 
     def test_guardar_nombre(self):
         out = self.run_js("""const a = {path: 'r.wav'};
-const yo = {id: 'pu', nombre: 'Bernardo', es_usuario: true}, ana = {id: 'pa', nombre: 'Ana', es_usuario: false};
+const yo = {id: 'pu', nombre: 'Diego', es_usuario: true}, ana = {id: 'pa', nombre: 'Ana', es_usuario: false};
 J(spkNameBody(a, 'h2', yo, 'Ana', {recordar: true, consentimiento: true}));
 J(spkNameBody(a, 'h1', ana, 'Anna', {corregir: true}));
 J(spkNameBody(a, 'h1', ana, 'Luis', {}));
@@ -651,7 +651,7 @@ J(spkPickBody(a, 'h3', {persona: null}, 'pa', 'c1'));""")
 
 @unittest.skipUnless(shutil.which("node"), "node no instalado")
 class CopiarTextoTests(unittest.TestCase):
-    """§15 del backlog (msg 1160): «Copiar texto» lleva quien habla, como la pantalla."""
+    """§15 del backlog: «Copiar texto» lleva quien habla, como la pantalla."""
 
     def run_js(self, setup):
         defs = js_defs(read("app.js"), ["paragraphs", "whoFor", "transcriptText"])

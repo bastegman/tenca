@@ -563,7 +563,7 @@ class Voces:
         return out
 
     def speakers_join(self, b):
-        """«Es el mismo que…» (msg 1242): dos hablantes de esta reunion son la misma voz (la app la partio en dos)."""
+        """«Es el mismo que…»: dos hablantes de esta reunion son la misma voz (la app la partio en dos)."""
         h, con, v = b.get("h"), b.get("con"), self.jobs.voices
         with self._voices_lock():  # dentro: si la reunion se acaba de mover (B1c), su ruta nueva
             abs_path = safe(alias_of(b.get("path")), "reunion")

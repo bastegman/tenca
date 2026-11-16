@@ -799,7 +799,7 @@ class TraduccionTests(unittest.TestCase):
         self.assertLessEqual(live.TRANSLATE_LOCK_S, 3)
         tr.lock.release()
         self.assertTrue(tr.step(final=True))  # sin nadie: con plazo (todo incluido) y pocos intentos
-        self.assertEqual(sorted(summ.kw), ["attempts", "budget", "to"])  # to: el destino (msg 1152), aquí el de siempre
+        self.assertEqual(sorted(summ.kw), ["attempts", "budget", "to"])  # to: el destino (ítem 13a), aquí el de siempre
         self.assertEqual(summ.kw["to"], "es")
         self.assertEqual(summ.kw["attempts"], live.TRANSLATE_FINAL_ATTEMPTS)
         self.assertLessEqual(summ.kw["budget"], live.TRANSLATE_FINAL_S)

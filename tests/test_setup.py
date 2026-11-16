@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Setup.exe, fase 1 (ítem 8 del backlog; msg 1296): scripts/setup/tenca.iss (Inno Setup que envuelve instalar.ps1),
+"""Setup.exe, fase 1 (ítem 8 del backlog): scripts/setup/tenca.iss (Inno Setup que envuelve instalar.ps1),
 scripts/build_setup.py (prepara el contenido del zip y llama a ISCC) e instalar.ps1 -DesdeSetup. Lo de Windows de
 verdad (compilar con ISCC, instalar, el asistente, desinstalar, encima de Chuleta) lo prueba setup-exe.yml con
 scripts/e2e/setup_e2e.ps1; aquí, lo que se puede comprobar en cualquier sistema."""

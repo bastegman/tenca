@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""fix-groq (10/11/2026, msgs 1468-1474: «se queda loading y no hace transcript nunca… para mí debería seguir
-funcionando»). Desde sin-groq (d74bf0a) el motor rechazaba unos ajustes con un proveedor vacío o desconocido, que hasta
+"""fix-groq (10/11/2026: con unos ajustes de antes, el directo se quedaba «cargando» y nunca transcribía).
+Desde sin-groq (d74bf0a) el motor rechazaba unos ajustes con un proveedor vacío o desconocido, que hasta
 fe29522 transcribían con Groq. Ahora solo los rechaza en «Probar» del asistente sin proveedor elegido (la marca
 engines.SIN_PROVEEDOR que pone server._candidata); unos ajustes guardados siguen yendo a Groq, como siempre. Una
 instalación nueva sigue sin sugerir Groq (test_sin_groq)."""
@@ -92,7 +92,7 @@ class CandidataTests(TempTree):
 
 
 GSK = "gsk_" + "prueba" * 6  # falsa: nunca sale a ningún sitio
-# lo que podía tener Bernardo: un proveedor que no existe (de una versión anterior)…
+# lo que podía tener quien actualiza: un proveedor que no existe (de una versión anterior)…
 SIN_PROVEEDOR = {"procesado": "api", "preset": "nube", "live_preset": "nube",
                  "cloud": {"provider": "", "api_key": GSK, "model": "whisper-large-v3"}}
 # …y lo que dejaba en ese caso un «Guardar» de 0d5169b: el desplegable no marcaba ninguno, el navegador marcaba el

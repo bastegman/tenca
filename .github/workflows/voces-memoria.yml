@@ -1,7 +1,7 @@
 name: voces-memoria
 
-# «Quién habla» con una reunión larga en Windows (fix-subir-memoria, 09/11/2026, msg 1378): con un audio de 55 min, la
-# versión de antes (fe29522) llegaba a ~2,3 GB y en el portátil de Bernardo acabó en «bad allocation». Sintetiza una
+# «Quién habla» con una reunión larga en Windows (fix-subir-memoria, 09/11/2026): con un audio de 55 min, la
+# versión de antes (fe29522) llegaba a ~2,3 GB y en un portátil acabó en «bad allocation». Sintetiza una
 # reunión con las voces del sistema (SAPI), baja los modelos de voces con su sha256 y mide el pico de memoria
 # comprometida (PeakPagefileUsage) del subproceso de voces con este commit y con fe29522. Falla si la de ahora no gasta
 # menos que la de antes o pasa del tope. Resultado en el artefacto voces-memoria.
