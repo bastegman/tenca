@@ -518,6 +518,13 @@ class InstaladorNoSeCongelaTests(unittest.TestCase):
         self.assertIn("(Join-Path $app 'python.txt')", fondo)
         self.assertIn("@{ MaxPy = $MaxPy; Previo = $previo }", fondo)
 
+    def test_find_python_no_recorre_program_files(self):
+        """Get-ChildItem -Path "...\\Python*" -Recurse recorria la carpeta de arriba (Program Files) entera: en la CI,
+        Find-Python con un Python valido delante no acababa en 120 s. Ahora, solo el primer nivel."""
+        codigo = [x for x in _funcion(self.ps1, "Find-Python").split("\n") if not x.strip().startswith("#")]
+        self.assertFalse([x for x in codigo if "-Recurse" in x or "\\Python*" in x])
+        self.assertTrue([x for x in codigo if '-Directory -Filter "Python*"' in x])
+
     def test_el_log_dice_la_hora_de_cada_paso_y_lo_mas_largo_sin_atender(self):
         self.assertIn('Log-File ("> $text  [" + (Get-Date -Format "HH:mm:ss") + "]")', _funcion(self.ps1, "Step"))
         self.assertIn('"ventana: lo más largo sin atenderla, {0:0.0} s"', _funcion(self.ps1, "Finish-Ui"))  # sin miles
@@ -580,6 +587,16 @@ class InvokeFondoWindowsTests(unittest.TestCase):
         m = re.search(r"P=(.*)", out)
         self.assertTrue(m, out)
         self.assertEqual(os.path.normcase(m.group(1).strip()), os.path.normcase(sys.executable))
+
+    def test_find_python_tarda_poco(self):
+        """Sin el recorrido de Program Files: en un runner de la CI, segundos (antes, mas de 120 s)."""
+        from test_desinstalar import run_ps_functions
+        t0 = time.monotonic()
+        out = run_ps_functions(os.path.join(APP, "instalar.ps1"), ["Find-Python"],
+                               "function Say($t, $c) { }; $MaxPy = 399; $Previo = ''; "
+                               "Write-Output ('P=' + (Find-Python))")
+        self.assertIn("P=", out)
+        self.assertLess(time.monotonic() - t0, 60)
 
     def test_una_funcion_enviada_y_un_fallo(self):
         out = self.ps("$r = Invoke-Fondo '[pscustomobject]@{ v = [bool](Test-Grabadora) }' @{} @('Test-Grabadora'); "

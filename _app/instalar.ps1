@@ -406,9 +406,21 @@ function Find-Python {
     $probe = "import sys; print(sys.executable); print(sys.version_info[0] * 100 + sys.version_info[1])"
     $tries = @(@("py", "-3.13"), @("py", "-3.12"), @("py", "-3.11"), @("py", "-3.10"), @("py", "-3"), @("python"), @("python3"))
     if ($Previo) { $tries = @(, @($Previo)) + $tries }
-    foreach ($dir in @("$env:LOCALAPPDATA\Programs\Python", "$env:ProgramFiles\Python*", "${env:ProgramFiles(x86)}\Python*")) {
-        Get-ChildItem -Path $dir -Filter python.exe -Recurse -Depth 1 -ErrorAction SilentlyContinue |
-            Sort-Object FullName -Descending | ForEach-Object { $tries += , @($_.FullName) }
+    # las carpetas de Python de siempre (%LOCALAPPDATA%\Programs\Python\PythonXY, C:\Program Files\PythonXY): solo
+    # su primer nivel y python.exe dentro. Antes, Get-ChildItem -Path "...\Python*" -Recurse: con un comodin y -Recurse,
+    # PowerShell recorre la carpeta de arriba entera (todo Program Files): 23 s en un runner de la CI con la cache
+    # caliente, casi 5 min en frio, y el disco a tope con el antivirus mirando cada fichero (16/11/2026)
+    $carpetas = @()
+    if ($env:LOCALAPPDATA) {
+        $lp = Join-Path $env:LOCALAPPDATA "Programs\Python"
+        $carpetas += @(Get-ChildItem -LiteralPath $lp -Directory -ErrorAction SilentlyContinue)
+    }
+    foreach ($pf in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+        if ($pf) { $carpetas += @(Get-ChildItem -LiteralPath $pf -Directory -Filter "Python*" -ErrorAction SilentlyContinue) }
+    }
+    $carpetas | Sort-Object FullName -Descending | ForEach-Object {
+        $exe = Join-Path $_.FullName "python.exe"
+        if (Test-Path -LiteralPath $exe -PathType Leaf) { $tries += , @($exe) }
     }
     $newer = $null
     foreach ($t in $tries) {
