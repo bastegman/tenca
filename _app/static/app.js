@@ -1,5 +1,36 @@
-'use strict';
 /* Tenca: interfaz (vanilla JS, sin dependencias). Habla con server.py en /api/* */
+import {
+  applyTab, closePop, closeSlash, curAudio, favHtml, fIcon, fillTagList, flushNotes, iconOf, isFav, loadVocab,
+  onSummaryJobs, openPalette, openVocabEditor, pageTitle, propsHtml, pushRecent, renderMeetChip, renderSideNav,
+  tabsHtml, tblProyTxt, titleOf, titleRowHtml, viewCalendar, viewTable, vocabFit, wsSelect,
+} from './notas.js';
+import {
+  bindVocesSettings, loadSpeakers, onVoicesJobs, renderVoicesBar, spkChip, spkLabel, spkPopCerrar, vocesFieldsetHtml,
+} from './voces.js';
+import { aprAjustes, aprCargar, aprHl, aprPintar, aprReset } from './aprender.js';
+import {
+  bindDirectoSettings, collectDirectoSettings, destinoHtml, destinoPendienteHtml, destinoSig, directoAfterRender,
+  directoParadaTexto, directoSettingsHtml, onDirectoJobs, onMovimientos, renderDirectoAvisos, renderDirectoBar,
+} from './directo.js';
+import { bindReunionSettings } from './reunion.js';
+import { renderSiguiente, viewHoy } from './hoy.js';
+import {
+  bindPerfilSettings, PERFIL_AUTO, perfilFolderOpts, perfilImportar, perfilLangOf, perfilLiveHtml, perfilMotoresHtml,
+  perfilOuts, perfilOutsHtml, perfilOutsPoner, perfilResumenHtml, perfilSalidasHtml, perfilVocabEmptyHtml,
+  perfilVocabRedraw, VOCAB_COPIAR_TITLE, vocabCarpetasHtml, vocabConectar, vocabDesconectar,
+} from './perfil.js';
+import { bindModelos, modelosHtml, motorHtml } from './modelos.js';
+import {
+  abrirConfigurar, cfgAccionHtml, cfgDescargaTotal, cfgEstadoHtml, cfgModelosNecesarios, modeloBajar, modeloNombre,
+  modoLinea, modoLineaHtml, prepCola, prepEstado, prepHtml, prepHueco, prepVigilar,
+} from './configurar.js';
+import { abrirGrabar } from './grabar.js';
+import { cerrarSubirMenu, subirMenu } from './recibir.js';
+import {
+  ajAlGrabarHtml, ajCalendarioHtml, ajProyectosHtml, bindAjAlGrabar, bindAjCalendario, bindAjProyectos,
+} from './ajustes.js';
+import { audioNoSeOye, conservarLineaHtml } from './conservar.js';
+import { Pistas } from './pistas.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -136,7 +167,7 @@ const fullTitle = a => (a.props && a.props.titulo) ? `${nfc(a.props.titulo)} · 
 const provName = () => S.config?.procesado === 'agente' ? `${S.config.agente?.label || 'Claude Code'} (tu cuenta)`
   : provElegido() ? (S.config?.providers?.[S.config.cloud?.provider]?.label || 'la nube') : 'tu proveedor';
 /* hay un proveedor de la nube elegido (server.proveedor_elegido): en una instalación nueva no, y ninguno se da por
-   elegido ni se nombra (Bernardo, msg 1386: «Lo que no quiero es sugerir Groq a un nuevo instalador») */
+   elegido ni se nombra: a quien instala no se le sugiere ningún proveedor */
 const provElegido = () => S.config?.cloud?.elegido !== false;
 /* los proveedores para elegir: por su nombre, y la API de tu empresa al final (sin uno delante de los demás) */
 const provOrden = P => Object.entries(P || {}).sort(([a, x], [b, y]) => (a === 'custom') - (b === 'custom') || x.label.localeCompare(y.label, 'es'));
@@ -237,7 +268,7 @@ const isActive = j => j.status === 'queued' || j.status === 'running';
 const jobFor = path => S.jobs.find(j => j.path === path && isActive(j) && j.kind !== 'summary');  // los resúmenes van aparte
 const lastJobFor = path => { for (let i = S.jobs.length - 1; i >= 0; i--) if (S.jobs[i].path === path) return S.jobs[i]; };
 /* el último trabajo de TRANSCRIPCIÓN de esa reunión: el de voces y el resumen tienen su propio aviso. Con lastJobFor, un
-   fallo de las voces salía también como «No se pudo transcribir» con la transcripción hecha (09/11/2026, msg 1378) */
+   fallo de las voces salía también como «No se pudo transcribir» con la transcripción hecha (09/11/2026) */
 const lastTxJobFor = path => { for (let i = S.jobs.length - 1; i >= 0; i--) { const j = S.jobs[i]; if (j.path === path && j.kind !== 'voces' && j.kind !== 'summary') return j; } };
 function statusOf(a) {
   const j = jobFor(a.path);
@@ -305,7 +336,7 @@ function liveStatus(a, j) {
     if (l && l.live && l.status === 'error' && l.error) return `<span class="motor-err"><b>No se ha podido transcribir en directo.</b> ${esc(l.aviso?.frase || l.error)}</span> La grabación sigue; cuando lo arregles, pulsa «Transcribir en directo».`;
     return 'La transcripción en directo está parada. Elige modelo y pulsa «Transcribir en directo».';
   }
-  if (typeof prepEstado === 'function' && prepEstado(j)) return '';  // lo dice «Preparando la transcripción», con su %
+  if (prepEstado(j)) return '';  // lo dice «Preparando la transcripción», con su %
   if (/Cargando|Descargando|Reinici|Rehaciendo|Empezando/.test(j.stage)) return esc(j.stage);
   const lag = Math.max(0, j.recorded - j.transcribed);
   const p = S.presetsById[j.preset] || {};
@@ -317,7 +348,7 @@ function liveStatus(a, j) {
 function liveHeroSig(a, j, sel, mine, muted) {
   const p = S.presetsById[sel] || {}, falta = !j && p.cached === false ? (S.modelos?.[p.model]?.downloading ? 'd' : 'f') : '';
   return (j ? j.id + j.preset : 'none') + sel + mine + muted + (S.config.procesado || '') + (S.lhModelos ? 'm' : '')
-    + (typeof prepEstado === 'function' && prepEstado(j) ? 'p' : '') + falta + (typeof destinoSig === 'function' ? destinoSig(a) : '');
+    + (prepEstado(j) ? 'p' : '') + falta + destinoSig(a);
 }
 function renderLiveHero(a) {
   const el = $('#lHero');
@@ -341,28 +372,27 @@ function renderLiveHero(a) {
     </div>
     ${mine ? `<div class="lh-meters">${meterHtml('mic', I.mic + 'Micro')}${meterHtml('sys', I.volume + 'Ordenador')}</div>` : ''}
     <div class="lh-avisos" data-lh-avisos></div>
-    ${typeof destinoHtml === 'function' ? destinoHtml(a) : crumbs(a.folder)}
+    ${destinoHtml(a)}
     <h1>${iconOf(a) ? iconOf(a) + ' ' : ''}${esc(pageTitle(a))}${!titleOf(a) && a.label ? `<span class="sub"> · ${esc(nfc(a.label))}</span>` : ''}</h1>
     <div class="lh-status" data-lh-status>${liveStatus(a, j)}</div>
     <div id="directoBar"></div>
     ${S.vocab.length ? `<div class="lh-ws">${I.topic}Proyecto ${wsSelect(a)}</div>` : ''}
-    ${typeof perfilLiveHtml === 'function' ? perfilLiveHtml(a) : ''}
+    ${perfilLiveHtml(a)}
     ${j ? `<div class="lh-bar" title="Transcrito / grabado"><i data-lh-bar style="width:${(100 * Math.min(1, j.transcribed / Math.max(1, j.recorded))).toFixed(1)}%"></i></div>` : ''}
-    ${typeof modoLineaHtml === 'function' ? modoLineaHtml(sel, { cambiar: 'lh-modelos', abierto: S.lhModelos, falta: !j }) + prepHtml(j) : ''}
-    <div class="lh-modelos${S.lhModelos || typeof modoLineaHtml !== 'function' ? '' : ' hidden'}">
-    <div class="lh-label">Modelo del directo${typeof motorHtml === 'function' ? motorHtml(sel) : ''} ${j ? '<span class="muted">(el cambio se aplica a lo que se diga a partir de ahora)</span>' : ''}</div>
+    ${modoLineaHtml(sel, { cambiar: 'lh-modelos', abierto: S.lhModelos, falta: !j }) + prepHtml(j)}
+    <div class="lh-modelos${S.lhModelos ? '' : ' hidden'}">
+    <div class="lh-label">Modelo del directo${motorHtml(sel)} ${j ? '<span class="muted">(el cambio se aplica a lo que se diga a partir de ahora)</span>' : ''}</div>
     ${liveModels(sel, j)}
     ${S.presetsById[sel]?.live_note ? `<div class="lh-note">${esc(S.presetsById[sel].live_note)}</div>` : ''}
-    ${j && typeof modoLineaHtml === 'function' ? `<div class="lh-actions"><button class="btn sm" data-act="live-restart" data-id="${j.id}">${I.refresh}Rehacer desde el principio con este modelo</button></div>` : ''}
+    ${j ? `<div class="lh-actions"><button class="btn sm" data-act="live-restart" data-id="${j.id}">${I.refresh}Rehacer desde el principio con este modelo</button></div>` : ''}
     </div>
     <div class="lh-actions">
-      ${j && typeof modoLineaHtml !== 'function' ? `<button class="btn sm" data-act="live-restart" data-id="${j.id}">${I.refresh}Rehacer desde el principio con este modelo</button>` : ''}
       <button class="btn sm" data-act="play-live" data-path="${esc(a.path)}">${I.play}Escuchar lo grabado</button>
       <button class="btn sm" data-act="consent" title="Texto para pegar en el chat de Teams">${I.clipboard}Copiar aviso de grabación</button>
       <button class="btn sm" data-act="reveal" data-path="${esc(a.path)}">${I.ext}Mostrar en carpeta</button>
     </div></div>`;
-  if (typeof renderDirectoBar === 'function') renderDirectoBar(a, j);
-  if (typeof renderDirectoAvisos === 'function') renderDirectoAvisos();
+  renderDirectoBar(a, j);
+  renderDirectoAvisos();
 }
 function updateLiveHero(a) {
   const el = $('#lHero');
@@ -375,9 +405,9 @@ function updateLiveHero(a) {
   const st = $('[data-lh-status]', el);
   if (st) st.innerHTML = liveStatus(a, j);
   const pr = $('[data-prep]', el);
-  if (pr && typeof prepHtml === 'function') pr.outerHTML = prepHtml(j);
+  if (pr) pr.outerHTML = prepHtml(j);
   const hueco = $('[data-prep-hueco]');
-  if (hueco && typeof prepHueco === 'function') hueco.textContent = prepHueco(j) || hueco.dataset.base || '';
+  if (hueco) hueco.textContent = prepHueco(j) || hueco.dataset.base || '';
   const bar = $('[data-lh-bar]', el);
   if (bar && j) bar.style.width = (100 * Math.min(1, j.transcribed / Math.max(1, j.recorded))).toFixed(1) + '%';
 }
@@ -391,7 +421,7 @@ function renderLiveChip() {
   $('[data-rec-clock]', chip).dataset.recClock = a.path;
   const lj = liveJob(a);
   chip.title = lives.length > 1 ? `${lives.length} grabaciones en curso` : 'Grabación en curso: ' + fullTitle(a)
-    + (typeof modoLinea === 'function' ? `. ${modoLinea(lj ? lj.preset : (S.livePreset || S.config.live_preset || 'medium'))}.` : '');
+    + `. ${modoLinea(lj ? lj.preset : (S.livePreset || S.config.live_preset || 'medium'))}.`;
 }
 function liveBanner(a) {
   const j = liveJob(a);
@@ -408,6 +438,8 @@ function liveBanner(a) {
    asi que el resto de la app lo trata como cualquier grabacion en vivo */
 S.rec = { recording: false };
 let recTimer = null, recDialog = false;
+// la tarjeta de grabar (grabar.js) la enciende y la apaga: un import no se puede reasignar desde otro módulo
+function recDialogPoner(v) { recDialog = v; }
 /* Latido: el sondeo de la grabadora es también el de «¿sigue ahí Tenca?». Con tope de 5 s por petición y, tras 3
    sondeos seguidos sin respuesta, una franja roja fija que se quita sola al volver (review del 14/11/2026, punto 1:
    con el servidor caído la pantalla seguía «EN VIVO» con los relojes parados y sin un aviso). */
@@ -435,8 +467,8 @@ async function pollRec() {
   if (S.config && S.config.meeting_detect === false) S.rec.meeting = null;  // «Avisarme si estoy en una llamada» apagado: sin chip
   if (was !== !!S.rec.recording) onRecChange();
   renderRecBtn(); updateMeters(); renderMeetChip();
-  if (typeof renderDirectoAvisos === 'function') renderDirectoAvisos();  // fuente callada y «paro en 30 s» (directo.js)
-  if (typeof renderSiguiente === 'function') renderSiguiente();  // «Ya ha empezado «X»» al parar (hoy.js)
+  renderDirectoAvisos();  // fuente callada y «paro en 30 s» (directo.js)
+  renderSiguiente();  // «Ya ha empezado «X»» al parar (hoy.js)
   recTimer = setTimeout(pollRec, !ok ? 1500 : S.rec.recording || recDialog ? 300 : 1500);
 }
 /* empezo o paro la grabacion (tambien con Ctrl+Alt+R desde otro programa) */
@@ -450,7 +482,7 @@ function onRecChange() {
   if (!S.rec.recording && S.rec.cortada) return;  // se ha cortado sola: no es «Grabación guardada» (avisarCortes)
   if (S.recLocal) { S.recLocal = false; return; }  // lo ha pedido esta misma pagina: ya avisa ella
   if (S.rec.recording) toast(`● Grabando${S.rec.resumen ? ` · ${esc(S.rec.resumen)}` : ''} · <b>Ctrl+Alt+R</b> para parar · clic para verla y cambiar el idioma o el contexto`, '', () => go('a', S.rec.path));
-  else toast((typeof directoParadaTexto === 'function' && directoParadaTexto(S.rec)) || '■ Grabación guardada · la transcripción termina sola');
+  else toast(directoParadaTexto(S.rec) || '■ Grabación guardada · la transcripción termina sola');
 }
 
 /* ---------------------------------------------------------------- franjas fijas: Tenca no responde y grabación cortada */
@@ -573,19 +605,16 @@ const folderOpts = sel => flatFolders().filter(f => fold(f.name) !== 'vocabulari
    sale de /api/grabar/plan, el mismo cálculo que Ctrl+Alt+R y el aviso de Teams */
 function openRec() {
   if (!S.config) return toast('La app aún está arrancando: espera unos segundos y vuelve a probar.', 'err');
-  if (typeof abrirGrabar === 'function') return abrirGrabar();
-  toast('No se ha podido cargar la tarjeta de grabar: recarga la página (Ctrl+R) o usa Ctrl+Alt+R.', 'err');
+  return abrirGrabar();
 }
 $('#btnRec').onclick = openRec;
-/* «Subir audio» (09/11/2026, msg 1296): junto a Grabar, donde se busca cómo meter una reunión en la app. Abre el selector
+/* «Subir audio» (09/11/2026): junto a Grabar, donde se busca cómo meter una reunión en la app. Abre el selector
    de archivos y, con lo elegido, la tarjeta de subir (grabar.js); desde una carpeta, sube ahí */
 $('#btnSubir').onclick = () => {
   if (!S.config) return toast('La app aún está arrancando: espera unos segundos y vuelve a probar.', 'err');
   const carpeta = S.route.kind === 'f' ? S.route.path : null;
-  // «Desde este PC» o «Desde el móvil» (recibir.js); sin él, el selector de archivos como antes
-  if (typeof subirMenu === 'function') return S.sbMenu ? cerrarSubirMenu() : subirMenu($('#btnSubir'), { carpeta });
-  if (typeof elegirAudios === 'function') return elegirAudios({ carpeta });
-  toast('No se ha podido cargar «Subir audio»: recarga la página (Ctrl+R).', 'err');
+  // «Desde este PC» o «Desde el móvil» (recibir.js)
+  return S.sbMenu ? cerrarSubirMenu() : subirMenu($('#btnSubir'), { carpeta });
 };
 
 /* ---------------------------------------------------------------- router */
@@ -851,7 +880,7 @@ function txBox(list, title, opts = {}) {
   }).join('');
   // idioma: lo que hayas elegido en esta caja; si no, en lote «el de cada reunión» y, con una, el suyo (o el del perfil)
   const each = list.length > 1, langs = each ? [[TX_EACH, 'El de cada reunión (o el del perfil)']].concat(LANGS) : LANGS;
-  const lang = S.txLang?.[key] ?? (each ? TX_EACH : list.length === 1 && typeof perfilLangOf === 'function' ? perfilLangOf(list[0]) : (S.config.language ?? ''));
+  const lang = S.txLang?.[key] ?? (each ? TX_EACH : list.length === 1 ? perfilLangOf(list[0]) : (S.config.language ?? ''));
   const hint = S.presetsById[sel]?.hint || '';
   return `<div class="card txbox" data-box="${id}">
     <div class="head"><b>${esc(title)}</b><span class="muted">${list.length > 1 ? `${list.length} audios · ` : ''}${fmtDur(total)} de audio${resume && list.some(a => a.partial) ? ' por transcribir' : ''}</span></div>
@@ -892,12 +921,12 @@ function jobSub(j) {
   if (j.kind === 'summary') return `${I.spark}Resumen con IA (${provName()})${j.status === 'running' ? ` · ${Math.round(j.progress * 100)} %` : ''}${j.elapsed && j.status === 'done' ? ` · hecho en ${fmtLeft(j.elapsed)}` : ''}`;
   const p = S.presetsById[j.preset] || { icon: '', label: j.preset };
   // un solo nombre por modelo (configurar.js: Rápido, Normal, Preciso, Máxima); la nube, con el suyo
-  const lab = p.engine === 'local' && p.model && typeof modeloNombre === 'function' ? modeloNombre(p.model) : (j.live ? (p.live_label || p.label) : p.label);
+  const lab = p.engine === 'local' && p.model ? modeloNombre(p.model) : (j.live ? (p.live_label || p.label) : p.label);
   const parts = [`${presetIcon(p)}${esc(lab)}`];
   if (j.live) {
     parts.push(`transcrito hasta ${fmtClock(j.transcribed)} de ${fmtClock(j.recorded)}${j.recording ? ' grabados' : ''}`);
     const lag = j.recorded - j.transcribed;
-    const prep = typeof prepCola === 'function' ? prepCola(j) : '';  // descargando o cargando el modelo: aún no va «al día»
+    const prep = prepCola(j);  // descargando o cargando el modelo: aún no va «al día»
     if (j.status === 'running' && j.recording) parts.push(prep || (lag > 90 ? `poniéndose al día (${fmtLeft(lag)} por detrás)` : 'al día'));
     else if (prep) parts.push(prep);
     if (j.status === 'done' && j.elapsed) parts.push(`terminado`);
@@ -922,16 +951,16 @@ function jobStage(j) {
   if (j.status === 'queued') return 'En cola';
   if (j.status === 'done') return j.live ? 'Grabación transcrita' : 'Transcripción lista';
   if (j.status === 'cancelled') return j.live ? 'Directo detenido' : 'Cancelado';
-  if (j.live && j.status === 'running') return `● En directo · ${typeof prepEstado === 'function' && prepEstado(j) ? 'preparando la transcripción' : j.stage}`;
+  if (j.live && j.status === 'running') return `● En directo · ${prepEstado(j) ? 'preparando la transcripción' : j.stage}`;
   if (j.status === 'error') return 'No se pudo transcribir';
-  if (typeof prepCola === 'function' && prepCola(j)) return prepCola(j);  // con el nombre del modelo, como en todas partes
+  if (prepCola(j)) return prepCola(j);  // con el nombre del modelo, como en todas partes
   return j.stage;
 }
 
 /* el hueco del texto del directo: escuchando o, mientras se descarga o carga el modelo, lo que falta (configurar.js) */
 function txEscuchando(lj) {
   const base = `Escuchando… el texto aparecerá aquí en cuanto se hable (${lj.engine === 'cloud' || S.presetsById[lj.preset]?.engine === 'cloud' ? 'unos 5–10 s' : 'unos 20–40 s'} de retraso).`;
-  const prep = typeof prepHueco === 'function' ? prepHueco(lj) : '';
+  const prep = prepHueco(lj);
   return `<div data-prep-hueco data-base="${esc(base)}">${esc(prep || base)}</div>`;
 }
 
@@ -958,16 +987,8 @@ function avisoResumenLocalVisto(irAlAjuste) {
 
 function viewHome() {
   // Inicio es «Hoy» (rediseño B7, hoy.js): la reunión de ahora, lo que pide algo de ti, esta semana y la agenda de
-  // Outlook. Sin hoy.js, lo mínimo: los avisos y lo último que se ha grabado
-  if (typeof viewHoy === 'function') return viewHoy();
-  const all = allAudios(), recent = [...all].sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.mtime - a.mtime).slice(0, 8);
-  main.innerHTML = `<div class="page">
-    ${liveAudios().map(liveBanner).join('')}
-    ${avisoResumenLocalHtml()}
-    <h1>Hoy</h1>
-    ${welcomeCard(all)}
-    <h2>Recientes</h2>${alist(recent, { folder: true })}
-  </div>`;
+  // Outlook
+  return viewHoy();
 }
 
 function viewFolder(f) {
@@ -999,7 +1020,7 @@ function viewLive(a) {
     <div id="aTabs"></div><section class="sum hidden" id="aSum"></section><section class="tx live-feed" id="aTx"></section><section class="notes hidden" id="aNotes"></section></div>
     <button class="to-live hidden" id="toLive" data-act="to-live">↓ Ir al directo</button>`;
   S.tx = null; S.curIdx = -1; S.curEl = null; S.liveRev = undefined; S.seenSegs = 0;
-  if (typeof aprReset === 'function') aprReset();
+  aprReset();
   S.tq = S.route.params.get('q') || '';
   renderLiveHero(a);
   applyTab(a);  // en directo tambien se pueden ir tomando notas (como en Notion)
@@ -1014,7 +1035,7 @@ function viewAudio(a) {
     <div id="aHead"></div><div id="aJob"></div><div id="aBox"></div>
     <div id="aTabs"></div><section class="sum hidden" id="aSum"></section><div id="aVoz"></div><section class="tx" id="aTx"></section><section class="notes hidden" id="aNotes"></section></div>`;
   S.tx = null; S.curIdx = -1; S.curEl = null; S.liveRev = undefined;
-  if (typeof aprReset === 'function') aprReset();
+  aprReset();
   S.tq = S.route.params.get('q') || '';
   renderAudioHead(a); renderAudioJob(a);
   applyTab(a);
@@ -1033,7 +1054,7 @@ function renderAudioHead(a, force) {
   const docs = (a.parent?.docs || []);
   /* B5 (punto 22 del review): la cabecera en dos líneas (título; fecha, duración, proyecto y estado con Reproducir y
      «⋯») y el resto de la ficha en «Detalles», plegado. Así el resumen se ve sin bajar */
-  const proy = typeof tblProyTxt === 'function' ? tblProyTxt(a) : (p.workstream || '');
+  const proy = tblProyTxt(a);
   const visible = job ? '' : a.recording
     ? `<button class="btn primary" data-act="live" data-path="${esc(a.path)}">${I.spark}Transcribir en directo</button>`
     : has ? '' : `<button class="btn primary" data-act="tx-toggle">${I.spark}Transcribir</button>`;
@@ -1044,12 +1065,12 @@ function renderAudioHead(a, force) {
     a.txt ? `<button type="button" role="menuitem" data-act="open-txt" data-path="${esc(a.path)}">${I.text}Abrir .txt</button>` : '',
     `<button type="button" role="menuitem" class="danger" data-act="delete" data-path="${esc(a.path)}" title="A la papelera de Windows">${I.trash}Eliminar</button>`].join('');
   const sinConfirmar = p.participantes && p.participantes_origen;
-  el.innerHTML = `${crumbs(a.folder)}${typeof destinoPendienteHtml === 'function' ? destinoPendienteHtml(a) : ''}
+  el.innerHTML = `${crumbs(a.folder)}${destinoPendienteHtml(a)}
     ${titleRowHtml(a)}
     <div class="pmeta-row"><div class="pmeta"><span>${esc(longTitle(a))}</span><span>${fmtDur(estDuration(a))}</span><button type="button" class="plink${proy ? '' : ' muted'}" data-act="det-proy" title="Cambiar el proyecto (en Detalles)">${esc(proy || 'Sin proyecto')}</button>${statusPill(a)}</div>
       <div class="pacts">${a.sin_audio ? '' : `<button class="btn primary" data-act="play" data-path="${esc(a.path)}">${I.play}${S.playing === a.path && !audio.paused ? 'Pausa' : 'Reproducir'}</button>`}${visible}
         <span class="pmas"><button class="btn pmas-btn" type="button" data-act="mas" aria-haspopup="menu" aria-expanded="false" aria-label="Más acciones" title="Más acciones">⋯</button><span class="pmenu hidden" role="menu" aria-label="Más acciones">${menu}</span></span></div></div>
-    ${interrumpidaHtml(a)}${typeof conservarLineaHtml === 'function' ? conservarLineaHtml(a) : ''}
+    ${interrumpidaHtml(a)}${conservarLineaHtml(a)}
     <details class="pdet"${S.detPara === a.path || localStorage.getItem('detalles') === '1' ? ' open' : ''}><summary>Detalles${sinConfirmar ? ' <span class="muted">· participantes sin confirmar</span>' : ''}</summary>${propsHtml(a)}</details>
     ${docs.length ? `<div class="related">${docs.map(d => `<a href="${href('d', d.path)}">${I.doc}${esc(nfc(d.name))}</a>`).join('')}</div>` : ''}`;
   fillTagList();
@@ -1167,7 +1188,7 @@ function renderAudioJob(a) {
   if (el.dataset.id === j.id + j.status) return updateJobLine(el, j);
   el.dataset.id = j.id + j.status;
   if (j.status === 'error') {
-    el.innerHTML = `<div class="card jobline error"><div><div class="st">No se pudo transcribir</div><div class="sub">${esc(j.aviso?.frase || j.error)}</div></div>${typeof cfgAccionHtml === 'function' ? cfgAccionHtml(j) : ''}<button class="btn sm" data-act="tx-toggle">Reintentar</button></div>`;
+    el.innerHTML = `<div class="card jobline error"><div><div class="st">No se pudo transcribir</div><div class="sub">${esc(j.aviso?.frase || j.error)}</div></div>${cfgAccionHtml(j)}<button class="btn sm" data-act="tx-toggle">Reintentar</button></div>`;
     return;
   }
   el.innerHTML = `<div class="card jobline${j.live ? ' live' : ''}"><div><div class="st" data-st></div><div class="sub" data-sub></div></div>`
@@ -1247,7 +1268,7 @@ async function loadTranscript(a) {
   t.segments.forEach(s => { s.orig = s.text; });  // para saber, si el directo rehace algo, qué habías corregido
   S.tx = { path: want, kind: t.kind, file: t.file, segs: t.segments, mtime: a.tx_mtime, starts: t.segments.map(s => s.start ?? 0), has_backup: !!t.has_backup, gen: t.text_gen ?? null,
     aprendido: t.aprendido || null };  // lo que cambió Tenca con lo que aprendió de tus correcciones (aprender.js)
-  if (typeof aprCargar === 'function') aprCargar(a);  // y lo que podría aprender de lo que has corregido
+  aprCargar(a);  // y lo que podría aprender de lo que has corregido
   if (keepScroll && typing) { renderTxBody(); main.scrollTop = st; return; }  // no robar el foco del buscador
   renderTxSection();
   const lj = jobFor(want);
@@ -1298,7 +1319,7 @@ function renderTxSection() {
       <button class="btn sm ghost${tx.has_backup && !jobFor(tx.path) ? '' : ' hidden'}" data-act="tx-restore" title="Volver a lo que transcribió Whisper">${I.refresh}Restaurar original</button>
     </div>` : ''}
     <div class="tx-body${S.mode === 'lines' && tx.kind === 'srt' ? ' lines' : ''}${S.editing ? ' editing' : ''}" id="txBody"></div>`;
-  if (typeof aprPintar === 'function') aprPintar();
+  aprPintar();
   renderTxBody();
 }
 
@@ -1447,7 +1468,7 @@ async function finishEdit() {
   renderTxSection();
   toast('Cambios guardados en el .txt y el .srt');
   const au = S.audios.get(tx.path);
-  if (au && typeof aprCargar === 'function') aprCargar(au, true);  // ¿algún nombre que Whisper no conocía? (sin interrumpir)
+  if (au) aprCargar(au, true);  // ¿algún nombre que Whisper no conocía? (sin interrumpir)
 }
 function replaceAll() {
   syncEdits();
@@ -1511,7 +1532,7 @@ function renderTxBody(fromModel) {
   const live = S.viewMode === 'live';
   const fresh = live && S.seenSegs ? S.seenSegs : Infinity;  // lo recien llegado se resalta un momento
   const edit = S.editing ? ' contenteditable="plaintext-only" spellcheck="true"' : '';
-  const hl = typeof aprHl === 'function' ? aprHl : (s, t) => hlTerms(s.text, t);  // aprHl: y lo que cambió Tenca, subrayado
+  const hl = aprHl;  // aprHl: y lo que cambió Tenca, subrayado
   const span = i => `<span class="s${i >= fresh ? ' fresh' : ''}" data-i="${i}"${edit}>${hl(tx.segs[i], terms)}</span>`;
   // quien habla (voces.js): etiqueta al cambiar de hablante, parrafo nuevo por turno
   const who = whoFor(tx);
@@ -1528,7 +1549,7 @@ function renderTxBody(fromModel) {
     S.seenSegs = tx.segs.length;
     const a = S.audios.get(tx.path), lj = a && liveJob(a);
     if (lj) body.insertAdjacentHTML('beforeend', `<div class="typing" title="${esc(lj.stage)}"><i></i><i></i><i></i><span>escuchando…</span></div>`);
-    if (typeof directoAfterRender === 'function') directoAfterRender(tx, lj);
+    directoAfterRender(tx, lj);
   }
   S.marks = $$('mark', body); S.markIdx = -1;
   const n = $('#tqn');
@@ -1601,7 +1622,7 @@ function whoParcial(segs, frases) {
   });
 }
 
-// «Copiar texto»: como en pantalla, un parrafo por turno y el nombre de quien habla al cambiar (msg 1160)
+// «Copiar texto»: como en pantalla, un parrafo por turno y el nombre de quien habla al cambiar
 function transcriptText() {
   const tx = S.tx;
   if (!tx) return '';
@@ -1703,14 +1724,14 @@ $('#gq').addEventListener('keydown', e => { if (e.key === 'Enter') { clearTimeou
 
 /* ---------------------------------------------------------------- reproductor */
 function loadAudio(a, t, autoplay = true) {
-  if (typeof audioNoSeOye === 'function' && audioNoSeOye(a)) return;  // el audio ya está en la papelera (conservar.js)
+  if (audioNoSeOye(a)) return;  // el audio ya está en la papelera (conservar.js)
   // grabacion en curso: si se pide un punto mas alla de lo que el reproductor cargo, se recarga
   if (S.playing === a.path && isLive(a) && t != null && !(t < (audio.duration || 0) - 1)) S.playing = null;
   if (S.playing !== a.path) {
     savePos();
     S.playing = a.path;
     audio.src = '/media?path=' + enc(a.path);
-    if (typeof Pistas !== 'undefined') Pistas.cargar(a.path);  // grabada en dos pistas: se mezcla al oírla (pistas.js)
+    Pistas.cargar(a.path);  // grabada en dos pistas: se mezcla al oírla (pistas.js)
     audio.defaultPlaybackRate = audio.playbackRate = S.rate;
     const saved = parseFloat(localStorage.getItem('pos:' + a.path));
     const start = t != null ? t : (saved > 5 ? saved : 0);
@@ -1801,7 +1822,7 @@ main.addEventListener('click', async e => {
       } catch (err) { toast(esc(err.message), 'err'); }
     }
     else if (a === 'lh-modelos') { e.preventDefault(); S.lhModelos = !S.lhModelos; const au = curAudio(); if (au) renderLiveHero(au); }
-    else if (a === 'modelo-bajar') { e.preventDefault(); act.disabled = true; if (typeof modeloBajar === 'function') modeloBajar(act.dataset.model); }
+    else if (a === 'modelo-bajar') { e.preventDefault(); act.disabled = true; modeloBajar(act.dataset.model); }
     else if (a === 'live-model') {
       const preset = act.dataset.preset, pr = S.presetsById[preset];
       if (pr.engine === 'cloud' && !S.config.cloud.has_key) return openSettings({ sec: 'procesado' });
@@ -1852,11 +1873,11 @@ main.addEventListener('click', async e => {
     else if (a === 'rename-folder') openRenameFolder(p);
     else if (a === 'link-remove') unlinkFolder(p);
     else if (a === 'aviso-sum-ok' || a === 'aviso-sum-ajuste') { e.preventDefault(); avisoResumenLocalVisto(a === 'aviso-sum-ajuste'); }
-    else if (a === 'cfg-abrir' && typeof abrirConfigurar === 'function') abrirConfigurar();
+    else if (a === 'cfg-abrir') abrirConfigurar();
     else if (a === 'cfg-probar' || a === 'cfg-aviso-no') {  // el aviso único de Inicio (configurar.js)
       localStorage.setItem('avisoProbar', '1');
       $('#avisoProbar')?.remove();
-      if (a === 'cfg-probar' && typeof abrirConfigurar === 'function') abrirConfigurar({ paso: 3 });
+      if (a === 'cfg-probar') abrirConfigurar({ paso: 3 });
     }
     else if (a === 'cancel-job') { await api('/api/cancel', { id: act.dataset.id }); pollJobs(true); }
     else if (a === 'copy-tx') copy(transcriptText(), whoFor(S.tx) ? 'Transcripción copiada (con hablantes)' : 'Transcripción copiada');
@@ -1959,7 +1980,7 @@ document.addEventListener('keydown', e => {
     if (cerrarSobre(false)) return;  // la confirmación de encima, sola (Ajustes sigue debajo)
     if (!$('#modal').classList.contains('hidden')) return closeModal(false);  // el diálogo, antes que el lateral
     if (pmenuCerrar(true)) return;  // «⋯» de la reunión
-    if (typeof spkPopCerrar === 'function' && spkPopCerrar()) return;  // el globo de un hablante (voces.js)
+    if (spkPopCerrar()) return;  // el globo de un hablante (voces.js)
     if (S.latAbierto && LAT_MQ.matches) { S.latAbierto = false; latEstado(); latFocoFuera(); return; }
     if (!$('#jobsPanel').classList.contains('hidden')) return $('#jobsPanel').classList.add('hidden');
     if (typing) el.blur();
@@ -1986,7 +2007,7 @@ async function pollJobs(now) {
   try {
     const r = await api('/api/jobs', undefined, 5000);  // con tope: una petición colgada no para el sondeo
     onJobs(r.jobs);
-    if (typeof onMovimientos === 'function') onMovimientos(r.movimientos);  // cambiar la carpeta en pleno directo
+    onMovimientos(r.movimientos);  // cambiar la carpeta en pleno directo
     onHilosCaidos(r.hilos_caidos);
   } catch { /* servidor reiniciandose */ }
   const active = S.jobs.some(isActive);
@@ -2006,7 +2027,7 @@ function onHilosCaidos(lista) {
 function onJobs(jobs) {
   const prev = S.jobsById;
   S.jobs = jobs;
-  if (typeof prepVigilar === 'function') prepVigilar(jobs);
+  prepVigilar(jobs);
   S.jobsById = new Map(jobs.map(j => [j.id, j]));
   let finished = false;
   for (const j of jobs) {
@@ -2025,7 +2046,7 @@ function onJobs(jobs) {
   if (!$('#jobsPanel').classList.contains('hidden')) renderJobsPanel();
   onSummaryJobs(prev);
   onVoicesJobs(prev);
-  if (typeof onDirectoJobs === 'function') onDirectoJobs(prev);
+  onDirectoJobs(prev);
   if (finished) { refreshTree(true); api('/api/config').then(setConfig).catch(() => { }); }
   if (statusChanged) { renderTree(); refreshView(); renderLiveChip(); }
   else applyProgress();
@@ -2075,7 +2096,7 @@ async function buscarVersion(d) {
   finally { btn.disabled = false; }
 }
 /* el botón de explicar.py de un trabajo con error (configurar.js), en su aviso como en la Cola (punto 11) */
-const jobAccionHtml = j => (typeof cfgAccionHtml === 'function' ? cfgAccionHtml(j) : '');
+const jobAccionHtml = j => cfgAccionHtml(j);
 function notifyJob(j) {
   if (j.kind === 'voces') {
     const a = S.audios.get(j.path), title = a ? fullTitle(a) : j.name;
@@ -2100,7 +2121,7 @@ function renderJobsPanel() {
       const a = S.audios.get(j.path), title = a ? fullTitle(a) : j.name;
       const pct = j.status === 'done' ? 100 : Math.round(j.progress * 100);
       const bar = isActive(j) ? `<div class="pbar${j.status === 'running' && j.progress < 0.004 ? ' indet' : ''}" style="grid-column:1/-1"><i style="width:${pct}%"></i></div>` : '';
-      const sub = j.status === 'error' ? `<div class="s err" title="${esc(j.error)}">${esc(j.aviso?.frase || j.error)}${typeof cfgAccionHtml === 'function' ? cfgAccionHtml(j) : ''}</div>` : `<div class="s">${esc(jobStage(j))} · ${jobSub(j)}</div>`;
+      const sub = j.status === 'error' ? `<div class="s err" title="${esc(j.error)}">${esc(j.aviso?.frase || j.error)}${cfgAccionHtml(j)}</div>` : `<div class="s">${esc(jobStage(j))} · ${jobSub(j)}</div>`;
       const btn = isActive(j) ? `<button class="btn ghost sm danger" data-jact="cancel" data-id="${j.id}">${j.live ? 'Detener' : 'Cancelar'}</button>`
         : `<span class="pill ${j.status === 'done' ? 'ok' : j.status === 'error' ? 'err' : ''}">${{ done: 'Hecho', error: 'Error', cancelled: 'Cancelado' }[j.status]}</span>`;
       return `<div class="jitem"><span class="n" data-jgo="${esc(j.path)}">${esc(title)}</span>${btn}${bar}${sub}</div>`;
@@ -2356,11 +2377,10 @@ function ajProcesadoHtml(pedido) {
   const sinAplicar = pedido && pedido !== aplicado
     ? `<div class="notice" id="ajProcPedido">${nombre[pedido]} aún no está aplicada: sigue ${nombre[aplicado]}. Para aplicarla, «Cambiar…».</div>` : '';
   // los modelos de Whisper, plegados; abiertos mientras falta alguno de los que usa esta opción (la descarga se ve)
-  const falta = typeof cfgDescargaTotal === 'function' && typeof cfgModelosNecesarios === 'function'
-    ? cfgDescargaTotal(cfgModelosNecesarios(), S.modelos) : null;
-  const modelos = modo !== 'api' && typeof modelosHtml === 'function'
+  const falta = cfgDescargaTotal(cfgModelosNecesarios(), S.modelos);
+  const modelos = modo !== 'api'
     ? `<details class="aj-plegado"${falta && !falta.listo ? ' open' : ''}><summary>Modelos de Whisper de este PC</summary>${modelosHtml()}</details>` : '';
-  return `${typeof cfgEstadoHtml === 'function' ? cfgEstadoHtml() : ''}${sinAplicar}${det}${typeof perfilMotoresHtml === 'function' ? perfilMotoresHtml() : ''}${modelos}`;
+  return `${cfgEstadoHtml()}${sinAplicar}${det}${perfilMotoresHtml()}${modelos}`;
 }
 
 /* la ayuda del directo en Ajustes › Avanzado (OBS): con la API, la nube y su cupo; sin ella, solo el PC */
@@ -2374,8 +2394,8 @@ const lAyuda = api => 'El motor con el que empieza cada directo se elige en Proc
 // las listas de vocabulario, en su sección: Proyectos ocupaba 2,5 pantallas
 const AJ_SECS = [['algrabar', 'Al grabar'], ['proyectos', 'Proyectos'], ['vocabulario', 'Vocabulario'], ['procesado', 'Procesado'],
   ['resumen', 'Resumen'], ['calendario', 'Calendario y Teams'], ['voces', 'Voces'], ['avanzado', 'Avanzado'], ['ayuda', 'Ayuda']];
-/* Ajustes guarda cada control al cambiarlo (punto 12 del review, 14/11/2026: «no me queda claro si lo que se configura
-   es lo que realmente queda», msg 1196). Antes convivían cuatro formas: «Guardar» abajo, las filas de Proyectos y
+/* Ajustes guarda cada control al cambiarlo (punto 12 del review, 14/11/2026: no quedaba claro si lo que se
+   configuraba era lo que realmente quedaba). Antes convivían cuatro formas: «Guardar» abajo, las filas de Proyectos y
    Outlook al momento, y «Aplicar ahora» en Procesado; y el borrador de lo escrito sin guardar dio fallos en tres
    revisiones seguidas. Ahora no hay borrador: lo que se ve es lo guardado, con «Guardado ✓» junto a cada control. La
    única excepción es cambiar de opción en Procesado (descarga modelos o manda datos fuera): se hace en el asistente.
@@ -2442,16 +2462,16 @@ function openSettings(opts) {
     <div class="aj-main">
     ${S.config.settings_broken ? `<div class="notice">${settingsBrokenHtml(S.config.settings_broken)}</div>` : ''}
     <section data-secc="algrabar"${sec === 'algrabar' ? '' : ' hidden'}>
-    ${typeof ajAlGrabarHtml === 'function' ? ajAlGrabarHtml() : `<fieldset><legend>${I.globe}Idioma de las reuniones</legend><label>Por defecto</label>${langSelect('sLang', S.config.language ?? 'es-en')}</fieldset>`}
+    ${ajAlGrabarHtml()}
     </section>
     <section data-secc="proyectos"${sec === 'proyectos' ? '' : ' hidden'}>
-    ${typeof ajProyectosHtml === 'function' ? ajProyectosHtml() : ''}
+    ${ajProyectosHtml()}
     <fieldset><legend>${I.folder}Carpetas fuera de ${esc(APP_NAME)}</legend>
       <div id="sLinks"></div>
       <div class="row" style="margin-top:8px"><button class="btn sm" type="button" id="lnAdd">${I.plus}Añadir una carpeta…</button></div>
       <div class="help">Por ejemplo la carpeta del proyecto en OneDrive. ${esc(APP_NAME)} la trata como suya: puedes grabar ahí, escuchar y transcribir sus audios, y la transcripción y las notas se guardan junto al audio. Quitarla de ${esc(APP_NAME)} no borra nada.</div>
     </fieldset>
-    ${typeof perfilSalidasHtml === 'function' ? perfilSalidasHtml() : ''}
+    ${perfilSalidasHtml()}
     </section>
     <section data-secc="vocabulario"${sec === 'vocabulario' ? '' : ' hidden'}>
     <fieldset><legend>${I.book}Listas de vocabulario</legend>
@@ -2466,10 +2486,10 @@ function openSettings(opts) {
     ${ajProcesadoHtml(pedido)}
     </section>
     <section data-secc="resumen"${sec === 'resumen' ? '' : ' hidden'}>
-    ${typeof perfilResumenHtml === 'function' ? perfilResumenHtml() : ''}
+    ${perfilResumenHtml()}
     </section>
     <section data-secc="calendario"${sec === 'calendario' ? '' : ' hidden'}>
-    ${typeof ajCalendarioHtml === 'function' ? ajCalendarioHtml() : window.reunionFieldsetHtml?.() || ''}
+    ${ajCalendarioHtml()}
     </section>
     <section data-secc="voces"${sec === 'voces' ? '' : ' hidden'}>
     ${vocesFieldsetHtml()}
@@ -2485,7 +2505,7 @@ function openSettings(opts) {
       <div class="help">Tu procesador tiene ${S.config.cpu_count} hilos. Con más hilos va más rápido, pero el portátil irá más justo mientras transcribe.</div>
     </fieldset>
     ${enApi ? `<div id="procApiAv"><fieldset><legend>${I.nube}La nube, en detalle</legend>
-      ${typeof directoSettingsHtml === 'function' ? directoSettingsHtml(c) : ''}
+      ${directoSettingsHtml(c)}
       <div class="grid2">
         <div><label for="cChunk">Minutos por trozo</label><input class="input" id="cChunk" type="number" min="2" max="20" value="${c.chunk_minutes}"></div>
         <div><label for="cPar">Trozos en paralelo</label><input class="input" id="cPar" type="number" min="1" max="8" value="${c.parallel}"></div>
@@ -2635,7 +2655,7 @@ function openSettings(opts) {
           // la tarjeta de Procesado, con lo que se acaba de guardar (modelo, motor…): antes seguía con lo de antes (P1-1).
           // Solo su texto: con los botones, un clic en «Cambiar…» justo entonces se perdía (revisión 2, P2-2)
           const txt = $('.cfg-estado .cfg-txt', d);
-          if (txt && typeof cfgEstadoHtml === 'function') {
+          if (txt) {
             const tmp = document.createElement('div');
             tmp.innerHTML = cfgEstadoHtml();
             const nuevo = $('.cfg-txt', tmp);
@@ -2728,7 +2748,7 @@ function openSettings(opts) {
     // la tarjeta de estado (configurar.js): «Probar» y «Cambiar…» abren el asistente (antes, lo pendiente se guarda)
     d.addEventListener('click', e => {
       const x = e.target.closest('[data-cfg]');
-      if (!x || typeof abrirConfigurar !== 'function') return;
+      if (!x) return;
       e.preventDefault();
       const volverA = () => openSettings({ sec: 'procesado' });
       d.ajAntesDeSalir().then(() => abrirConfigurar(x.dataset.cfg === 'probar' ? { paso: 3, volver: volverA, empezar: true } : { volver: volverA, ...(pedido ? { modo: pedido } : {}) }));
@@ -2755,7 +2775,7 @@ function openSettings(opts) {
       };
     }
     if ($('#agCheck', d)) $('#agCheck', d).onclick = async () => {  // no guarda nada: solo comprueba con el modelo elegido
-      // con los segundos a la vista (07/11/2026: en su PC tardó minutos con un «Comprobando…» quieto)
+      // con los segundos a la vista (07/11/2026: en un PC tardó minutos con un «Comprobando…» quieto)
       const res = $('#agRes', d), btn = $('#agCheck', d), t0 = Date.now();
       const seg = () => Math.round((Date.now() - t0) / 1000);
       const tic = () => { res.textContent = `Comprobando… ${seg()} s` + (seg() >= 20 ? ' · la primera vez, Claude Code puede tardar uno o dos minutos en arrancar' : ''); };
@@ -2787,22 +2807,22 @@ function openSettings(opts) {
     const autoLocal = $('#sAutoLocal', d);
     if (autoLocal) autoLocal.addEventListener('change', () => { $('#sAutoLocalAviso', d).hidden = !autoLocal.checked; if (autoLocal.checked) localStorage.setItem('sumOk', '1'); });
     bindVocesSettings(d);
-    if (typeof bindModelos === 'function') bindModelos(d);
-    if (typeof bindDirectoSettings === 'function') bindDirectoSettings(d);
-    window.bindReunionSettings?.(d);
-    if (typeof bindPerfilSettings === 'function') bindPerfilSettings(d);
-    if (typeof bindAjAlGrabar === 'function') bindAjAlGrabar(d);  // ajustes.js: el plan arriba, las reglas debajo
-    if (typeof bindAjProyectos === 'function') bindAjProyectos(d);
-    if (typeof bindAjCalendario === 'function') bindAjCalendario(d);
+    bindModelos(d);
+    bindDirectoSettings(d);
+    bindReunionSettings(d);
+    bindPerfilSettings(d);
+    bindAjAlGrabar(d);  // ajustes.js: el plan arriba, las reglas debajo
+    bindAjProyectos(d);
+    bindAjCalendario(d);
     // las dos listas que no son un control: las copias en otras carpetas (perfil.js) y las claves adicionales del
     // directo (directo.js). Se mandan enteras: el servidor no pisa una que haya cambiado otra ventana (config_rev)
     const outs = $('#pfOuts', d);
-    if (outs && typeof perfilOuts !== 'undefined') {
+    if (outs) {
       const guardadas = () => (S.config.perfil?.outputs || []).map(o => ({ path: o.path, format: o.format || 'md', by_project: !!o.by_project }));
       ESP.pfOuts = {
         valor: () => JSON.stringify(perfilOuts),
         patch: () => ({ perfil: { outputs: perfilOuts } }),
-        volver: () => { perfilOuts = guardadas(); outs.innerHTML = perfilOutsHtml(perfilOuts); },
+        volver: () => { perfilOutsPoner(guardadas()); outs.innerHTML = perfilOutsHtml(perfilOuts); },
         marca: () => { const r = $('#pfOutAdd', d).parentElement; return $('.aj-ok', r) || r.appendChild(Object.assign(document.createElement('span'), { className: 'aj-ok' })); },
       };
       outs.dataset.guardado = ESP.pfOuts.valor();
@@ -2811,7 +2831,7 @@ function openSettings(opts) {
     const dk = $('#dkRows', d);
     if (dk && d.directoKeys) {
       const prov = S.config.cloud?.provider || 'groq';
-      const lista = () => (typeof collectDirectoSettings === 'function' ? collectDirectoSettings(d).extra_keys_by?.[prov] : null) || [];
+      const lista = () => collectDirectoSettings(d).extra_keys_by?.[prov] || [];
       ESP.dkRows = {
         valor: () => JSON.stringify(lista()),
         patch: () => ({ cloud: { extra_keys_by: { [prov]: lista() } } }),
@@ -2853,7 +2873,7 @@ function openSettings(opts) {
       drawLinks();
       $('#lnAdd', d)?.focus();  // su «quitar» ya no existe: el foco, en «Añadir» (no en el cuerpo de la página)
       const f = $('#pfFolder', d);
-      if (f && typeof perfilFolderOpts === 'function') {
+      if (f) {
         const g = S.config.perfil?.folder ?? PERFIL_AUTO;
         f.innerHTML = perfilFolderOpts(g);
         f.dataset.prev = f.dataset.guardado = f.value;
@@ -2867,30 +2887,28 @@ function openSettings(opts) {
       // agrupado por proyecto: cada uno con sus temas y un boton para anadir otro
       const groups = {};
       S.vocab.forEach(v => (groups[v.project] ||= []).push(v));
-      const conectar = typeof vocabConectar === 'function';
       box.innerHTML = `${Object.entries(groups).map(([p, vs]) => `<div class="vproj"><b>${I.folder}${esc(p)}${vs.every(v => v.conectada) ? '<span class="muted" style="font-weight:400" title="Sus listas se leen de una carpeta conectada (abajo)"> · carpeta conectada</span>' : ''}</b>
           <button class="btn ghost sm" type="button" data-vnew="${esc(p)}">${I.plus}Workstream</button>
           <button class="btn ghost sm" type="button" data-vdir="${esc(vs[0].id.split('/').slice(0, -1).join('/'))}" title="Abrir su carpeta de listas">${I.ext}Carpeta</button></div>
         <table class="vtable">${vs.map(v => `<tr><td>${esc(v.name)}</td><td>${vocabFit(v)}</td>
           <td><button class="btn ghost sm" type="button" data-vedit="${esc(v.id)}">editar</button></td></tr>`).join('')}</table>`).join('')}
-        ${typeof perfilVocabEmptyHtml === 'function' && !S.vocab.length ? perfilVocabEmptyHtml() : ''}
-        <div class="row" style="margin-top:10px"><button class="btn sm" type="button" data-vnew="">${I.plus}Nuevo proyecto</button>${conectar ? `<button class="btn sm" type="button" id="sVocabConectar" title="Elige la carpeta donde tienes tus listas: se leen al grabar, sin copiarlas">${I.folder}Usar las listas de una carpeta…</button>` : ''}${typeof perfilImportar === 'function' ? `<button class="btn ghost sm" type="button" id="sVocabImport" title="${esc(typeof VOCAB_COPIAR_TITLE === 'string' ? VOCAB_COPIAR_TITLE : '')}">Copiar listas de otra carpeta…</button>` : ''}</div>
+        ${!S.vocab.length ? perfilVocabEmptyHtml() : ''}
+        <div class="row" style="margin-top:10px"><button class="btn sm" type="button" data-vnew="">${I.plus}Nuevo proyecto</button><button class="btn sm" type="button" id="sVocabConectar" title="Elige la carpeta donde tienes tus listas: se leen al grabar, sin copiarlas">${I.folder}Usar las listas de una carpeta…</button>${`<button class="btn ghost sm" type="button" id="sVocabImport" title="${esc(VOCAB_COPIAR_TITLE)}">Copiar listas de otra carpeta…</button>`}</div>
         <div class="help">Cada workstream es una lista de nombres y siglas, separados por comas y <b>los más importantes primero</b>: Whisper lee como mucho ${S.vocab[0]?.limit || 223} tokens (unos 45 términos) y lo que no cabe se queda fuera por el final.</div>
-        ${conectar ? `<label>Carpetas con tus listas <span class="muted" style="font-weight:400">· se leen en vivo al grabar: nada se copia</span></label><div id="sVocabCarpetas">${vocabCarpetasHtml(S.vocabCarpetas)}</div>` : ''}`;
+        <label>Carpetas con tus listas <span class="muted" style="font-weight:400">· se leen en vivo al grabar: nada se copia</span></label><div id="sVocabCarpetas">${vocabCarpetasHtml(S.vocabCarpetas)}</div>`;
     };
     d.ajPintarListas = drawVocab;
     loadVocab(S.config.language ?? 'es-en').then(drawVocab);
-    if (typeof aprAjustes === 'function') aprAjustes(d);  // lo que Tenca corrige solo (aprender.js)
+    aprAjustes(d);  // lo que Tenca corrige solo (aprender.js)
     const redrawVocab = () => loadVocab(S.config.language ?? 'es-en').then(drawVocab);
     d.addEventListener('click', e => {
       const ed = e.target.closest('[data-vedit]'), nw = e.target.closest('[data-vnew]'), r = e.target.closest('[data-vdir]');
       const vo = e.target.closest('[data-vopen]'), vu = e.target.closest('[data-vunlink]');
-      if (e.target.closest('#sVocabImport') && typeof perfilImportar === 'function') perfilImportar('', drawVocab);
-      if (e.target.closest('#sVocabConectar') && typeof vocabConectar === 'function') vocabConectar(redrawVocab);
-      if (vu && typeof vocabDesconectar === 'function') {
+      if (e.target.closest('#sVocabImport')) perfilImportar('', drawVocab);
+      if (e.target.closest('#sVocabConectar')) vocabConectar(redrawVocab);
+      if (vu) {
         vocabDesconectar(vu.dataset.vunlink, () => {
           redrawVocab();
-          if (typeof perfilVocabRedraw !== 'function') return;
           perfilVocabRedraw(d);
           // lo guardado ha cambiado en el servidor (el tema, a automático): es lo que se enseña
           const pv = $('#pfVocab', d);
@@ -3119,3 +3137,15 @@ async function init() {
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshTree(); });
 }
 addEventListener('DOMContentLoaded', init);  // tras cargar tambien notas.js
+
+export {
+  $, $$, aDate, AJ_GUARDA, allAudios, api, APP_NAME, ask, audio, avisoResumenLocalHtml, avisosLista, clockNow,
+  closeModal, copy, copyRich, DIA, enc, errorInterno, esc, estDuration, flatFolders, fmtClock, fmtDur, fmtSize, fold,
+  folderName, folderOpts, foldMap, franja, fullTitle, go, hlTerms, href, I, isActive, isLive, jobFor, LANGS,
+  langSelect, lastJobFor, lastTxJobFor, linkFolder, liveAudios, liveBanner, liveFit, liveJob, loadAudio,
+  loadTranscript, longTitle, main, md, MES, nfc, nodeName, onWindowClosing, openModal, openNewFolder, openRec,
+  openSettings, pad, pathLabel, pollJobs, pollRec, provName, provOrden, recDialog, recDialogPoner, refreshTree,
+  refreshView, remaining, renderAudioHead, renderJobsPanel, renderLiveHero, renderTree, renderTxBody, renderView,
+  rootName, route, S, saveEdits, setConfig, shortTitle, statusOf, statusPill, stopRec, submitTx, sum, termsOf, toast,
+  toggleRec, transcriptText, updateLiveHero, whoFor,
+};

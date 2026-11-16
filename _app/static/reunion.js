@@ -1,8 +1,10 @@
 /* Reuniones: lo que la app ve de la reunión en curso (título de la ventana de reunión de Teams y, si se activa en
    Ajustes, la cita en curso del Outlook clásico), el botón «Probar» y los ajustes del aviso flotante «Grabar». La
-   sugerencia al grabar (nombre, proyecto y participantes) la aplica el servidor en el plan (grabar.js).
-   Se carga después de app.js y usa sus utilidades ($, api, esc, I, S). app.js lo invoca con `window.x?.()`:
-   sin este fichero la app funciona igual, sin sugerencias. */
+   sugerencia al grabar (nombre, proyecto y participantes) la aplica el servidor en el plan (grabar.js). */
+// orden de arranque: este fichero se evalúa justo después de directo.js (la cadena, en main.js)
+import './directo.js';
+import { $, api, esc, I, S, toast } from './app.js';
+import { curAudio, saveProps } from './notas.js';
 
 function reunionHora(iso) { return (iso || '').slice(11, 16); }
 
@@ -106,8 +108,8 @@ function reunionParticipantesGuardados(a) {
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-rn-confirmar]');
   if (!b) return;
-  const a = typeof curAudio === 'function' ? curAudio() : null;
-  if (!a || typeof saveProps !== 'function') return;
+  const a = curAudio();
+  if (!a) return;
   b.disabled = true;
   // guardar los nombres a mano es confirmarlos: el servidor quita participantes_origen. Lo que haya en el campo (si se
   // estaba editando, el blur ya lo guarda con ese mismo valor)
@@ -117,3 +119,8 @@ document.addEventListener('click', async e => {
   if (!(a.props || {}).participantes_origen) toast('Participantes confirmados: ya pueden ir al resumen con IA y a las copias en otras carpetas');
   else b.disabled = false;
 });
+
+export {
+  bindReunionSettings, reunionEstadoHtml, reunionFieldsetHtml, reunionParticipantesGuardados,
+  reunionParticipantesHtml,
+};

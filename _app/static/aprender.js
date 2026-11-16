@@ -1,4 +1,3 @@
-'use strict';
 /* Aprender de tus correcciones (ítem 17, 09/11/2026; aprender.py en el servidor).
    1. Al terminar de corregir una transcripción («Listo», o al volver a abrirla), encima del texto: «¿Añadir «Orvalia» al
       vocabulario de Finanzas?». Sin ventanas ni foco robado: se contesta cuando se quiera, o «Ahora no».
@@ -6,13 +5,19 @@
       conectada) y, si está marcado, Tenca cambia lo que escribió Whisper en las próximas reuniones de ese proyecto.
    3. Lo que cambie Tenca va subrayado en el texto, con una barra arriba para deshacerlo en esa reunión.
    Nada se aprende sin un clic, y nada sale del PC. */
+// orden de arranque: este fichero se evalúa justo después de voces.js (la cadena, en main.js)
+import './voces.js';
+import {
+  $, $$, api, APP_NAME, closeModal, enc, esc, fold, foldMap, hlTerms, I, jobFor, loadTranscript, main, S, toast,
+} from './app.js';
+import { loadVocab, openVocabEditor } from './notas.js';
 
 S.apr = null;              // {path, data}: las propuestas de la reunión abierta (GET /api/aprender)
 S.aprOculto = new Set();   // «Ahora no»: reuniones donde no se enseña hasta recargar la página
 S.aprFilas = {};           // por término (normal): {estado: 'ok'|'error', msg, ...} tras contestar
 S.aprDeshecho = null;      // {path, de, proyecto, no, olvidada}: tras «Deshacer», ¿quitarlo también del diccionario?
-// por término (normal): la casilla «Y en las próximas reuniones…» desmarcada (false). Viene marcada: Bernardo quiere
-// que lo que confirma se aplique también en las futuras (msg 1390), y la casilla dice exactamente qué va a pasar
+// por término (normal): la casilla «Y en las próximas reuniones…» desmarcada (false). Viene marcada: lo que se confirma se
+// aplica también en las futuras, y la casilla dice exactamente qué va a pasar
 S.aprCasillas = {};
 
 const aprNorm = s => fold(s || '').split(/\s+/).filter(Boolean).join(' ');
@@ -204,7 +209,7 @@ async function aprSi(k) {
     S.aprFilas[aprNorm(p.termino)] = { estado: 'ok', html };
     p.en = lista ? [...p.en, lista] : p.en; if (!lista) p.en_general = true;
     p.antes.forEach(x => { x.regla = false; });
-    if (typeof loadVocab === 'function') loadVocab(S.config?.language ?? 'es-en');
+    loadVocab(S.config?.language ?? 'es-en');
   } catch (err) {
     S.aprFilas[aprNorm(p.termino)] = { estado: 'error', msg: err.message };
   }
@@ -265,9 +270,9 @@ main.addEventListener('click', async e => {
   else if (a === 'apr-olvidar') aprOlvidar();
   else if (a === 'apr-olvidar-no') { S.aprDeshecho = null; aprPintar(); $('#tq')?.focus({ preventScroll: true }); }
   else if (a === 'apr-ver') {
-    if (typeof loadVocab === 'function') await loadVocab(S.config?.language ?? 'es-en');
+    await loadVocab(S.config?.language ?? 'es-en');
     const v = S.vocab.find(x => x.id === act.dataset.id);
-    if (v && typeof openVocabEditor === 'function') openVocabEditor(v, () => closeModal());
+    if (v) openVocabEditor(v, () => closeModal());
     else toast('Esa lista ya no está.', 'err');
   }
 });
@@ -352,3 +357,5 @@ async function aprAjustes(d) {
     } catch (err) { toast(esc(err.message), 'err'); }
   });
 }
+
+export { aprAjustes, aprCargar, aprHl, aprLista, aprPintar, aprQue, aprReset };

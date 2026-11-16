@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
 from support import (APP, TempTree, bare_jobs, engines, server,  # noqa: F401  (prepara sys.path)
-                     wav_bytes, codigo_del_servidor)
+                     wav_bytes, codigo_del_servidor, importa, orden_de_arranque)
 from test_perfil import settings_store  # noqa: E402  (ayudante, no tests)
 
 try:
@@ -803,15 +803,14 @@ class ErroresNubeTests(unittest.TestCase):
 
 class InterfazModelosTests(unittest.TestCase):
     def test_modelos_js_cargado_despues_de_app_js(self):
-        html = static("index.html")
-        self.assertIn('<script src="/modelos.js"></script>', html)
-        self.assertLess(html.index('<script src="/app.js">'), html.index('<script src="/modelos.js">'))
+        orden = orden_de_arranque()  # (main.js: antes, el orden de los <script> de index.html)
+        self.assertLess(orden.index("app.js"), orden.index("modelos.js"))
 
     def test_ganchos_protegidos(self):
         app = static("app.js")
         # (motorNotaHtml era la reserva del diálogo Grabar de antes; la tarjeta de grabar.js no la usa: 07/11/2026)
-        for fn in ("modelosHtml", "bindModelos", "motorHtml"):
-            self.assertRegex(app, rf"typeof {fn} === 'function'", fn)
+        for fn in ("modelosHtml", "bindModelos", "motorHtml"):  # de modelos.js, por import (antes, con typeof)
+            self.assertTrue(importa(app, fn, "./modelos.js"), fn)
         # «Dónde se procesan» (punto 37 del review, 14/11/2026): solo se cambia en el asistente, que lo aplica al
         # terminar (o con «Guardar sin probar») y, si toca, empieza a bajar el modelo; Ajustes ya no tiene su «Aplicar
         # ahora» ni el aviso al cerrar sin aplicar

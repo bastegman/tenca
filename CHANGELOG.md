@@ -21,13 +21,29 @@ Punto 50 del review del 14/11/2026. No cambia nada en la app instalada.
 - **Nuevo test, sin secreto**: `NotasInternasTests` falla si vuelve a aparecer una (referencias a mensajes, también
   partidas por el ajuste de línea; el nombre del autor fuera de `LICENSE`, del AppUserModelID y del editor del
   instalador; el del asistente que coordinaba el trabajo, el del sistema de agentes o el del modelo que hizo una
-  revisión; rutas personales de macOS y rutas a notas que no están en el repo). Corre en la suite y en su propio paso
-  del job `agnosticismo`.
-  `_app/static/` queda fuera hasta que llegue su propia limpieza.
+  revisión; rutas personales de macOS y rutas a notas que no están en el repo), en todo lo versionado, también
+  `_app/static/`. Corre en la suite y en su propio paso del job `agnosticismo`.
 - `scripts/publicar_release.py` compara el CHANGELOG con el del Release anterior sin esas referencias: un apartado
   que solo las ha perdido no sale como nuevo ni como cambiado, y los «()» de código ya no se pierden al quitarlas. Los
   apartados con texto reescrito aquí saldrán una vez en «También cambian» del próximo Release: en la app no cambia
   nada.
+
+### La interfaz, en módulos (16/11/2026)
+
+Rama `frontend-modulos` (punto 52 de la revisión del 14/11/2026 y la parte de `_app/static/` del 50). No cambia nada de
+lo que se ve: es para quien mantiene el repositorio.
+
+- Los 16 `<script>` de `index.html` son ahora uno, `<script type="module" src="/main.js">`. Cada fichero de
+  `_app/static/` importa lo que usa de los demás y exporta lo que usan ellos. Fuera las guardas
+  `typeof x === 'function'` y `window.x?.()`: si faltaba un fichero, la interfaz quedaba a medias sin ningún error.
+- El orden de arranque de siempre es una cadena escrita en `main.js`: cada fichero importa primero el anterior. En
+  `window` solo queda `onWindowClosing`, que la ventana propia llama por su nombre. La página del móvil también carga
+  `movil.js` como módulo.
+- Los comentarios de `_app/static/` ya no llevan notas de trabajo (referencias a mensajes y a personas).
+- Tests: `test_modulos.py` (un solo punto de entrada, la cadena, lo de otro fichero por import, nada más en `window` y
+  sin notas internas), dos de `test_ui_smoke` con la página tal cual (en Chromium y, en Windows, en Edge: el orden de
+  arranque, el tipo de los `.js` y `window`) y `test_modulos_webview2.py` en la ventana de verdad (windows-real). Los
+  tests de navegador ven lo que exportan los módulos con `support.nuevo_contexto`.
 
 ### El audio de cada reunión, «Mis pendientes» en Hoy y «Quién habla» mientras se graba (16/11/2026)
 

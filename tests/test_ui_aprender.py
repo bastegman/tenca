@@ -18,7 +18,7 @@ import unittest
 import urllib.parse
 import urllib.request
 
-from support import REPO, srt_text
+from support import REPO, srt_text, nuevo_contexto
 
 try:
     import av  # noqa: F401
@@ -167,8 +167,8 @@ class AprenderEnLaInterfazTests(unittest.TestCase):
         return rel, base
 
     def pagina(self, ancho=1280, alto=860, oscuro=False):
-        ctx = self.browser.new_context(bypass_csp=True, viewport={"width": ancho, "height": alto},
-                                       color_scheme="dark" if oscuro else "light")
+        ctx = nuevo_contexto(self.browser, bypass_csp=True, viewport={"width": ancho, "height": alto},
+                             color_scheme="dark" if oscuro else "light")
         self.addCleanup(ctx.close)
         pg = ctx.new_page()
         self.errores = []

@@ -375,9 +375,8 @@ class AvisoResumenLocalTests(TempTree):
 
     def test_la_interfaz_lo_ensena_en_inicio(self):
         app, hoy = static("app.js"), static("hoy.js")
-        # Inicio es «Hoy» (B7): el aviso va arriba, antes del título (y en lo mínimo de app.js sin hoy.js)
-        self.assertRegex(hoy, r"avisoResumenLocalHtml\(\) : ''\}\n    <h1>Hoy ")
-        self.assertIn("${avisoResumenLocalHtml()}\n    <h1>Hoy</h1>", app)
+        # Inicio es «Hoy» (B7): el aviso va arriba, antes del título
+        self.assertRegex(hoy, r"\$\{avisoResumenLocalHtml\(\)\}\n    <h1>Hoy ")
         self.assertIn("api('/api/settings', { summary: { aviso_visto: true } })", app)
         self.assertIn("else if (a === 'aviso-sum-ok' || a === 'aviso-sum-ajuste')", app)
 
@@ -558,8 +557,8 @@ class ParticipantesTextosTests(unittest.TestCase):
         self.assertIn("Irán a las notas de la reunión como sugeridos: no se envían al resumen ni a las copias en otras "
                       "carpetas hasta que los confirmes.", static("grabar.js"))
         self.assertNotRegex(js, r"[\U0001F300-\U0001FAFF\u2600-\u26FF]")
-        self.assertEqual(notas.count("${window.reunionParticipantesHtml?.(a) || ''}"), 1)
-        self.assertEqual(notas.count(".then(() => window.reunionParticipantesGuardados?.(a))"), 1)
+        self.assertEqual(notas.count("${reunionParticipantesHtml(a)}"), 1)  # (por import de reunion.js)
+        self.assertEqual(notas.count(".then(() => reunionParticipantesGuardados(a))"), 1)
         cal = open(os.path.join(REPO, "_app", "calendario.py"), encoding="utf-8").read()
         self.assertNotIn("Nada sale del PC", cal)
         self.assertIn("participantes_origen", cal)

@@ -8,7 +8,10 @@
    Cualquier otro audio suena como siempre: Web Audio solo se monta la primera vez que se oye uno en dos pistas, y desde
    entonces los demás pasan por él tal cual.
    «Exportar audio mezclado» (POST /api/audio/mezclado) guarda en el Escritorio un WAV normal con esa mezcla. */
-'use strict';
+// orden de arranque: este fichero se evalúa justo después de conservar.js (la cadena, en main.js)
+import './conservar.js';
+import { $, api, audio, esc, toast } from './app.js';
+
 const Pistas = (() => {
   const MARCA = 'tenca:pistas=micro,sistema', ECO = ' eco=';
   const cache = new Map();          // ruta → Promise<{doble, eco}>
@@ -228,3 +231,5 @@ const Pistas = (() => {
   }
   return { cargar, esDoble, leerCabecera, estado, cfg };
 })();
+
+export { Pistas };

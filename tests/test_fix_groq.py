@@ -11,7 +11,7 @@ import tempfile
 import time
 import unittest
 
-from support import TempTree, engines, server  # noqa: F401  (support prepara sys.path)
+from support import TempTree, engines, server, nuevo_contexto  # noqa: F401  (support prepara sys.path)
 from test_e2e_procesado import CLAVE, GroqFalso
 from test_sin_groq import _claro
 from test_subir_audio import Servidor
@@ -171,7 +171,7 @@ class ArrancarYGuardarTests(unittest.TestCase):
         self.assertEqual(leer(), ("groq", GSK))  # reparado al arrancar, y la clave sigue siendo la suya
         with open(os.path.join(s.datos, "server.log"), encoding="utf-8") as f:
             self.assertIn("proveedor de la nube:", f.read())
-        ctx = self.browser.new_context(bypass_csp=True, viewport={"width": 1280, "height": 900})
+        ctx = nuevo_contexto(self.browser, bypass_csp=True, viewport={"width": 1280, "height": 900})
         self.addCleanup(ctx.close)
         pg = ctx.new_page()
         errores = []

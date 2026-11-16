@@ -1,9 +1,18 @@
 /* Directo en la nube (Groq): cupo y latencia en la cabecera del directo, «modo seguir» (letra grande y el texto
-   siempre abajo), traduccion al espanol o al ingles (msg 1152) por reunion en una columna lateral y, en Ajustes, el
+   siempre abajo), traduccion al espanol o al ingles por reunion en una columna lateral y, en Ajustes, el
    modelo del directo y las claves adicionales. Todo sobre j.directo (lo publica live.py en /api/jobs), /api/config y
    /api/live/traducir.
    Sin dependencias: su CSS se inyecta aqui mismo para no tocar app.css. Nunca ensena ni guarda claves (las mascaras
    vienen del servidor). */
+// orden de arranque: este fichero se evalúa justo después de aprender.js (la cadena, en main.js)
+import './aprender.js';
+import {
+  $, $$, api, APP_NAME, ask, esc, fmtClock, go, I, liveJob, main, nfc, nodeName, pathLabel, pollJobs, pollRec,
+  refreshTree, refreshView, rootName, S, setConfig, toast,
+} from './app.js';
+import { curAudio, saveProps } from './notas.js';
+import { perfilSavedText } from './perfil.js';
+
 I.eye = '<svg viewBox="0 0 24 24"><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
 I.translate = '<svg viewBox="0 0 24 24"><path d="M4 5h9M8.5 3v2M11 5c-.6 3.6-2.6 6.4-6 8.5M6 8.5c1 2.1 2.6 3.8 4.8 5"/><path d="M13 20l4.5-11L22 20M14.6 16.5h5.8"/></svg>';
 S.directo = {
@@ -343,7 +352,7 @@ function bindDirectoSettings(d) {
     const b = e.target.closest('[data-xkey-del]');
     if (!b) return;
     const fila = b.closest('.dk-row'), mask = $('[data-xkey]', fila)?.dataset.mask;
-    if (mask && typeof ask === 'function' && !await ask('¿Quitar esta clave?', `<p>Se deja de usar la clave <code>${esc(mask)}</code> en ${esc(APP_NAME)}. Para volver a usarla, tendrás que pegarla otra vez.</p>`, 'Quitar')) return;
+    if (mask && !await ask('¿Quitar esta clave?', `<p>Se deja de usar la clave <code>${esc(mask)}</code> en ${esc(APP_NAME)}. Para volver a usarla, tendrás que pegarla otra vez.</p>`, 'Quitar')) return;
     if (!fila.isConnected) return;  // (las filas se rehicieron mientras tanto: ya no es esa)
     fila.remove();
     sync();
@@ -400,7 +409,7 @@ function collectDirectoSettings(d) {
   return out;
 }
 
-/* ---------------------------------------------------------------- carpeta en pleno directo (msg 1198) */
+/* ---------------------------------------------------------------- carpeta en pleno directo */
 /* «Se guarda en … · Cambiar» en la cabecera del directo. La grabación sigue donde empezó; lo elegido se ve como «Se
    moverá a … al terminar · Deshacer» y, cuando ya no queda nada en marcha (directo, repaso final, voces y resumen), el
    servidor mueve la reunión entera (POST /api/reunion/destino, App._aplicar_movimientos). Lo pendiente y lo hecho
@@ -562,7 +571,7 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDestino(); });
 
-/* ---------------------------------------------------------------- avisos de la franja del directo (B6, msg 1378) */
+/* ---------------------------------------------------------------- avisos de la franja del directo (B6) */
 /* Tres avisos, en la cabecera del directo y con lo que ya llega en los sondeos (sin peticiones nuevas):
    - fuente callada (/api/rec/status → callada {mic, sys} en segundos; el criterio, en directo_avisos.Callada);
    - «La llamada ha terminado: paro en 30 s · No terminar» (/api/rec/status → fin_llamada; FinDeLlamada);
@@ -688,7 +697,7 @@ function directoCambiarIdioma(path, code) {
     return;
   }
   const a = S.audios.get(path);
-  if (a) saveProps(a, { idioma: code }).then(r => { if (r && typeof perfilSavedText === 'function') toast(perfilSavedText('idioma', true, false, r.directo?.idioma)); });
+  if (a) saveProps(a, { idioma: code }).then(r => { if (r) toast(perfilSavedText('idioma', true, false, r.directo?.idioma)); });
 }
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-aviso-act]');
@@ -707,3 +716,9 @@ document.addEventListener('click', async e => {
     } catch (err) { S.directo.propOculta = null; toast(esc(err.message), 'err'); }
   }
 });
+
+export {
+  bindDirectoSettings, collectDirectoSettings, destinoHtml, destinoPendienteHtml, destinoSig, directoAfterRender,
+  directoParadaTexto, directoSettingsHtml, directoTradTo, onDirectoJobs, onMovimientos, renderDirectoAvisos,
+  renderDirectoBar,
+};

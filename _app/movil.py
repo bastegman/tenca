@@ -448,4 +448,4 @@ def pagina_movil(rec):
             'o en la carpeta de tu grabadora.</p></div>'
             '<ul class="m-lista" id="mLista" aria-live="polite"></ul>'
             '<p class="m-pie">Cuando termine, puedes cerrar esta página.</p></main>'
-            f'<script src="{base}nombres-audio.js"></script><script src="{base}movil.js"></script></body></html>')
+            f'<script type="module" src="{base}movil.js"></script></body></html>')  # nombres-audio.js llega por import

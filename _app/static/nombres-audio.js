@@ -1,4 +1,3 @@
-'use strict';
 /* El nombre y la fecha que propone un audio por su archivo (09/11/2026, «Subir audio»): «WhatsApp Ptt 2026-11-08 at
    10.15.32», «PTT-20261108-WA0003», «2026-11-08 10-15-32 - Comité» (de Tenca), «Nueva grabación 12»… Sin fecha en el
    nombre, la de cuándo se guardó. Aparte de grabar.js porque lo usa también la página del móvil (movil.py, «Desde el
@@ -27,3 +26,5 @@ function sbDesdeArchivo(f) {
   if (/^(AUDIO|REC|VID|Recording|Grabaci[oó]n|Voice|Voz)?[\s_-]*\d*$/i.test(nombre)) nombre = '';
   return { file: f, nombre: nombre.slice(0, 120), fecha: fecha.getTime(), origen };
 }
+
+export { sbDesdeArchivo };

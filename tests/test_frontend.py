@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import unittest
 
-from support import REPO
+from support import REPO, orden_de_arranque
 
 STATIC = os.path.join(REPO, "_app", "static")
 
@@ -92,8 +92,8 @@ console.log(J(paragraphs(segs)), J(paragraphs(segs, ['h1', 'h1', 'h2', 'h2'])),
         self.assertEqual(r.stdout.split(), ["[[0,1,2,3]]", "[[0,1],[2,3]]", "[[0,1],[2],[3]]"])
 
     def test_voces_js_cargado_y_textos(self):
-        html, js, app = read("index.html"), read("voces.js"), read("app.js")
-        self.assertIn('<script src="/voces.js"></script>', html)
+        js, app = read("voces.js"), read("app.js")
+        self.assertIn("voces.js", orden_de_arranque())  # (main.js: antes, un <script> en index.html)
         self.assertIn("Tengo el consentimiento de esta persona para guardar su huella de voz en este PC", js)
         for s in ("Soy yo", "Recordar en próximas reuniones", "Fusionar con…", "No es esta persona", "Olvidar persona",
                   "Identificar voces", "Olvidar todas", "/api/voces/activar", "/api/hablantes"):

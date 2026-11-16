@@ -1,10 +1,16 @@
-'use strict';
 /* Ajustes por lo que hace el usuario (rediseño B2 y B3, 07/11/2026): «Al grabar» abre con «Así se graba ahora una
    reunión de [proyecto]», el mismo plan del servidor que la tarjeta de grabar y Ctrl+Alt+R (/api/grabar/plan), con lo
    que se ve (cada cambio se guarda al momento, app.js); debajo, solo las reglas, en una pantalla. «Proyectos» dice la carpeta y el idioma de
-   cada proyecto y workstream y si son suyos o heredados. «Calendario y Teams» dice el estado en una frase.
-   Se carga después de app.js, notas.js, perfil.js, reunion.js y grabar.js. app.js lo invoca con
-   `typeof x === 'function'`. */
+   cada proyecto y workstream y si son suyos o heredados. «Calendario y Teams» dice el estado en una frase. */
+// orden de arranque: este fichero se evalúa justo después de recibir.js (la cadena, en main.js)
+import './recibir.js';
+import { $, api, APP_NAME, esc, flatFolders, fold, I, LANGS, nfc, openSettings, S, setConfig, toast } from './app.js';
+import { loadVocab, openVocabEditor } from './notas.js';
+import { reunionEstadoHtml, reunionFieldsetHtml } from './reunion.js';
+import {
+  PERFIL_AUTO, perfilCarpetaTxt, perfilGroups, perfilLangLabel, perfilReglasHtml, perfilVocabOpts,
+} from './perfil.js';
+import { GR_FILAS, grDevsAviso } from './grabar.js';
 
 /* ---------------------------------------------------------------- Al grabar */
 function ajAlGrabarHtml() {
@@ -15,14 +21,14 @@ function ajAlGrabarHtml() {
       <div id="agFilas" aria-live="polite"><div class="gr-cargando">Calculando…</div></div>
     </div>
     <div class="ag-reglas">
-      ${typeof perfilReglasHtml === 'function' ? perfilReglasHtml() : `<div class="ag-regla"><label for="sLang">Idioma por defecto</label><div>${langSelect('sLang', c.language ?? 'es-en')}</div></div>`}
+      ${perfilReglasHtml()}
       ${'carpeta_por_reunion' in c ? `<div class="ag-regla"><label for="agPorReunion">Una carpeta por reunión</label><div><label class="ag-sw"><input type="checkbox" id="agPorReunion"${c.carpeta_por_reunion !== false ? ' checked' : ''}>fecha y nombre, dentro de la carpeta del proyecto</label></div></div>` : ''}
       <div class="ag-regla"><label for="agMic">Micrófono · audio del PC</label><div class="ag-dos"><select id="agMic" aria-label="Micrófono">${ajDispositivos(null)[0]}</select><select id="agSys" aria-label="Audio del PC">${ajDispositivos(null)[1]}</select><span id="agDevsAviso" class="hidden"></span></div></div>
       <div class="ag-regla"><label for="agDirecto">Texto en directo</label><div><label class="ag-sw"><input type="checkbox" id="agDirecto"${c.rec_directo !== false ? ' checked' : ''}>si el portátil va lento, quítalo: transcribe al terminar</label></div></div>
       <div class="ag-regla"><label for="lMeet">Llamada detectada</label><div><label class="ag-sw"><input type="checkbox" id="lMeet"${c.meeting_detect !== false ? ' checked' : ''}>avisarme si estoy en una llamada y no estoy grabando</label></div></div>
     </div>`;
 }
-/* «Ocultar Tenca al compartir pantalla» (msg 1242; window.py), en Calendario y Teams (las reglas de «Al grabar» ya
+/* «Ocultar Tenca al compartir pantalla» (window.py), en Calendario y Teams (las reglas de «Al grabar» ya
    llenan una pantalla): se aplica al marcarlo con su propia petición, como «Arrancar con Windows».
    o: /api/config → ocultar_captura ({activado, soportado, motivo, error}). */
 function ajOcultarHtml(o) {
@@ -215,7 +221,7 @@ function bindAjAlGrabar(d) {
     listas();
     const pv = $('#pfVocab', d);
     // con las listas ya aquí, con lo que había (lo guardado o lo que has elegido)
-    if (pv && typeof perfilVocabOpts === 'function') pv.innerHTML = perfilVocabOpts(pv.value);
+    if (pv) pv.innerHTML = perfilVocabOpts(pv.value);
     const av = $('.ag-sin-listas', d);
     // aquí, en una línea (Al grabar tiene que caber en una pantalla); en Proyectos y en las listas, con su recuadro
     if (S.vocabError && !S.vocab?.length && !av) $('.ag-plan', d)?.insertAdjacentHTML('afterend', '<div class="ag-sin-listas help" style="margin-top:4px"><span class="warn-txt">No se han podido leer las listas de vocabulario: solo se puede comprobar «Sin proyecto».</span> <a href="#" data-aj-listas-otra>Probar otra vez</a></div>');
@@ -247,10 +253,10 @@ function ajProyectosTabla(car, idioma0) {
   const c = S.config || {}, pl = c.project_langs || {}, wl = c.workstream_langs || {}, wf = c.workstream_folders || {};
   // con la rama de carpetas, project_folders llega resuelta (con la del árbol) y las asignadas van aparte
   const asig = c.project_folders_asignadas || c.project_folders || {};
-  const grupos = typeof perfilGroups === 'function' ? perfilGroups(S.vocab || []) : [];
+  const grupos = perfilGroups(S.vocab || []);
   if (!grupos.length && S.vocabError) return ajListasFalloHtml(', así que aquí no salen tus proyectos');
   if (!grupos.length) {
-    const conectar = typeof vocabConectar === 'function' ? ' o conecta la carpeta donde ya tienes tus listas' : '';
+    const conectar = ' o conecta la carpeta donde ya tienes tus listas';
     return `<div class="help" style="margin-top:0">Todavía no hay proyectos. Crea uno con «Nuevo proyecto» en <a href="#" data-sec-ir="vocabulario">Vocabulario</a>${conectar}: cada proyecto tiene sus workstreams, y cada workstream, su lista de nombres y siglas.</div>`;
   }
   const lang = code => esc(perfilLangLabel(code));
@@ -291,9 +297,9 @@ function ajCarpetaOpts(sel, heredadaTxt) {
   const falta = sel !== PERFIL_AUTO && S.folders.size > 0 && !S.folders.has(sel);  // sin árbol aún, no se sabe
   // con la ruta entera («Alfa › Reuniones»): cerrado, el desplegable solo enseña la opción elegida, y «Reuniones» a
   // secas no decía de qué proyecto era
-  const ruta = f => f.path ? (typeof perfilCarpetaTxt === 'function' ? perfilCarpetaTxt(f.path) : f.path).split('\\').join(' › ') : f.name;
+  const ruta = f => f.path ? perfilCarpetaTxt(f.path).split('\\').join(' › ') : f.name;
   return `<option value="${PERFIL_AUTO}"${sel === PERFIL_AUTO ? ' selected' : ''}>${esc(heredadaTxt)}</option>`
-    + (falta ? `<option value="${esc(sel)}" selected>${esc(typeof perfilCarpetaTxt === 'function' ? perfilCarpetaTxt(sel) : sel)} (no se encuentra)</option>` : '')
+    + (falta ? `<option value="${esc(sel)}" selected>${esc(perfilCarpetaTxt(sel))} (no se encuentra)</option>` : '')
     + flatFolders().filter(f => fold(f.name) !== 'vocabulario')
       .map(f => `<option value="${esc(f.path)}"${!falta && f.path === sel ? ' selected' : ''}>${esc(ruta(f))}</option>`).join('');
 }
@@ -434,7 +440,7 @@ function ajCalendarioHtml() {
       <div class="ct-fila"><span class="ct-n">${I.phone}Teams</span><span class="ct-estado" id="ctTeamsEstado">…</span><span class="ct-frase" id="ctTeamsFrase"></span><span class="ct-acc"></span></div>
       <div class="ct-fila hidden" id="ctOutFila"><span class="ct-n">${I.calendar}Outlook</span><span class="ct-estado" id="ctOutEstado"></span><span class="ct-frase" id="ctOutFrase"></span><span class="ct-acc" id="ctOutAcc"></span></div>
     </div>
-    ${window.reunionFieldsetHtml?.() || ''}
+    ${reunionFieldsetHtml()}
     ${ajOcultarHtml((S.config || {}).ocultar_captura)}`;
 }
 function bindAjCalendario(d) {
@@ -509,10 +515,11 @@ function bindAjCalendario(d) {
         const r = await api('/api/calendario/activar', { activar: false });
         casilla.checked = false;
         if (S.config) S.config.outlook_on = false;
-        if (typeof reunionEstadoHtml === 'function') est.innerHTML = reunionEstadoHtml(r);  // y pintar(), al verlo
-        else pintar();
+        est.innerHTML = reunionEstadoHtml(r);  // y pintar(), al verlo
       } catch (err) { b.disabled = false; toast(esc(err.message), 'err'); }
     });
     return;
   }
 }
+
+export { ajAlGrabarHtml, ajCalendarioHtml, ajProyectosHtml, bindAjAlGrabar, bindAjCalendario, bindAjProyectos };

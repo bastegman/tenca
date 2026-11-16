@@ -305,9 +305,9 @@ class NotasInternasTests(unittest.TestCase):
 
     def test_notas_internas_casa_y_respeta_las_exentas(self):
         """Los patrones casan con cada tipo de nota (también en mayúsculas, en un fichero CRLF, en el CHANGELOG y con la
-        referencia partida por el ajuste de línea de un comentario) y dejan pasar lo exento: LICENSE, _app/static/ (de
-        momento), el AppUserModelID y, solo en los ficheros del instalador y sus tests, el editor como valor literal
-        entero; el nombre completo entre comillas en un dato de prueba cualquiera sí sale."""
+        referencia partida por el ajuste de línea de un comentario, también en un .js de _app/static/) y dejan pasar lo
+        exento: LICENSE, el AppUserModelID y, solo en los ficheros del instalador y sus tests, el editor como valor
+        literal entero; el nombre completo entre comillas en un dato de prueba cualquiera sí sale."""
         root = tempfile.mkdtemp(prefix="tenca-notas-")
         nombre, apellido = "Ber" + "nardo", "Stegm" + "aier"  # en trozos: el propio test se revisa a sí mismo
         asistente, sistema = "Clau" + "dia", "Open" + "Claude"
@@ -340,14 +340,14 @@ class NotasInternasTests(unittest.TestCase):
                                 ("_app/a.py", 1, autor), ("_app/a.py", 2, "asistente"), ("_app/a.py", 3, "mensaje"),
                                 ("_app/a.py", 5, "asistente")]
                          + [("_app/instalar.ps1", n, autor) for n in (4, 4, 5, 5, 6, 6)]
+                         + [("_app/static/e.js", 1, "mensaje"), ("_app/static/e.js", 1, autor)]
                          + [("tests/b.py", 1, "ruta personal"), ("tests/b.py", 3, autor)]
                          + [("tests/t1.py", 1, autor), ("tests/t1.py", 1, autor)])
 
 
 # Notas internas que no van en un repo público (punto 50 del review del 14/11/2026). Cada patrón lleva una letra entre
-# corchetes para no casar consigo mismo en este fichero. _app/static/ queda fuera DE MOMENTO: lo limpia la rama
-# frontend-modulos, que al entrar en main tiene que quitar esa excepción (y si entra antes que repo-limpio, la quita
-# repo-limpio); test_notas_internas_casa_y_respeta_las_exentas también la nombra.
+# corchetes para no casar consigo mismo en este fichero. Mira todo lo versionado, también _app/static/ (que además
+# tiene su propia comprobación en test_modulos).
 NOTAS_INTERNAS = (
     # también partida por el ajuste de línea de un comentario («msgs» y, en la línea siguiente, «# 1468»)
     ("mensaje", re.compile(r"\bms[g]s?\.?[\s#;/*]*\d{3,4}\b", re.I)),
@@ -359,7 +359,6 @@ NOTAS_INTERNAS = (
     ("ruta personal", re.compile(r"/Us[e]rs/|\bmemory/proj[e]cts/|~/Proj[e]cts\b")),
 )
 NOTAS_FICHEROS_EXENTOS = ("LICENSE",)
-NOTAS_CARPETAS_EXENTAS = ("_app/static/",)
 # Lo único que puede llevar el nombre del autor, porque cambiarlo cambiaría la app: el AppUserModelID de Windows
 # (common.APP_ID; los accesos directos ya creados y la barra de tareas lo llevan, ver test_tenca) y el que usó la
 # prueba de WebView2 de scripts/, también con la barra escapada de una expresión regular de PowerShell, en cualquier
@@ -376,12 +375,12 @@ NOTAS_FICHEROS_EDITOR = ("_app/instalar.ps1", "_app/desinstalar.ps1", "scripts/s
 
 def buscar_notas_internas(rels, root=REPO):
     """[(fichero, línea, tipo, texto)] de cada nota interna de NOTAS_INTERNAS en los ficheros `rels` (relativos a
-    `root`, con «/»), saltando binarios, NOTAS_FICHEROS_EXENTOS, NOTAS_CARPETAS_EXENTAS, lo que casa con NOTAS_EXENTAS
+    `root`, con «/»), saltando binarios, NOTAS_FICHEROS_EXENTOS, lo que casa con NOTAS_EXENTAS
     y, en NOTAS_FICHEROS_EDITOR, con NOTAS_EXENTAS_EDITOR. Ordenado por fichero, línea y posición."""
     import bisect
     hits = []
     for rel in rels:
-        if rel in NOTAS_FICHEROS_EXENTOS or rel.startswith(NOTAS_CARPETAS_EXENTAS):
+        if rel in NOTAS_FICHEROS_EXENTOS:
             continue
         path = os.path.join(root, rel)
         if not os.path.isfile(path):

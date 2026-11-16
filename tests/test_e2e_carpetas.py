@@ -22,7 +22,7 @@ import time
 import unittest
 import urllib.request
 
-from support import REPO
+from support import REPO, nuevo_contexto
 
 try:
     from playwright.sync_api import sync_playwright
@@ -82,7 +82,7 @@ class CarpetaEnDirectoE2E(unittest.TestCase):
             raise AssertionError("el servidor de prueba no arrancó (ver salida.log)")
         cls.pw = sync_playwright().start()
         cls.browser = cls.pw.chromium.launch()
-        cls.ctx = cls.browser.new_context(bypass_csp=True, viewport={"width": 1366, "height": 900})
+        cls.ctx = nuevo_contexto(cls.browser, bypass_csp=True, viewport={"width": 1366, "height": 900})
         cls.pg = cls.ctx.new_page()
         cls.errores = []
         cls.pg.on("pageerror", lambda e: cls.errores.append(f"pageerror: {e}"))

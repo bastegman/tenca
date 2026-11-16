@@ -1,5 +1,4 @@
-'use strict';
-/* Hoy (rediseño B7, msgs 1380 y 1390): la pantalla de inicio, qué grabar ahora y qué tienes pendiente.
+/* Hoy (rediseño B7): la pantalla de inicio, qué grabar ahora y qué tienes pendiente.
    - Arriba, la reunión de ahora (la ventana de reunión de Teams o la cita de Outlook en curso) con su proyecto y su
      idioma, cambiables, y «Grabar», que empieza ya con el plan del servidor: /api/hoy lo trae calculado con
      plan.py, la misma regla que la tarjeta de Grabar, Ctrl+Alt+R y el aviso de Teams, y al cambiar un chip se pide
@@ -10,18 +9,22 @@
    - «Mis pendientes» (review del 14/11/2026, punto 28): las tareas sin hacer de los resúmenes de todas las reuniones
      (/api/pendientes), primero las tuyas, con su casilla (marca la línea del .resumen.md, con «Deshacer» un momento),
      la reunión y el minuto.
-   - La agenda de Outlook del próximo mes (msg 1390: «un mes al menos»), que el servidor lee en segundo plano y guarda
+   - La agenda de Outlook del próximo mes (un mes al menos), que el servidor lee en segundo plano y guarda
      en memoria: Hoy no espera a Outlook. Sin Outlook, la pantalla es la misma sin agenda, con una línea que dice por qué.
    - Sin reuniones: «Graba tu primera reunión», con las tres formas de grabar y la de subir un audio.
-   - Al parar una grabación, si ya ha empezado otra reunión (msg 1479): «Ya ha empezado «X» · 10:00–11:00 · Grabar ·
+   - Al parar una grabación, si ya ha empezado otra reunión: «Ya ha empezado «X» · 10:00–11:00 · Grabar ·
      Ahora no», encima de la tarjeta en Hoy y, en las demás páginas, junto a los avisos (renderSiguiente, desde
      pollRec con /api/rec/status). La decide el servidor (_siguiente: la reunión de ahora sin la que se grababa) y
-     «Grabar» graba esa con su plan, solo si sigue siendo la propuesta.
-   Se carga después de app.js, notas.js y grabar.js y usa sus utilidades ($, $$, api, esc, I, S, main, go, toast,
-   allAudios, liveAudios, isLive, jobFor, lastTxJobFor, statusOf, estDuration, fmtDur, fmtClock, aDate, titleOf, nfc, pad, iconOf, MES,
-   LANGS, vocabOf, vocabOptions, saveProps, wsPatch, submitTx, openRec, openModal, closeModal, openSettings,
-   refreshTree, pollRec, pollJobs, liveBanner, welcomeCard, avisoResumenLocalHtml). app.js lo llama con
-   `typeof viewHoy === 'function'`: sin este fichero, Inicio es la lista de antes. */
+     «Grabar» graba esa con su plan, solo si sigue siendo la propuesta. */
+// orden de arranque: este fichero se evalúa justo después de reunion.js (la cadena, en main.js)
+import './reunion.js';
+import {
+  $, $$, aDate, allAudios, api, APP_NAME, avisoResumenLocalHtml, closeModal, esc, estDuration, fmtClock, fmtDur, go,
+  I, isLive, jobFor, LANGS, lastTxJobFor, liveAudios, liveBanner, main, MES, nfc, openModal, openRec, openSettings,
+  pad, pollJobs, pollRec, refreshTree, renderView, S, statusOf, submitTx, toast,
+} from './app.js';
+import { iconOf, saveProps, titleOf, vocabOptions, welcomeCard, wsPatch } from './notas.js';
+import { avisoProbarHtml, cfgAccionHtml } from './configurar.js';
 
 const HOY_REVISAR_DIAS = 30;  // «Para revisar»: lo de los últimos 30 días (lo de antes, en Reuniones)
 const HOY_REVISAR_MAX = 8;
@@ -188,7 +191,7 @@ function hoyCargar(refrescar, otraVez, abrir) {
     HOY.otraVez = false;
     if (otra) hoyCargar(otra === 'r');
     hoyPintarVivo();
-    if (S.route?.kind === 'c' && typeof renderView === 'function') renderView();  // el calendario, con las citas
+    if (S.route?.kind === 'c') renderView();  // el calendario, con las citas
   });
   return HOY.cargando;
 }
@@ -394,7 +397,7 @@ function hoyRevisarHtml(lista, now) {
     return `<div class="hr-fila" data-go="a" data-path="${esc(a.path)}"><span class="hr-dia">${esc(hoyDiaTxt(hoyFechaDe(a), now))}</span>
       <div class="hr-t"><div class="hr-n">${iconOf(a) ? iconOf(a) + ' ' : ''}${esc(hoyTitulo(a))}${proy ? `<span class="hr-proy">${esc(proy)}</span>` : !(S.vocab || []).length ? '' : hoySinProyecto(a) ? '<span class="hr-proy">Ningún proyecto</span>' : '<span class="hr-proy sin">Sin proyecto</span>'}</div>
       <div class="hr-sub">${r.motivos.map(m => m.aviso ? `<b class="aviso">${esc(m.texto)}</b>` : esc(m.texto)).join(' · ')}</div>${hoyFalloHtml(r.fallo)}</div>
-      <div class="hr-acts">${r.fallo && typeof cfgAccionHtml === 'function' ? cfgAccionHtml(r.fallo) : ''}<button class="btn sm" data-act="hoy-accion" data-k="${r.accion.k}" data-path="${esc(a.path)}">${esc(r.accion.label)}</button></div></div>`;
+      <div class="hr-acts">${r.fallo ? cfgAccionHtml(r.fallo) : ''}<button class="btn sm" data-act="hoy-accion" data-k="${r.accion.k}" data-path="${esc(a.path)}">${esc(r.accion.label)}</button></div></div>`;
   }).join('');
   const mas = lista.length - HOY_REVISAR_MAX;
   return `<section class="hoy-revisar"><h2>Para revisar <span class="count">${lista.length}</span></h2><div class="card hr-lista">${filas}</div>
@@ -553,7 +556,7 @@ function hoyAgendaHtml() {
 }
 
 /* Calendario (notas.js, viewCalendar): las citas de Outlook que aún no han pasado, en su día, junto a las grabadas.
-   Es donde Bernardo buscó «las siguientes reuniones» (msg 1380). Se ven distintas y no se abren (no son reuniones
+   Es donde se buscan «las siguientes reuniones». Se ven distintas y no se abren (no son reuniones
    grabadas). */
 function hoyCalDia(key) {
   if (!HOY.cargando && (!HOY.datos || hoyViejo())) hoyCargar();
@@ -573,10 +576,10 @@ function viewHoy() {
   const fuera = new Set(revisar.slice(0, HOY_REVISAR_MAX).map(r => r.a.path));
   main.innerHTML = `<div class="page hoy">
     ${liveAudios().map(liveBanner).join('')}
-    ${typeof avisoProbarHtml === 'function' ? avisoProbarHtml() : ''}
-    ${typeof avisoResumenLocalHtml === 'function' ? avisoResumenLocalHtml() : ''}
+    ${avisoProbarHtml()}
+    ${avisoResumenLocalHtml()}
     <h1>Hoy <span class="sub">· ${esc(hoyFechaLarga(now))}</span></h1>
-    ${typeof welcomeCard === 'function' ? welcomeCard(all) : ''}
+    ${welcomeCard(all)}
     <div id="hoySiguiente" class="hoy-siguiente-box"></div>
     <div class="hoy-grid">
       <div class="hoy-ahora-box" id="hoyAhora">${hoyAhoraHtml()}</div>
@@ -710,3 +713,5 @@ main.addEventListener('click', e => {
 }, true);
 main.addEventListener('change', e => { if (e.target.dataset?.hoy) hoyCambio(e.target); });
 addEventListener('hashchange', () => { if (S.route?.kind !== 'home') HOY.abierta = false; });
+
+export { HOY, hoyAccion, hoyCalDia, hoyCargar, hoyElegirProyecto, PEND, renderSiguiente, viewHoy };

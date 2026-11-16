@@ -25,6 +25,7 @@ import plan  # noqa: E402
 import trabajos  # noqa: E402
 from test_enganches import ServidorDePrueba  # noqa: E402
 from test_frontend import js_defs, read  # noqa: E402
+from support import js_sin_modulo  # noqa: E402
 from test_hoy import JS_STUBS  # noqa: E402
 
 STATIC = os.path.join(REPO, "_app", "static")
@@ -818,7 +819,7 @@ class PendientesHoyJsTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, d, True)
         js = os.path.join(d, "prueba.js")
         with open(js, "w", encoding="utf-8") as f:
-            f.write(JS_STUBS + src + "\n" + code)
+            f.write(JS_STUBS + js_sin_modulo(src) + "\n" + code)
         r = subprocess.run(["node", js], capture_output=True, text=True, encoding="utf-8", timeout=30)
         self.assertEqual(r.returncode, 0, r.stderr)
         return json.loads(r.stdout)

@@ -1,12 +1,20 @@
-'use strict';
 /* Grabar: la tarjeta «Así se va a grabar» (rediseño B1, 07/11/2026). Sustituye al formulario de 15 controles.
    Lo que enseña sale de POST /api/grabar/plan, el mismo cálculo que usan Ctrl+Alt+R y el aviso de Teams, y
    «Empezar a grabar» manda a /api/rec/start el cuerpo exacto que se está viendo (plan.rec): lo que se ve es lo que se
    usa. Cada línea dice de dónde sale (esta reunión, el workstream, el proyecto o Ajustes) y «Cambiar» pregunta para
-   qué reuniones: solo esta (por defecto, D1), todas las del proyecto o todas (Ajustes).
-   Se carga después de app.js y notas.js y usa sus utilidades ($, $$, api, esc, I, S, LANGS, folderOpts, liveFit,
-   linkFolder, loadVocab, openModal, closeModal, copy, toast, go, pollRec, pollJobs, refreshTree, openVocabEditor,
-   openSettings, CONSENT_TEXT). app.js lo invoca con `typeof abrirGrabar === 'function'`. */
+   qué reuniones: solo esta (por defecto, D1), todas las del proyecto o todas (Ajustes). */
+// orden de arranque: este fichero se evalúa justo después de configurar.js (la cadena, en main.js)
+import { faltaModeloHtml, modeloNombre } from './configurar.js';
+import {
+  $, $$, api, APP_NAME, closeModal, copy, errorInterno, esc, fmtSize, fold, folderName, folderOpts, go, hlTerms, I,
+  LANGS, linkFolder, liveFit, MES, nfc, openModal, openSettings, pollJobs, pollRec, recDialog, recDialogPoner,
+  refreshTree, S, setConfig, stopRec, termsOf, toast,
+} from './app.js';
+import { CONSENT_TEXT, loadVocab, openVocabEditor, vocabFit } from './notas.js';
+import { vocabConectar } from './perfil.js';
+import { abrirMovilCard, mvMontar, mvMostrar } from './recibir.js';
+import { AUDIO_POL_AYUDA } from './conservar.js';
+import { sbDesdeArchivo } from './nombres-audio.js';
 
 const GR_FILAS = [['carpeta', 'folder'], ['idioma', 'globe'], ['vocab', 'book'], ['contexto', 'text'],
   ['transcribe', 'monitor'], ['resume', 'spark'], ['audio', 'mic'], ['conservar', 'trash']];
@@ -17,8 +25,10 @@ const GR_ALCANCES = { carpeta: ['reunion', 'proyecto', 'ajustes'], idioma: ['reu
 const GR_CLAVES = { carpeta: ['carpeta'], idioma: ['idioma'], contexto: ['contexto'], transcribe: ['live', 'preset'],
   audio: ['mic', 'sys'], conservar: ['conservar'] };  // conservar: qué pasa con el audio al terminar (solo esta reunión)
 let G = null;  // la tarjeta abierta: {d, pedido, plan, tocado, recientes, seq, ...; subir: {items, rechazados}}
-// «Usar las listas de una carpeta…» en Proyecto (rama vocab-carpeta, msg 1148: perfil.js define vocabConectar): no es un
-// proyecto, abre el selector de carpetas y vuelve a la tarjeta con lo que tenías
+// la tarjeta del móvil (recibir.js) suelta la suya al cerrarse: un import no se puede reasignar desde otro módulo
+function grSoltar(g) { if (G === g) G = null; }
+// «Usar las listas de una carpeta…» en Proyecto (vocabConectar, de perfil.js): no es un proyecto,
+// abre el selector de carpetas y vuelve a la tarjeta con lo que tenías
 const GR_CONECTAR = '__conectar';
 
 function grFila(plan, clave) { return (plan?.lineas || []).find(l => l.clave === clave); }
@@ -35,7 +45,7 @@ async function abrirGrabar(opts = {}) {
   if (opts.vocab != null) pedido.vocab = opts.vocab;
   G = { pedido, plan: null, tocado: opts.seguir && G ? G.tocado : {}, recientes: [], seq: 0, abierto: null,
     pendiente: null, timer: null, devs: null, sugIdx: -1 };
-  recDialog = true;
+  recDialogPoner(true);
   const hk = S.config.hotkey?.ok ? 'Ctrl+Alt+R y el aviso de Teams graban con este mismo plan, sin los cambios que hagas solo para esta reunión.'
     : `El atajo Ctrl+Alt+R solo funciona con ${esc(APP_NAME)} en primer plano: ${esc(S.config.hotkey?.error || 'no se pudo registrar en Windows')}.`;
   openModal(`<div class="gr-cab"><span class="gr-kicker"><i class="recdot"></i>Nueva grabación</span>
@@ -61,7 +71,7 @@ async function abrirGrabar(opts = {}) {
       <span class="gr-hueco"></span>
       <button class="btn" data-m="no" type="button">Cancelar</button>
       <button class="btn primary rec-go" id="rGo" type="button" disabled><i class="recdot"></i>Empezar a grabar <kbd>Intro</kbd></button></div>`, d => grMontar(d), 'gr');
-  S.modalCleanup = () => { if (recDialog) { recDialog = false; api('/api/rec/monitor', { stop: true }).catch(() => { }); } G = null; };
+  S.modalCleanup = () => { if (recDialog) { recDialogPoner(false); api('/api/rec/monitor', { stop: true }).catch(() => { }); } G = null; };
 }
 
 async function grMontar(d) {
@@ -144,7 +154,7 @@ function grPintar() {
   const sel = $('#grProy', d);
   sel.innerHTML = `<option value="">Sin proyecto</option>${(S.vocab || []).map(v => `<option value="${esc(v.id)}">${esc(v.project)} › ${esc(v.name)}</option>`).join('')}`
     + `<option value="__nuevo">Nuevo proyecto o workstream…</option>`
-    + (typeof vocabConectar === 'function' ? `<option value="${GR_CONECTAR}">Usar las listas de una carpeta…</option>` : '');
+    + `<option value="${GR_CONECTAR}">Usar las listas de una carpeta…</option>`;
   sel.value = p.proyecto.vocab || '';
   sel.classList.toggle('vacio', !p.proyecto.vocab);
   $('#grMotivo', d).textContent = p.proyecto.motivo || '';
@@ -221,7 +231,7 @@ function grPintarFilas() {
   }
   // el modelo del directo aún no está en el PC: se dice antes de empezar (configurar.js)
   const t = grFila(p, 'transcribe');
-  const falta = (t?.live || g.subir) && typeof faltaModeloHtml === 'function' ? faltaModeloHtml(t?.preset, g.subir ? 'subir' : '') : '';
+  const falta = t?.live || g.subir ? faltaModeloHtml(t?.preset, g.subir ? 'subir' : '') : '';
   let fm = $('.gr-falta', box);
   if (!fm) { fm = document.createElement('div'); fm.className = 'gr-falta'; box.querySelector('[data-panel="transcribe"]').after(fm); }
   if (fm.dataset.sig !== falta) { fm.innerHTML = falta; fm.dataset.sig = falta; }
@@ -286,7 +296,7 @@ function grPanelHtml(k) {
       <div class="help">Con las opciones de arriba da igual que conectes o quites los cascos: la grabación sigue con el dispositivo nuevo. Pon algo a sonar para ver que la barra se mueve.</div>${pie()}`;
   }
   if (k === 'conservar') {  // punto 17: por reunión, sin ajuste fijo (conservar.js tiene los textos)
-    const ayuda = typeof AUDIO_POL_AYUDA === 'object' ? AUDIO_POL_AYUDA : {};
+    const ayuda = AUDIO_POL_AYUDA;
     return `<div class="gr-conservar" role="radiogroup" aria-label="Qué pasa con el audio al terminar">${[['guardar', 'Guardar'], ['15-dias', 'Guardar 15 días'], ['borrar', 'Borrar al terminar']].map(([v, t]) =>
       `<label class="${v === l.politica ? 'on' : ''}"><input type="radio" name="grConservar" data-gr="conservar" value="${v}"${v === l.politica ? ' checked' : ''}><b>${t}</b><span>${esc(ayuda[v] || '')}</span></label>`).join('')}</div>${pie(false)}`;
   }
@@ -296,7 +306,7 @@ function grPanelHtml(k) {
       <div class="gr-panel-pie"><button class="btn sm" type="button" data-gr-ir="proyecto">Elegir otro proyecto</button>
         ${v ? `<button class="btn sm" type="button" data-gr-ir="editar">${I.edit}Editar la lista</button>` : ''}
         <button class="btn sm" type="button" data-gr-ir="nuevo">${I.plus}Nuevo proyecto o workstream…</button>
-        ${typeof vocabConectar === 'function' ? `<button class="btn sm" type="button" data-gr-ir="conectar" title="Elige la carpeta donde tienes tus listas: se leen al grabar, sin copiarlas">${I.folder}Usar las listas de una carpeta…</button>` : ''}
+        <button class="btn sm" type="button" data-gr-ir="conectar" title="Elige la carpeta donde tienes tus listas: se leen al grabar, sin copiarlas">${I.folder}Usar las listas de una carpeta…</button>
         <button class="btn sm primary" type="button" data-gr-listo="vocab">Listo</button></div>`;
   }
   // resume: lo decide Ajustes › Procesado
@@ -348,7 +358,7 @@ async function grListo(k) {
         delete g.pedido.cambios[c];
       }
       const cfg = await api('/api/config');
-      if (typeof setConfig === 'function') setConfig(cfg);
+      setConfig(cfg);
       toast(alc === 'proyecto' ? `Guardado para todas las reuniones de <b>${esc(grProyecto(g.plan))}</b>` : 'Guardado en Ajustes › Al grabar: vale para todas las reuniones');
     } catch (err) { toast(esc(err.message), 'err'); }
   }
@@ -378,7 +388,7 @@ function grClick(e) {
     if (ir.dataset.grIr === 'proyecto') { grCerrarPanel(); $('#grProy', G.d).focus(); }
     else if (ir.dataset.grIr === 'editar' && v) openVocabEditor(v, volver);
     else if (ir.dataset.grIr === 'nuevo') openVocabEditor(null, volver, v?.project || '');
-    else if (ir.dataset.grIr === 'conectar' && typeof vocabConectar === 'function') vocabConectar(volver);
+    else if (ir.dataset.grIr === 'conectar') vocabConectar(volver);
     else if (ir.dataset.grIr === 'procesado') { closeModal(false); openSettings({ sec: 'procesado' }); }
     return;
   }
@@ -429,7 +439,7 @@ function grProyectoElegido(val) {
   }
   if (val === GR_CONECTAR) {
     $('#grProy', G.d).value = G.plan?.proyecto?.vocab || '';
-    if (typeof vocabConectar === 'function') vocabConectar(() => grVolver());
+    vocabConectar(() => grVolver());
     return;
   }
   G.pedido.vocab = val;
@@ -517,7 +527,7 @@ function grMonitor() {
   api('/api/rec/monitor', { mic: a.mic, sys: a.sys }).catch(() => { });
 }
 async function grEmpezar() {
-  if (G?.subir) return G.subir.movil && typeof mvMostrar === 'function' ? mvMostrar() : sbSubir();
+  if (G?.subir) return G.subir.movil ? mvMostrar() : sbSubir();
   const g = G, b = g && $('#rGo', g.d);
   if (!g || !b || b.disabled) return;
   b.disabled = true;
@@ -528,7 +538,7 @@ async function grEmpezar() {
   try {
     S.recLocal = true;
     const r = await api('/api/rec/start', { ...p.rec, resumen: p.resumen });
-    recDialog = false;
+    recDialogPoner(false);
     closeModal(true);
     toast(`● Grabando · ${esc(p.resumen)}${r.aviso ? ` · ${esc(r.aviso)}` : ''}`);
     await refreshTree(true);
@@ -537,7 +547,7 @@ async function grEmpezar() {
   } catch (err) { S.recLocal = false; toast(esc(err.message), 'err'); b.disabled = false; }
 }
 
-/* ---------------------------------------------------------------- «Subir audio» (09/11/2026, msg 1296) */
+/* ---------------------------------------------------------------- «Subir audio» (09/11/2026) */
 /* Un audio que ya tienes (el móvil, un audio de WhatsApp, otra grabadora) entra como una reunión grabada con esta
    tarjeta: el mismo plan (/api/grabar/plan con `subir`), sin la línea de audio y con la transcripción de la cola. «Subir
    y transcribir» manda cada archivo a /api/subir con lo que se está viendo; el servidor comprueba con la cadena de la
@@ -703,14 +713,14 @@ async function sbMontar(d) {
   const n = $('#grNombre', d);
   if (n) { n.focus(); n.select(); } else $('#rGo', d).focus();  // varios: Intro sube
 }
-const voc0 = () => (typeof loadVocab === 'function' ? loadVocab(S.config.language ?? 'es-en') : Promise.resolve()).catch(() => { });
+const voc0 = () => loadVocab(S.config.language ?? 'es-en').catch(() => { });
 
 /* el modelo con el que se transcribe al subir: el de la cola (Ajustes › Procesado), para este audio */
 function sbPanelTranscribe(l, pie) {
   const nube = S.config.procesado === 'api';
   const ps = (S.config.presets || []).filter(x => x.engine !== 'cloud' || nube);
   const nom = x => x.engine === 'cloud' ? `${S.config.providers?.[S.config.cloud?.provider || 'groq']?.label || 'La nube'} · en la nube`
-    : `${typeof modeloNombre === 'function' ? modeloNombre(x.model) : x.label} · en este PC`;
+    : `${modeloNombre(x.model)} · en este PC`;
   return `<label class="gr-l" for="grSelPreset">Modelo</label><select data-gr="preset" id="grSelPreset">${ps.map(x => `<option value="${esc(x.id)}"${x.id === l.preset ? ' selected' : ''}>${esc(nom(x))}</option>`).join('')}</select>
     <div class="help">${esc(S.presetsById?.[l.preset]?.hint || '')} El de siempre se cambia en Ajustes › Procesado.</div>${pie()}`;
 }
@@ -826,3 +836,8 @@ async function sbSubir() {
   }
   fallidos.forEach(f => toast(esc(f.msg), 'err'));
 }
+
+export {
+  abrirGrabar, abrirSubir, elegirAudios, esAudio, G, GR_FILAS, grDevsAviso, grMontar, grPedir, grSoltar, grVolver,
+  sbEnviar, sbNoSePuedeSoltar, sbTam, voc0,
+};

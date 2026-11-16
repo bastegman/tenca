@@ -1,11 +1,12 @@
-'use strict';
 /* Qué pasa con el audio de cada reunión (punto 17 del review del 14/11/2026; en el servidor, conservar.py y
    app_conservar.py): «Guardar» (por defecto), «Guardar 15 días» o «Borrar al terminar». Se elige al grabar (la
    tarjeta) y se cambia aquí, en Detalles; la cabecera de la reunión dice qué pasará y cuándo. Borrar manda solo el
    audio a la papelera de Windows, y solo cuando la reunión ya tiene transcripción y resumen. Sin audio (ya en la
-   papelera), la reunión sigue con sus textos y no se reproduce.
-   Se carga después de app.js y notas.js: usa $, esc, I, S, main, toast, saveProps, jobFor, isLive, curAudio,
-   renderAudioHead, refreshTree. app.js y notas.js lo llaman con `typeof … === 'function'`. */
+   papelera), la reunión sigue con sus textos y no se reproduce. */
+// orden de arranque: este fichero se evalúa justo después de ajustes.js (la cadena, en main.js)
+import './ajustes.js';
+import { $, APP_NAME, esc, I, isLive, jobFor, main, refreshTree, renderAudioHead, toast } from './app.js';
+import { curAudio, saveProps } from './notas.js';
 
 const AUDIO_POL = [['guardar', 'Guardar'], ['15-dias', 'Guardar 15 días'], ['borrar', 'Borrar al terminar']];
 const AUDIO_POL_AYUDA = {
@@ -89,9 +90,9 @@ main.addEventListener('change', async e => {
   if (v === '15-dias' && a.mtime) a.audio_hasta = new Date((a.mtime + 15 * 86400) * 1000).toISOString();
   const ay = e.target.closest('.pv')?.querySelector('.audio-ayuda');
   if (ay) ay.textContent = AUDIO_POL_AYUDA[a.audio_pol];
-  if (typeof renderAudioHead === 'function') renderAudioHead(a, true);
+  renderAudioHead(a, true);
   toast(v === 'guardar' ? 'El audio de esta reunión se guarda' : esc(audioDestinoTxt(a) || ''));
-  if (typeof refreshTree === 'function') refreshTree(true);
+  refreshTree(true);
 });
 main.addEventListener('click', e => {
   const b = e.target.closest('[data-act="audio-cambiar"]');
@@ -102,3 +103,5 @@ main.addEventListener('click', e => {
   const sel = $('select[data-prop="audio"]');
   if (sel) { sel.scrollIntoView({ block: 'center' }); sel.focus(); }
 });
+
+export { AUDIO_POL_AYUDA, audioNoSeOye, conservarLineaHtml, conservarPropHtml };

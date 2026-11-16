@@ -22,7 +22,7 @@ import unittest
 import urllib.request
 from datetime import datetime, timedelta
 
-from support import REPO
+from support import REPO, nuevo_contexto
 
 try:
     from playwright.sync_api import sync_playwright
@@ -146,7 +146,7 @@ class Base(unittest.TestCase):
                 pass
 
     def pagina(self, ancho=1500, alto=920, elegido=True):
-        ctx = self.browser.new_context(bypass_csp=True, viewport={"width": ancho, "height": alto})
+        ctx = nuevo_contexto(self.browser, bypass_csp=True, viewport={"width": ancho, "height": alto})
         if elegido:  # ya se eligió dónde procesar: sin la tarjeta de bienvenida encima
             ctx.add_init_script("localStorage.setItem('procElegido', '1'); localStorage.setItem('avisoProbar', '1')")
         self.addCleanup(ctx.close)

@@ -16,7 +16,7 @@ import wave
 
 import numpy as np
 
-from support import APP  # noqa: F401  (prepara sys.path)
+from support import APP, nuevo_contexto  # noqa: F401  (prepara sys.path)
 import pistas  # noqa: E402
 
 try:
@@ -81,7 +81,7 @@ class ReproductorPistasUI(unittest.TestCase):
                 pass
 
     def pagina(self, navegador=None):
-        ctx = (navegador or self.browser).new_context(bypass_csp=False, viewport={"width": 1400, "height": 900})
+        ctx = nuevo_contexto(navegador or self.browser, bypass_csp=False, viewport={"width": 1400, "height": 900})
         ctx.add_init_script("localStorage.setItem('procElegido', '1'); localStorage.setItem('avisoProbar', '1')")
         self.addCleanup(ctx.close)
         pg = ctx.new_page()
@@ -200,7 +200,7 @@ class ReproductorPistasUI(unittest.TestCase):
         # evaluate de Playwright ya cuenta como gesto): el contexto nace suspendido; al darle a Reproducir se reanuda y
         # suena (sin eso, una grabación en dos pistas quedaría en silencio; revisión 1, mutación M31)
         rel = "Alfa/Dos pistas.wav"
-        ctx = self.browser_gesto.new_context(viewport={"width": 1400, "height": 900})
+        ctx = nuevo_contexto(self.browser_gesto, viewport={"width": 1400, "height": 900})
         self.addCleanup(ctx.close)
         ctx.add_init_script("""localStorage.setItem('procElegido', '1'); localStorage.setItem('avisoProbar', '1');
             (function espera() {

@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import unittest
 
+from support import importa, orden_de_arranque
 from test_frontend import js_defs, read
 
 # ganchos de app.js y notas.js: cada uno una sola vez y protegido con typeof (la app funciona sin perfil.js)
@@ -23,10 +24,9 @@ GUARDED = ("perfilLiveHtml", "perfilMotoresHtml", "perfilResumenHtml", "perfilSa
 
 class PerfilCargaTests(unittest.TestCase):
     def test_index_carga_perfil_el_ultimo(self):
-        html = read("index.html")
-        self.assertIn('<script src="/perfil.js"></script>', html)
+        orden = orden_de_arranque()  # (main.js: antes, el orden de los <script> de index.html)
         for before in ("app.js", "notas.js", "reunion.js", "directo.js"):
-            self.assertLess(html.index(f'<script src="/{before}">'), html.index('<script src="/perfil.js">'))
+            self.assertLess(orden.index(before), orden.index("perfil.js"), before)
 
     def test_ganchos_en_app_js_y_notas_js(self):
         app, notas, src = read("app.js"), read("notas.js"), read("app.js") + read("notas.js")
@@ -35,8 +35,9 @@ class PerfilCargaTests(unittest.TestCase):
         self.assertEqual(notas.count("perfilPropsHtml(a)"), 1)
         self.assertEqual(notas.count("perfilSavedText('idioma'"), 1)
         self.assertEqual(notas.count("perfilSavedText('contexto'"), 1)
-        for fn in GUARDED:
-            self.assertRegex(src, rf"typeof {fn} === 'function'", fn)
+        for fn in GUARDED:  # de perfil.js, por import (antes, con typeof)
+            self.assertTrue(importa(app, fn, "./perfil.js") or importa(notas, fn, "./perfil.js"), fn)
+        self.assertNotIn("typeof perfil", src)
         # el motor del directo, el idioma del resumen y las instrucciones extra viven en el perfil (con fallback)
         self.assertNotIn('<label>Motor para el directo</label>', app)
         # (14/11/2026, punto 12 del review) y se guardan al cambiarlos, cada uno con lo suyo

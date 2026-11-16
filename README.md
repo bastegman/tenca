@@ -564,8 +564,8 @@ seguridad están activadas.
   `agnosticismo`, sin secreto: falla si un fichero versionado lleva una referencia a un mensaje (`msg` y su número),
   el nombre del autor fuera de `LICENSE`, del AppUserModelID y del editor del instalador (este, solo en los ficheros
   del instalador y sus tests), el del asistente que coordinaba el trabajo, el del sistema de agentes o el del modelo
-  que hizo una revisión, una ruta personal de macOS o una ruta a notas que no están en el repo. `_app/static/` queda
-  fuera hasta que su limpieza llegue a `main`. Los commits anteriores al 16/11/2026 siguen teniendo esas notas: la historia no se reescribe.
+  que hizo una revisión, una ruta personal de macOS o una ruta a notas que no están en el repo (también en
+  `_app/static/`). Los commits anteriores al 16/11/2026 siguen teniendo esas notas: la historia no se reescribe.
 
 ### Banco de pruebas del directo en la nube
 

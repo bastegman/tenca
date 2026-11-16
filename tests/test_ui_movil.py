@@ -8,6 +8,7 @@ import os
 import unittest
 
 from test_subir_audio import FIX, Servidor
+from support import nuevo_contexto
 
 try:
     from playwright.sync_api import sync_playwright
@@ -33,7 +34,7 @@ class DesdeElMovilTests(unittest.TestCase):
             cls.s.cerrar()
 
     def contexto(self, **kw):
-        ctx = self.browser.new_context(**kw)
+        ctx = nuevo_contexto(self.browser, **kw)
         self.addCleanup(ctx.close)
         pg = ctx.new_page()
         pg.errores = []
@@ -157,8 +158,9 @@ class DesdeElMovilTests(unittest.TestCase):
         pc.wait_for_selector(".mv-qrimg svg", timeout=10000)
         self.assertEqual(pc.locator(".mv-url code").text_content(), url)
         # «Mostrar otro código» con doble clic: un solo código nuevo
-        pc.evaluate("""() => { window.nAbrir = 0; const orig = api; window.api = (u, b) => {
-            if (u === '/api/movil/abrir') window.nAbrir++; return orig(u, b); }; }""")
+        # (api() es de un módulo: se cuenta en fetch, que es lo que usa por dentro)
+        pc.evaluate("""() => { window.nAbrir = 0; const orig = window.fetch; window.fetch = (u, o) => {
+            if (String(u) === '/api/movil/abrir') window.nAbrir++; return orig(u, o); }; }""")
         self.s.post("/api/movil/cerrar", {})  # (caducado o parado: sale «Mostrar otro código»)
         pc.wait_for_selector(".mv-fin [data-mv='otro']", timeout=5000)
         pc.dblclick(".mv-fin [data-mv='otro']")
@@ -175,8 +177,8 @@ class DesdeElMovilTests(unittest.TestCase):
     def test_cerrar_mientras_se_abre(self):
         """Esc mientras «Mostrar el código» espera al servidor (PowerShell puede tardar): no se queda abierto."""
         pc = self.pc()
-        pc.evaluate("""() => { const orig = api; window.api = (u, b) => u === '/api/movil/abrir'
-            ? new Promise(r => setTimeout(r, 800)).then(() => orig(u, b)) : orig(u, b); }""")
+        pc.evaluate("""() => { const orig = window.fetch; window.fetch = (u, o) => String(u) === '/api/movil/abrir'
+            ? new Promise(r => setTimeout(r, 800)).then(() => orig(u, o)) : orig(u, o); }""")
         pc.evaluate("() => abrirSubir(null, {movil: true})")
         pc.wait_for_selector(".dialog.mvd #rGo:not([disabled])", timeout=10000)
         pc.click("#rGo")
