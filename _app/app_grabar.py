@@ -11,6 +11,7 @@ import threading
 import time
 
 import calendario
+import conservar
 import engines
 import plan as grabar_plan
 import voices
@@ -506,6 +507,9 @@ class Grabar:
                 ctx = " ".join(str(ctx or "").split())[:engines.ABOUT_CHARS]
                 if ctx:
                     props["contexto"] = ctx
+                # qué pasa con el audio al terminar (punto 17): «Guardar» (por defecto) no escribe nada
+                if conservar.politica(b.get("conservar")) != conservar.POR_DEFECTO:
+                    props[conservar.CLAVE] = conservar.politica(b.get("conservar"))
                 if props:  # antes de arrancar el directo, para que ya use ese vocabulario
                     try:
                         self.notes_save({"path": rel, "props": props, "_al_grabar": True})

@@ -16,6 +16,7 @@ from api import WINDOW, captura_estado
 from aprendido import aprendido_publico
 from biblioteca import (IDIOMA_RE, NOTE_KEYS, PARTICIPANTES_ORIGENES, clean_icon, dump_notes, parse_notes,
                         public_transcript, temas, with_theme_id)
+import conservar
 from carpetas import backup_dir, por_reunion, project_folders_resolved, rec_folder_origin
 from common import APP_NAME, ApiError, fold, log, log_exc, parse_srt, read_text, save_text
 from diagnostico import DIAG_FREE, DIAG_MODELS, diag_line, masked, scrub
@@ -191,7 +192,7 @@ class Reuniones:
         return {"version": version, "tree": public}
 
     def transcript(self, q):
-        abs_path = safe(q.get("path"), "file")
+        abs_path = safe(q.get("path"), "reunion")
         activo = getattr(getattr(self, "jobs", None), "active_for", None)
         job = activo(rel_of(abs_path)) if activo is not None else None
         if job is not None and job.live and getattr(job, "edit_lock", None) is not None:
@@ -212,7 +213,7 @@ class Reuniones:
 
     # --- resumen con IA
     def summary_get(self, q):
-        abs_path = safe(q.get("path"), "file")
+        abs_path = safe(q.get("path"), "reunion")
         p = os.path.splitext(abs_path)[0] + ".resumen.md"
         if not os.path.isfile(p):
             return {"exists": False, "ready": self.jobs.summary_ready()}
@@ -232,7 +233,7 @@ class Reuniones:
 
     # --- notas y propiedades (estilo Notion)
     def notes_get(self, q):
-        abs_path = safe(q.get("path"), "file")
+        abs_path = safe(q.get("path"), "reunion")
         md = os.path.splitext(abs_path)[0] + ".md"
         if not os.path.isfile(md):
             return {"props": {}, "body": "", "mtime": 0}
@@ -244,7 +245,7 @@ class Reuniones:
         tema = bool({"proyecto", "workstream", "vocabulario"} & set(b.get("props") or {})) and not b.get("_al_grabar")
         with self.notes_lock:
             # dentro del candado: si la reunion se acaba de mover (se mueve con el cogido), su ruta nueva
-            abs_path = safe(alias_of(b.get("path")), "file")
+            abs_path = safe(alias_of(b.get("path")), "reunion")
             md = os.path.splitext(abs_path)[0] + ".md"
             props, body = parse_notes(read_text(md)) if os.path.isfile(md) else ({}, "")
             antes = self._tema_de(props, abs_path) if tema else None
@@ -264,6 +265,11 @@ class Reuniones:
                         v = v if v in PARTICIPANTES_ORIGENES else ""
                     elif k == "sin_proyecto":  # «No es de ningún proyecto» (Hoy, punto 38): «sí» o se quita
                         v = "sí" if str(v or "").strip().lower() in ("sí", "si", "true", "1") or v is True else ""
+                    elif k == "audio":  # qué pasa con su audio (punto 17): «Guardar» es no poner nada
+                        if conservar.politica(v) != "guardar" and os.path.isfile(conservar.marca_de(abs_path)):
+                            raise ApiError("El audio de esta reunión ya está en la papelera.")
+                        v = conservar.politica(v)
+                        v = "" if v == conservar.POR_DEFECTO else v
                     props[k] = v
             # elegir un proyecto contesta a «¿De qué proyecto es?»: el «ninguno» de antes se olvida; y una reunión que
             # ya tiene su proyecto (workstream, lo que mira Hoy) no es «de ninguno» (revisión 1, P2-6)
@@ -289,6 +295,8 @@ class Reuniones:
             directo = self.jobs.refresh_prompt(rel_of(abs_path))  # el idioma, ya; lo demas, en el siguiente trozo
         self.jobs.schedule_outputs(rel_of(abs_path))  # destinos de salida: el documento con las notas nuevas
         self.library.at = 0
+        if "audio" in (b.get("props") or {}) and hasattr(self, "audio_despertar"):
+            self.audio_despertar()  # si ya toca, que no espere al repaso de cada 10 min
         out = {"props": with_theme_id(props, rel_of(abs_path)),
                "mtime": os.path.getmtime(md) if os.path.isfile(md) else 0}
         if directo is not None and "idioma" in (b.get("props") or {}):

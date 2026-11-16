@@ -198,7 +198,7 @@ class RecTests(unittest.TestCase):
                                     "language": "en-pt", "contexto": "Seguimiento semanal", "mic": "m1",
                                     "sys": "default", "live": True, "preset": "rapido",
                                     "participantes": "Ana, Luis", "sugerido": "outlook", "plan": True,
-                                    "recordar_carpeta": True})
+                                    "recordar_carpeta": True, "conservar": "guardar"})
         self.assertEqual((b["idioma"]["code"], b["carpeta"]["rel"], b["audio"]["mic"], b["transcribe"]["preset"]),
                          (p["rec"]["language"], p["rec"]["folder"], p["rec"]["mic"], p["rec"]["preset"]))
         self.assertEqual(p["resumen"], "Comité de seguimiento → Alfa › Infra · Inglés + portugués")
@@ -631,7 +631,7 @@ class ServidorPlanTests(TempTree):
         p = a.grabar_plan_api({"recientes": True})
         self.assertEqual(p["recientes"], [])
         self.assertEqual([l["clave"] for l in p["lineas"]],
-                         ["carpeta", "idioma", "vocab", "contexto", "transcribe", "resume", "audio"])
+                         ["carpeta", "idioma", "vocab", "contexto", "transcribe", "resume", "audio", "conservar"])
 
 
 class RutasPlanTests(unittest.TestCase):

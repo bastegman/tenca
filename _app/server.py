@@ -110,6 +110,7 @@ from app_ajustes import (  # noqa: F401 (fachada: server.X sigue valiendo)
     Ajustes)
 from app_voces import (  # noqa: F401 (fachada: server.X sigue valiendo)
     Voces)
+from app_conservar import Conservar  # punto 17 del review: qué pasa con el audio de cada reunión
 from window import Window, set_app_id
 # fachada: lo que server.py importaba antes de partirse (15/11/2026) y ya no usa aqui sigue siendo server.X (tests y
 # ramas que lo parchean o lo leen)
@@ -155,10 +156,10 @@ SERVER, WINDOW = None, None  # los pone main(): el servidor HTTP y la ventana pr
 #   PARTES que tenian el mismo objeto (_Fachada), como cuando todo ese codigo estaba aqui. Un mismo nombre en server y
 #   en un modulo de PARTES es siempre el mismo objeto (test_servidor_partido lo comprueba).
 # los modulos que salieron de server.py
-PARTES = ("ajustes", "apagado", "api", "app_ajustes", "app_carpetas", "app_directo",
+PARTES = ("ajustes", "apagado", "api", "app_ajustes", "app_carpetas", "app_conservar", "app_directo",
           "app_grabar", "app_hoy", "app_listas", "app_reuniones", "app_textos", "app_voces",
-          "aprendido", "biblioteca", "carpetas", "diagnostico", "inicio_windows", "instancia",
-          "listas", "paquete", "rutas", "trabajos")
+          "aprendido", "biblioteca", "carpetas", "conservar", "diagnostico", "inicio_windows", "instancia",
+          "listas", "paquete", "rutas", "trabajos", "voces_directo")
 COMPARTIDAS = ("PORT", "URL", "DATA_DIR", "SERVER", "WINDOW", "COMPLETE")  # COMPLETE: lo crea App()
 
 
@@ -238,7 +239,7 @@ if __name__ != "__main__" and getattr(sys.modules.get(__name__), "__dict__", Non
 # ----------------------------------------------------------------------------- API
 
 
-class App(Grabar, Reuniones, Listas, Carpetas, Hoy, Textos, Directo, Ajustes, Voces):
+class App(Grabar, Reuniones, Listas, Carpetas, Hoy, Textos, Directo, Ajustes, Voces, Conservar):
     rec_body = rec_cadena = None  # con que se grabo lo ultimo: la continuacion de una grabacion cortada lo repite
 
     @property
@@ -542,6 +543,8 @@ def main():
     # las huellas de voz de un modelo anterior (al actualizar), rehechas con el de ahora desde sus reuniones, en segundo
     # plano y sin grabar a la vez (app_voces.Voces.rehacer_huellas)
     threading.Thread(target=Handler.app.rehacer_huellas_al_arrancar, daemon=True, name="rehacer-huellas").start()
+    # el audio de las reuniones con «Guardar 15 días» o «Borrar al terminar», a la papelera cuando toque (punto 17)
+    threading.Thread(target=Handler.app.audio_vigia, daemon=True, name="audio-conservar").start()
     SERVER = srv
     _compartir("SERVER")
     for line in ("=" * 64, f"  {APP_NAME.upper()}  ·  {URL}", f"  Carpeta: {ROOT}",

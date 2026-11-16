@@ -110,7 +110,7 @@ def aplicar_aprendido(rel, st):
 
 
 def _aplicar_aprendido(rel, todas):
-    abs_path = safe(rel, "file")
+    abs_path = safe(rel, "reunion")
     proyecto = proyecto_de_reunion(abs_path)
     # las de su proyecto y que sigan siendo seguras (una escrita a mano en settings.json o de una version anterior,
     # como «plan» → «Plan», no se aplica)
@@ -185,7 +185,7 @@ def deshacer_aprendido(rel, de, a):
     """«Deshacer» de una regla en una reunion: vuelve a poner lo que escribio Whisper donde Tenca puso `a` en lugar de
     `de` (las frases que has cambiado despues y ya no se sabe donde esta, no) y no la vuelve a aplicar en esta
     reunion. Devuelve (deshechos, no deshechos)."""
-    abs_path = safe(rel, "file")
+    abs_path = safe(rel, "reunion")
     base = os.path.splitext(abs_path)[0]
     reg = registro_aprendido(rel)
     k = aprender.normal(de)

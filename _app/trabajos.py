@@ -17,10 +17,12 @@ import threading
 import time
 import uuid
 
+import conservar
 import engines
 import explicar
 import live
 import salidas
+import voces_directo
 import voices
 from ajustes import NUBE_OFF, agente_de, moved_rel, procesado_de
 from aprendido import aplicar_aprendido
@@ -31,6 +33,15 @@ from carpetas import backup_dir, save_original, to_recycle_bin
 from common import APP_NAME, ApiError, default_threads, log, log_exc, parse_srt, read_text, save_text, write_bytes
 from listas import LIVE_PRESETS, idioma_repaso, meeting_setup, perfil_de
 from rutas import APP_DIR, DATA_DIR, in_app_tree, safe
+
+
+def _con_audio(rel):
+    """La ruta del audio de una reunion para lo que necesita oirlo (transcribir, el directo, quien habla, una huella):
+    si ya se mando a la papelera (conservar.py), lo dice asi y no con un «No existe el archivo»."""
+    err = conservar.error_sin_audio(safe(rel))
+    if err:
+        raise err
+    return safe(rel, "file")
 
 
 TEXT_GEN = itertools.count(1)  # generaciones del texto en directo (Job.text_gen); next() es atómico con el GIL
@@ -257,6 +268,9 @@ class Jobs:
         # resumen) ya esta en cola cuando se sueltan. on_idle(rel): la reunion ha quedado libre; on_tick(): cada 3 s
         # (App: los movimientos pendientes, cambiar la carpeta en pleno directo)
         self.held, self.on_idle, self.on_tick = {}, None, None
+        # «Quién habla» bloque a bloque mientras se graba, solo con el directo en la nube (punto 56, voces_directo.py)
+        self.voces_directo = voces_directo.VocesDirecto(self)
+        threading.Thread(target=self.voces_directo.bucle, daemon=True, name="voces-directo").start()
         for kind in self.queues:
             threading.Thread(target=self._worker, args=(kind,), daemon=True, name=f"worker-{kind}").start()
         threading.Thread(target=self._watch_recordings, daemon=True, name="live-watch").start()
@@ -401,7 +415,7 @@ class Jobs:
                 # y se dice: hasta fix-lento caia en silencio a Whisper en el PC (medium, ~1 GB y la CPU ocupada
                 # durante toda la reunion) y se veia como «la nube va lenta» o «cargando» (fix-groq, 10/11/2026)
                 log(f"   directo: la nube no está lista ({e}); se transcribe en este PC con {preset}")
-        abs_path = safe(rel, "file")
+        abs_path = _con_audio(rel)
         if self.active_for(rel):
             raise ApiError("Ese audio ya se está transcribiendo.")
         job = Job(rel, os.path.basename(rel), preset, meeting_setup(abs_path, st)["language"] or None)
@@ -653,7 +667,7 @@ class Jobs:
             self._cloud_ready()
         added = []
         for rel in paths:
-            safe(rel, "file")
+            _con_audio(rel)
             if self.active_for(rel):
                 continue
             a = self.library.find(rel)
@@ -703,7 +717,7 @@ class Jobs:
         return cur
 
     def submit_summary(self, rel, auto=False):
-        abs_path = safe(rel, "file")
+        abs_path = safe(rel, "reunion")
         missing = self.summary_missing()
         if missing:
             raise ApiError(missing)
@@ -769,7 +783,7 @@ class Jobs:
             missing = self.summary_missing()  # por si Ajustes cambio mientras esperaba en la cola
             if missing:
                 raise engines.EngineError(missing)
-            abs_path = safe(job.path, "file")
+            abs_path = safe(job.path, "reunion")
             base = os.path.splitext(abs_path)[0]
             data = Transcripts().load(base)
             if not data or not data["segments"]:
@@ -870,7 +884,7 @@ class Jobs:
     def document_for(self, rel):
         """Lo que va al documento: titulo, fecha, duracion, propiedades, resumen (sin su cabecera), notas y
         transcripcion (con quien habla, si se sabe)."""
-        abs_path = safe(rel, "file")
+        abs_path = safe(rel, "reunion")
         base = os.path.splitext(abs_path)[0]
         props, notes = parse_notes(read_text(base + ".md")) if os.path.isfile(base + ".md") else ({}, "")
         # participantes sugeridos por Outlook/Teams sin confirmar: el destino (quiza sincronizado) no los lleva
@@ -919,7 +933,7 @@ class Jobs:
             destinos = perfil_de(self.settings.get())["outputs"]
             if not destinos:
                 return []
-            base = os.path.splitext(safe(rel, "file"))[0]
+            base = os.path.splitext(safe(rel, "reunion"))[0]
             if not any(os.path.isfile(base + e) for e in (".srt", ".txt")):
                 return []
             done = salidas.write_all(self.document_for(rel), destinos, self.registro, log, blocked=in_app_tree)
@@ -1081,7 +1095,7 @@ class Jobs:
             return False
 
     def submit_voices(self, rel, auto=False, then_summary=False):
-        safe(rel, "file")
+        _con_audio(rel)
         if not self.voices_on():
             raise ApiError("Activa «Voces» en Ajustes ⚙ para identificar quién habla.")
         ok, why = voices.available()
@@ -1101,11 +1115,13 @@ class Jobs:
         log(f"🗣 {job.name}  voces{' (automático)' if auto else ''} en cola")
         return job.id
 
-    def _voices_subprocess(self, job, args, idle_timeout=1800, cancel=None):
+    def _voices_subprocess(self, job, args, idle_timeout=1800, cancel=None, reposo=False, hilos=None):
         """python voices.py … con prioridad baja; lee su progreso; cancelar = matar el proceso. Sin job (la huella de
         «Recordar», con el usuario esperando a «Guardar»), por debajo de lo normal y no en reposo: en reposo, con el PC
         ocupado (una llamada, otra identificacion de voces), Windows lo deja sin turno (fix-lento, 10/11/2026).
-        cancel(): otra forma de cancelar, sin job (rehacer las huellas al arrancar: si empieza una grabacion)."""
+        cancel(): otra forma de cancelar, sin job (rehacer las huellas al arrancar: si empieza una grabacion).
+        reposo: en reposo aunque no haya job, y fuera de Windows con nice 19 (quien habla mientras se graba: el directo
+        primero, voces_directo.py); hilos: los de onnxruntime (sin ellos, voices.hilos())."""
         log_path = os.path.join(DATA_DIR, "voces.log")
         try:  # rotacion sencilla: el stderr de onnxruntime no debe crecer sin tope
             if os.path.getsize(log_path) > 1_000_000:
@@ -1113,10 +1129,12 @@ class Jobs:
         except OSError:
             pass
         err = open(log_path, "ab")
-        p = subprocess.Popen([sys.executable, "-u", os.path.join(APP_DIR, "voices.py"), *args, "--data", DATA_DIR,
-                              "--threads", str(voices.hilos())], stdout=subprocess.PIPE, stderr=err, cwd=APP_DIR,
+        nice = ["nice", "-n", "19"] if reposo and os.name != "nt" and shutil.which("nice") else []
+        p = subprocess.Popen([*nice, sys.executable, "-u", os.path.join(APP_DIR, "voices.py"), *args, "--data",
+                              DATA_DIR, "--threads", str(hilos or voices.hilos())], stdout=subprocess.PIPE, stderr=err,
+                             cwd=APP_DIR,
                              creationflags=engines.NO_WINDOW | ((voices.IDLE_PRIORITY or engines.BELOW_NORMAL)
-                                                                if job is not None else engines.BELOW_NORMAL))
+                                                                if job is not None or reposo else engines.BELOW_NORMAL))
         err.close()
         q = queue.Queue()
 
@@ -1169,7 +1187,7 @@ class Jobs:
         vec = (self.voice_vectors.get(rel) or {}).get(h)
         if vec:
             return vec, None
-        abs_path = safe(rel, "file")
+        abs_path = _con_audio(rel)
         args = ["--fingerprint", h, "--diarize", abs_path, "--out", voices.sidecar_path(abs_path)]
         m = self._voices_subprocess(None, args, idle_timeout=600, cancel=cancel)
         vec = (m.get("huellas") or {}).get(h)
@@ -1220,7 +1238,8 @@ class Jobs:
             props = parse_notes(read_text(md))[0] if os.path.isfile(md) else {}
         except (OSError, ValueError):
             return 0
-        if old.get("tramos") and props.get("participantes_origen") not in PARTICIPANTES_ORIGENES:  # la grabadora
+        if old.get("tramos") and not old.get("parcial") \
+                and props.get("participantes_origen") not in PARTICIPANTES_ORIGENES:  # la grabadora
             # deja un sidecar con solo «micro»: eso aun no es una identificacion
             return 0
         texto = props.get("participantes")  # exacto solo si es el texto que escribio la app (no basta el origen: el
@@ -1260,7 +1279,12 @@ class Jobs:
                         raise engines.Cancelled()
                     raise engines.EngineError(str(e))
             side = voices.sidecar_path(abs_path)
+            # quien habla mientras se grababa (voces_directo): desde aqui ya no se escribe nada parcial, y se usan los
+            # mismos bloques (solo se diariza lo que falta)
+            vd = getattr(self, "voces_directo", None)
+            rejilla = vd.final(job.path) if vd is not None else []
             old = voices.read_sidecar(side) or {}  # lo que el usuario ya dijo de esta reunion (se conserva)
+            rejilla = rejilla if old.get("rejilla") else []
             restore = (side, json.loads(json.dumps(old))) if old else None
             uid = (self.voices.user() or {}).get("id")
             # sin huellas y sin huellas por rehacer: una persona que solo tiene las de antes del cambio de modelo
@@ -1274,13 +1298,15 @@ class Jobs:
             self.voice_vectors.pop(job.path, None)
             n = self._participant_hint(abs_path, old)
             res = self._voices_subprocess(job, ["--diarize", abs_path, "--out", side,
-                                                *(["--participantes", str(n)] if n else [])])
+                                                *(["--participantes", str(n)] if n else []), *rejilla])
             huellas = res.get("huellas") or {}
             data = voices.read_sidecar(side)
             if not data or not data.get("tramos"):
                 raise engines.EngineError("No se ha detectado voz en la grabación.")
             voices.identify(data, huellas, self.voices)
             voices.carry_manual(old, data, usuario=uid, known=self.voices.names())
+            if rejilla:  # identificada en directo: volver a identificarla usa los mismos bloques
+                data["rejilla"] = voices.BLOQUE_S
             srt = Transcripts().load(os.path.splitext(abs_path)[0])
             if srt and srt["kind"] == "srt":
                 voices.refresh_frases(data, srt["segments"])

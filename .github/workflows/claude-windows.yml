@@ -20,6 +20,7 @@ on:
       - "_app/api.py"
       - "_app/app_ajustes.py"
       - "_app/app_carpetas.py"
+      - "_app/app_conservar.py"
       - "_app/app_directo.py"
       - "_app/app_grabar.py"
       - "_app/app_hoy.py"
@@ -30,6 +31,7 @@ on:
       - "_app/aprendido.py"
       - "_app/biblioteca.py"
       - "_app/carpetas.py"
+      - "_app/conservar.py"
       - "_app/diagnostico.py"
       - "_app/inicio_windows.py"
       - "_app/instancia.py"
@@ -37,6 +39,7 @@ on:
       - "_app/paquete.py"
       - "_app/rutas.py"
       - "_app/trabajos.py"
+      - "_app/voces_directo.py"
       - "scripts/e2e/claude_windows.py"
       - ".github/workflows/claude-windows.yml"
 

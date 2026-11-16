@@ -112,7 +112,8 @@ function bindAjAlGrabar(d) {
   let seq = 0, t = null, elegido = false;
   const pintar = plan => {
     const tmp = document.createElement('div');
-    tmp.innerHTML = plan.lineas.filter(l => l.clave !== 'contexto' || l.valor).map(l => {
+    // qué pasa con el audio (punto 17) es de cada reunión, sin ajuste fijo: aquí no sale
+    tmp.innerHTML = plan.lineas.filter(l => (l.clave !== 'contexto' || l.valor) && l.clave !== 'conservar').map(l => {
       const ir = { proyecto: 'proyectos', workstream: 'proyectos', procesado: 'procesado' }[l.origen];
       const origen = ir ? `<a href="#" class="gr-origen ag-ir" data-sec-ir="${ir}">${esc(l.origen_txt)}</a>` : `<span class="gr-origen">${esc(l.origen_txt)}</span>`;
       // la ruta en una línea (la entera, al pasar el ratón): con la carpeta por reunión puede ser larga

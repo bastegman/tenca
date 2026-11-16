@@ -382,14 +382,16 @@ class PlanSubirTests(unittest.TestCase):
         p = self.plan({"subir": True, "nombre": "Nota de voz 12", "archivo": "Nota de voz 12"})
         claves = [x["clave"] for x in p["lineas"]]
         self.assertNotIn("audio", claves)
-        self.assertEqual(claves, ["carpeta", "idioma", "vocab", "contexto", "transcribe", "resume"])
+        # (y qué pasa con el audio al terminar, punto 17: también para un audio subido)
+        self.assertEqual(claves, ["carpeta", "idioma", "vocab", "contexto", "transcribe", "resume", "conservar"])
         t = next(x for x in p["lineas"] if x["clave"] == "transcribe")
         self.assertEqual((t["preset"], t["live"]), ("turbo", False))  # el de la cola (Ajustes › Procesado)
         self.assertIn("nada más subirlo", t["valor"])
         self.assertEqual(p["nombre"], {"valor": "Nota de voz 12", "origen": "archivo",
                                        "texto": "del nombre del archivo"})
         self.assertEqual(p["fuente"], "")  # Teams no cuenta: el audio ya existe
-        self.assertEqual(set(p["rec"]), {"name", "vocab", "folder", "language", "contexto", "preset", "plan"})
+        self.assertEqual(set(p["rec"]), {"name", "vocab", "folder", "language", "contexto", "preset", "plan",
+                                         "conservar"})
 
     def test_lo_cambiado_y_lo_que_no_existe(self):
         p = self.plan({"subir": True, "nombre": "Comité", "cambios": {"preset": "rapido"}})

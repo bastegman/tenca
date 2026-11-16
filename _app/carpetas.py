@@ -20,7 +20,8 @@ from ajustes import moved_rel
 from biblioteca import carpetas_reunion, write_outputs
 from common import WINDOWS, ApiError, clean_name, fold, log, log_exc
 from listas import _list_vocab, _norm_dir, _of_project, _project_dir, list_vocab, perfil_folder
-from rutas import AUDIO_EXT, DATA_DIR, LINKS, ROOT, VOCAB_LINKS, _inside, in_app_dir, rel_of, root_name, safe
+from rutas import (AUDIO_EXT, DATA_DIR, LINKS, MARCA_SIN_AUDIO, ROOT, VOCAB_LINKS, _inside, in_app_dir, rel_of,
+                   root_name, safe)
 
 
 # Donde se graba (msgs 1148 y 1158): una carpeta por reunion, «AAAA-MM-DD Nombre», dentro de la carpeta principal de su
@@ -191,7 +192,11 @@ def own_meeting_dir(abs_audio):
     n = 0
     try:
         for _, _, files in os.walk(d):
-            n += sum(1 for f in files if os.path.splitext(f)[1].lower() in AUDIO_EXT)
+            audios = [os.path.splitext(f.lower()) for f in files if os.path.splitext(f)[1].lower() in AUDIO_EXT]
+            # una reunion cuyo audio ya esta en la papelera (conservar.py) tambien cuenta: su marca hace de audio
+            stems = {s for s, _ in audios}
+            n += len(audios) + sum(1 for f in files if f.lower().endswith(MARCA_SIN_AUDIO)
+                                   and f.lower()[:-len(MARCA_SIN_AUDIO)] not in stems)
             if n > 1:
                 return None
     except OSError:
@@ -353,9 +358,11 @@ def theme_moved(props, vid, new, lists, project, ambiguous=False, inside=False):
     return {"proyecto": project[1]} if inside or not ambiguous else {}
 
 
-def to_recycle_bin(paths):
+def to_recycle_bin(paths, aviso_firme=False):
     """A la papelera de Windows (se puede restaurar), no un borrado definitivo.
-    Fuera de Windows (solo desarrollo) se mueven a DATA_DIR/papelera/<fecha>/."""
+    Fuera de Windows (solo desarrollo) se mueven a DATA_DIR/papelera/<fecha>/. aviso_firme: si Windows fuera a borrarlo
+    en firme en vez de mandarlo a la papelera (no cabe, unidad sin papelera), que pregunte en lugar de hacerlo callado
+    (FOF_WANTNUKEWARNING): lo usa el borrado del audio de conservar.py, que ademas lo comprueba antes."""
     if not WINDOWS:
         dest = os.path.join(DATA_DIR, "papelera", time.strftime("%Y%m%d-%H%M%S"))
         os.makedirs(dest, exist_ok=True)
@@ -371,8 +378,8 @@ def to_recycle_bin(paths):
                     ("hNameMappings", ctypes.c_void_p), ("lpszProgressTitle", ctypes.c_void_p)]
 
     buf = ctypes.create_unicode_buffer("\0".join(paths) + "\0\0")
-    op = SHFILEOPSTRUCTW(None, 3, ctypes.cast(buf, ctypes.c_void_p), None,
-                         0x40 | 0x10 | 0x4 | 0x400, False, None, None)  # ALLOWUNDO|NOCONFIRMATION|SILENT|NOERRORUI
+    flags = 0x40 | 0x10 | 0x4 | 0x400 | (0x4000 if aviso_firme else 0)  # ALLOWUNDO|NOCONFIRMATION|SILENT|NOERRORUI
+    op = SHFILEOPSTRUCTW(None, 3, ctypes.cast(buf, ctypes.c_void_p), None, flags, False, None, None)  # (|WANTNUKE)
     if ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op)) != 0 or op.fAnyOperationsAborted:
         raise ApiError("No se pudo mandar a la papelera (¿archivo en uso?).")
 

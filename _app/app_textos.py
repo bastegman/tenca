@@ -31,7 +31,7 @@ class Textos:
             return self._save_transcript(dict(b, path=alias_of(b.get("path"))))
 
     def _save_transcript(self, b):
-        abs_path = safe(b.get("path"), "file")
+        abs_path = safe(b.get("path"), "reunion")
         rel, base = rel_of(abs_path), os.path.splitext(abs_path)[0]
         segs = []
         for s in b.get("segments") or []:
@@ -101,7 +101,7 @@ class Textos:
             return self._restore_transcript(dict(b, path=alias_of(b.get("path"))))
 
     def _restore_transcript(self, b):
-        abs_path = safe(b.get("path"), "file")
+        abs_path = safe(b.get("path"), "reunion")
         rel, base = rel_of(abs_path), os.path.splitext(abs_path)[0]
         bdir = backup_dir(rel)
         if not os.path.isdir(bdir):
@@ -170,7 +170,7 @@ class Textos:
 
     def aprender_get(self, q):
         """GET /api/aprender?path=: las propuestas de esa reunion (ver _propuestas)."""
-        return self._propuestas(safe(q.get("path"), "file"))
+        return self._propuestas(safe(q.get("path"), "reunion"))
 
     def aprender_anadir(self, b):
         """POST /api/aprender/anadir {path, termino, lista ("" = vocabulario general), reglas: [lo que escribio
@@ -178,7 +178,7 @@ class Textos:
         mas) y, de las reglas seguras de esa propuesta, las que marcaste se aplican desde la siguiente transcripcion del
         proyecto de esa lista; las que desmarcaste no se vuelven a proponer. Solo vale lo que se esta proponiendo ahora
         en esa reunion: nada se aprende que no hayas visto."""
-        abs_path = safe(b.get("path"), "file")
+        abs_path = safe(b.get("path"), "reunion")
         termino = aprender.termino_valido(b.get("termino"))
         p = next((x for x in self._propuestas(abs_path)["propuestas"]
                   if termino and aprender.normal(x["termino"]) == aprender.normal(termino)), None)
@@ -261,7 +261,7 @@ class Textos:
         """POST /api/aprender/deshacer {path, de, a}: «Deshacer» de lo que cambio Tenca en esa reunion
         (deshacer_aprendido). Con el candado de las correcciones a mano, como Restaurar original."""
         with self._tx_save_lock:
-            abs_path = safe(b.get("path"), "file")
+            abs_path = safe(b.get("path"), "reunion")
             rel = rel_of(abs_path)
             if self.jobs.active_for(rel):
                 raise ApiError("Se está transcribiendo; espera a que termine.")

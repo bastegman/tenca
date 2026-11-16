@@ -35,6 +35,9 @@ def root_name():
 AUDIO_EXT = {".wav", ".mp3", ".m4a", ".mp4", ".flac", ".ogg", ".aac", ".wma", ".opus", ".mkv", ".mov", ".webm",
              ".oga", ".amr", ".3gp", ".3gpp", ".3ga", ".caf", ".qta", ".aif", ".aiff", ".waptt"}
 TEXT_EXT = {".txt", ".md", ".srt"}
+# una reunion cuyo audio ya se mando a la papelera (punto 17 del review del 14/11/2026, conservar.py): este
+# fichero junto a sus textos dice como era el audio y la mantiene en la biblioteca, con la ruta de siempre
+MARCA_SIN_AUDIO = ".audio.json"
 
 
 MIME = {".wav": "audio/wav", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".mp4": "video/mp4",
@@ -154,7 +157,8 @@ def is_link_root(rel):
 
 
 def safe(rel, must=None):
-    """Ruta absoluta dentro de la carpeta de la app o de una carpeta vinculada (no deja salir de ahi)."""
+    """Ruta absoluta dentro de la carpeta de la app o de una carpeta vinculada (no deja salir de ahi). must: "file"
+    (tiene que existir el archivo), "dir" (la carpeta) o "reunion" (el audio, o una reunion sin el: sin_audio)."""
     rel = (rel or "").replace("\\", "/").strip("/")
     base = ROOT
     if rel.startswith(LINK):
@@ -167,9 +171,19 @@ def safe(rel, must=None):
         raise ApiError(f"Ruta fuera de las carpetas de {APP_NAME}", 403)
     if must == "file" and not os.path.isfile(p):
         raise ApiError("No existe el archivo: " + rel, 404)
+    if must == "reunion" and not os.path.isfile(p) and not sin_audio(p):
+        raise ApiError("No existe el archivo: " + rel, 404)
     if must == "dir" and not os.path.isdir(p):
         raise ApiError("No existe la carpeta: " + rel, 404)
     return p
+
+
+def sin_audio(p):
+    """p es la ruta del audio de una reunion que ya no lo tiene: se mando a la papelera y quedan sus textos (y su
+    MARCA_SIN_AUDIO). safe(rel, "reunion") la da por buena para lo que solo necesita los textos (transcripcion, resumen,
+    notas, quien habla); lo que necesita el audio (escuchar, transcribir, recordar una voz) sigue con "file"."""
+    stem, ext = os.path.splitext(p)
+    return ext.lower() in AUDIO_EXT and not os.path.isfile(p) and os.path.isfile(stem + MARCA_SIN_AUDIO)
 
 
 def in_app_dir(p):

@@ -12,7 +12,7 @@ ingles; hasta el 15/11/2026, TitaNet small), memoria de personas entre reuniones
     y devuelve las huellas por stdout en JSON (como worker.py):
 
         python voices.py --diarize AUDIO --out SIDECAR [--niveles FICHERO] [--data DATA_DIR] [--threads 2]
-                         [--participantes N]
+                         [--participantes N] [--rejilla] [--cache DIR] [--hasta SEGUNDOS]
         python voices.py --fingerprint h2 --diarize AUDIO --out SIDECAR     (recalcular la huella de un hablante)
 
 Umbrales (spike del 30/10/2026): coseno >= 0,55 y segundo candidato a >= 0,10 → misma persona; 0,40-0,55 (o dos
@@ -530,10 +530,17 @@ def mixed(huellas, umbral=DUDOSO):
 
 
 def diarize(samples16, data_dir, threads=2, progress=None, cancelled=None, shift=0.5, umbral_grupos=UMBRAL_GRUPOS,
-            consolidar=True, participantes=None, enlace=None):
+            consolidar=True, participantes=None, enlace=None, rejilla=False, cache=None):
     """Devuelve {"tramos": [{inicio, fin, h}], "hablantes": {h: {segundos, breve, …}}, "huellas": {h: [floats]},
     "duracion_s"}. Audio > 30 min: por bloques, enlazando los clusteres de cada bloque por huella (coseno >= enlace;
-    None = ENLACE, leido al llamar)."""
+    None = ENLACE, leido al llamar).
+
+    rejilla: bloques fijos de BLOQUE_S desde el principio (sin ella, del mismo tamano: 55 min son 27,5 + 27,5). Con la
+    rejilla, los primeros bloques de una grabacion que sigue creciendo son los mismos que los de la grabacion entera.
+    cache: carpeta donde guardar lo de cada bloque (sus grupos, con sus tramos y huellas) por el contenido del bloque
+    (bloque_clave): un bloque ya visto no se vuelve a diarizar. Asi «Quien habla» va bloque a bloque mientras se graba
+    con el directo en la nube (punto 56 del review del 14/11/2026, voces_directo.py) y al terminar solo queda el
+    ultimo. Lo que no esta en la cache, o no se puede leer, se calcula como siempre."""
     enlace = ENLACE if enlace is None else float(enlace)
     progress = progress or (lambda **k: None)
     cancelled = cancelled or (lambda: False)
@@ -543,7 +550,7 @@ def diarize(samples16, data_dir, threads=2, progress=None, cancelled=None, shift
         raise VoicesError("Faltan los modelos de voces (activa la opcion en Ajustes para descargarlos)")
     total_s = len(samples16) / SR
     n_blocks = max(1, int(math.ceil(total_s / BLOQUE_S)))
-    block = int(math.ceil(len(samples16) / n_blocks))
+    block = int(BLOQUE_S * SR) if rejilla else int(math.ceil(len(samples16) / n_blocks))
     speakers = []  # globales: {"vec", "vecs": [(vec, s)], "segundos", "tramos": [(a, b)]}
     for bi in range(n_blocks):
         off = bi * block
@@ -557,22 +564,18 @@ def diarize(samples16, data_dir, threads=2, progress=None, cancelled=None, shift
             progress(stage=f"Identificando voces… ({where})", frac=0.05 + 0.85 * (_bi + done / max(1, n)) / n_blocks)
             return 1 if cancelled() else 0
 
-        # una sesion de onnxruntime por bloque y por fase, que se suelta al terminarla: cada una guarda para si la
-        # memoria que ha llegado a usar (su arena) y, juntas, se sumaban (fix-subir-memoria, 09/11/2026)
-        sd = _diarizer(so, paths, threads, shift, umbral_grupos)
-        if sd.sample_rate != SR:
-            raise VoicesError(f"El modelo espera {sd.sample_rate} Hz")
-        local = {}
-        for s in sd.process(_f32(part), cb).sort_by_start_time():
-            local.setdefault(int(s.speaker), []).append((round(s.start + t_off, 3), round(s.end + t_off, 3)))
-        del sd
-        if cancelled():
-            raise VoicesError("cancelado")
-        ex = _extractor(so, paths, threads)
-        for spk in sorted(local):
+        clave = bloque_clave(part, shift, umbral_grupos) if cache else None
+        grupos = bloque_leer(cache, clave, t_off) if cache else None
+        if grupos is None:
+            grupos = _bloque(so, paths, threads, shift, umbral_grupos, part, t_off, samples16, cb, cancelled)
+            if cache:
+                bloque_guardar(cache, clave, grupos, t_off)
+        elif n_blocks > 1:
+            progress(stage=f"Identificando voces… (bloque {bi + 1}/{n_blocks}, ya hecho)",
+                     frac=0.05 + 0.85 * (bi + 1) / n_blocks)
+        for tramos_g, vec, secs in grupos:
             if cancelled():
                 raise VoicesError("cancelado")
-            vec, secs = fingerprint(ex, samples16, local[spk])
             target = None
             if bi and vec is not None:  # bloque 2 en adelante: ¿es alguien del bloque anterior?
                 best = max(((cosine(vec, g["vec"]), g) for g in speakers if g["vec"] is not None),
@@ -582,14 +585,13 @@ def diarize(samples16, data_dir, threads=2, progress=None, cancelled=None, shift
             if target is None:
                 target = {"vec": None, "vecs": [], "segundos": 0.0, "tramos": []}
                 speakers.append(target)
-            target["tramos"] += local[spk]
+            target["tramos"] += tramos_g
             target["segundos"] += secs
             if vec is not None:
                 target["vecs"].append((vec, secs))
                 mean = sum(v * max(s, 1.0) for v, s in target["vecs"])
                 n = float(np.linalg.norm(mean))
                 target["vec"] = mean / n if n > 0 else None
-        del ex
     order = sorted(range(len(speakers)), key=lambda i: -speakers[i]["segundos"])
     tramos, hablantes, huellas = [], {}, {}
     for k, i in enumerate(order, 1):
@@ -606,6 +608,84 @@ def diarize(samples16, data_dir, threads=2, progress=None, cancelled=None, shift
         out = consolidate(out, samples16, _extractor(so, paths, threads), participantes=participantes)
     progress(stage="Voces identificadas", frac=0.95)
     return out
+
+
+def _bloque(so, paths, threads, shift, umbral_grupos, part, t_off, samples16, cb, cancelled):
+    """Los grupos de un bloque: [(tramos [(a, b)] en segundos de la grabacion, huella | None, segundos de voz)], en el
+    orden de sherpa-onnx (el de siempre: el enlace entre bloques depende de el)."""
+    # una sesion de onnxruntime por bloque y por fase, que se suelta al terminarla: cada una guarda para si la
+    # memoria que ha llegado a usar (su arena) y, juntas, se sumaban (fix-subir-memoria, 09/11/2026)
+    sd = _diarizer(so, paths, threads, shift, umbral_grupos)
+    if sd.sample_rate != SR:
+        raise VoicesError(f"El modelo espera {sd.sample_rate} Hz")
+    local = {}
+    for s in sd.process(_f32(part), cb).sort_by_start_time():
+        local.setdefault(int(s.speaker), []).append((round(s.start + t_off, 3), round(s.end + t_off, 3)))
+    del sd
+    if cancelled():
+        raise VoicesError("cancelado")
+    ex = _extractor(so, paths, threads)
+    grupos = []
+    for spk in sorted(local):
+        if cancelled():
+            raise VoicesError("cancelado")
+        vec, secs = fingerprint(ex, samples16, local[spk])
+        grupos.append((local[spk], vec, secs))
+    del ex
+    return grupos
+
+
+BLOQUES_DIR = "voces-bloques"   # en DATA_DIR: lo de cada bloque ya diarizado (bloque_guardar)
+BLOQUES_VIEJO_S = 3 * 86400     # lo de hace mas de esto ya no es de ninguna reunion en curso
+
+
+def bloque_clave(part, shift=0.5, umbral_grupos=UMBRAL_GRUPOS):
+    """El bloque por su contenido (las muestras de 16 kHz) y por como se diariza (modelo y parametros)."""
+    h = hashlib.sha256(f"{MODEL_ID}|{shift}|{umbral_grupos}|{len(part)}|".encode())
+    a = np.ascontiguousarray(part, dtype="<i2")
+    for i in range(0, len(a), SR * 60):  # por trozos: un memmap de 30 min no se copia entero a memoria
+        h.update(a[i:i + SR * 60].tobytes())
+    return h.hexdigest()[:40]
+
+
+def bloque_leer(carpeta, clave, t_off):
+    """Los grupos de un bloque ya diarizado, con los tramos donde caen ahora (t_off), o None."""
+    try:
+        d = json.loads(read_text(os.path.join(carpeta, clave + ".json")))
+        if d.get("modelo") != MODEL_ID:
+            return None
+        out = []
+        for g in d["grupos"]:
+            vec = np.asarray(g["vec"], dtype=np.float32) if g.get("vec") else None
+            if vec is not None and vec.shape != (DIM,):
+                return None
+            out.append(([(round(float(a) + t_off, 3), round(float(b) + t_off, 3)) for a, b in g["tramos"]], vec,
+                        float(g["segundos"])))
+        return out
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def bloque_guardar(carpeta, clave, grupos, t_off):
+    """Guarda los grupos de un bloque (tramos relativos al bloque). Sin poder, nada: es solo para no repetirlo."""
+    try:
+        os.makedirs(carpeta, exist_ok=True)
+        data = {"modelo": MODEL_ID, "grupos": [
+            {"tramos": [[round(a - t_off, 3), round(b - t_off, 3)] for a, b in tr],
+             "vec": [round(float(x), 6) for x in vec] if vec is not None else None, "segundos": round(secs, 3)}
+            for tr, vec, secs in grupos]}
+        tmp = os.path.join(carpeta, f"{clave}.{os.getpid()}.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        os.replace(tmp, os.path.join(carpeta, clave + ".json"))
+    except OSError:
+        pass
+    try:  # lo viejo fuera (de reuniones que ya terminaron)
+        for e in os.scandir(carpeta):
+            if e.name.endswith((".json", ".tmp")) and time.time() - e.stat().st_mtime > BLOQUES_VIEJO_S:
+                os.remove(e.path)
+    except OSError:
+        pass
 
 
 # ----------------------------------------------------------------------------- emparejado, casado y «Tu» (numpy puro)
@@ -1208,11 +1288,17 @@ def write_sidecar(path, data):
     return data
 
 
+# quien escribe en el sidecar de una grabacion en curso: la linea del micro al parar (write_micro) y quien habla
+# mientras se graba (voces_directo.py), que no se pisan (lo uno leia el sidecar justo antes de que lo otro escribiera)
+SIDECAR_LOCK = threading.RLock()
+
+
 def write_micro(path, micro):
     """Al parar la grabadora propia: guarda la linea de tiempo del micro (sin tramos; no es biometria)."""
-    data = read_sidecar(path) or {"version": 1}
-    data["micro"] = micro
-    return write_sidecar(path, data)
+    with SIDECAR_LOCK:
+        data = read_sidecar(path) or {"version": 1}
+        data["micro"] = micro
+        return write_sidecar(path, data)
 
 
 def identify(data, huellas, voices, micro=None):
@@ -1462,6 +1548,9 @@ def main(argv=None):
     ap.add_argument("--threads", type=int, default=2)
     ap.add_argument("--fingerprint", metavar="H", help="solo recalcular la huella de ese hablante del sidecar")
     ap.add_argument("--participantes", type=int, default=0, help="personas nombradas en la reunion (pista)")
+    ap.add_argument("--rejilla", action="store_true", help="bloques fijos de 30 min desde el principio (diarize)")
+    ap.add_argument("--cache", metavar="DIR", help="lo de cada bloque ya diarizado (diarize; voces_directo.py)")
+    ap.add_argument("--hasta", type=float, default=0, help="solo los primeros SEGUNDOS (una grabacion en curso)")
     a = ap.parse_args(argv)
     proto = os.fdopen(os.dup(1), "wb")
     os.dup2(2, 1)  # cualquier print de las librerias nativas va a stderr y no rompe el protocolo
@@ -1503,7 +1592,10 @@ def main(argv=None):
                   "segundos": sum(b - a_ for a_, b in tramos)})
             return 0
         samples = load_audio_16k(a.diarize, en_disco=tmp)
-        res = diarize(samples, a.data, a.threads, progress, participantes=a.participantes or None)
+        if a.hasta:  # una grabacion en curso: hasta donde ya esta escrita entera (el final aun puede cambiar)
+            samples = samples[:int(a.hasta * SR)]
+        res = diarize(samples, a.data, a.threads, progress, participantes=a.participantes or None,
+                      rejilla=a.rejilla, cache=a.cache)
         micro = None
         if a.niveles:
             try:

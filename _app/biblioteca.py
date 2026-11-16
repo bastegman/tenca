@@ -12,17 +12,20 @@ import re
 import threading
 import time
 
+import conservar
 import engines
 import live
 import voices
 from ajustes import moved_rel
 from common import (APP_NAME, SRT_TIME, ApiError, fmt_srt, fold, log, log_exc, natural_key, parse_srt, read_text,
                     save_text, wav_duration)
-from rutas import AUDIO_EXT, CLOUD_ONLY, DATA_DIR, LINK, LINKS, ROOT, TEXT_EXT, in_app_dir, is_link_root, safe
+from rutas import (AUDIO_EXT, CLOUD_ONLY, DATA_DIR, LINK, LINKS, MARCA_SIN_AUDIO, ROOT, TEXT_EXT, in_app_dir,
+                   is_link_root, safe)
 
 
 # lo que acompana a cada audio (se mueve y borra con el): texto, subtitulos, notas, resumen, hablantes y su exportacion
-SIDE_EXTS = (".txt", ".srt", ".md", ".resumen.md", voices.SIDECAR_EXT, ".hablantes.txt")
+# y, si el audio ya se mando a la papelera (conservar.py), lo que queda de el
+SIDE_EXTS = (".txt", ".srt", ".md", ".resumen.md", voices.SIDECAR_EXT, ".hablantes.txt", MARCA_SIN_AUDIO)
 
 
 DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})[ _-](\d{2})-(\d{2})-(\d{2})")
@@ -112,16 +115,26 @@ def scan(dirs=None):
             except OSError:
                 continue
         audio_stems = {os.path.splitext(k)[0] for k in files if os.path.splitext(k)[1] in AUDIO_EXT}
-        for low, e in files.items():
-            stem_low, ext = os.path.splitext(low)
+        # reuniones cuyo audio se mando a la papelera (conservar.py): su marca hace de audio, con la ruta de siempre
+        sin_audio = {k[:-len(MARCA_SIN_AUDIO)]: e for k, e in files.items()
+                     if k.endswith(MARCA_SIN_AUDIO) and k[:-len(MARCA_SIN_AUDIO)] not in audio_stems}
+        reuniones = audio_stems | set(sin_audio)
+        for low, e in list(files.items()) + [(k + "\0", e) for k, e in sin_audio.items()]:
+            marca = low.endswith("\0")
+            stem_low, ext = (low[:-1], "") if marca else os.path.splitext(low)
             frel = f"{rel}/{e.name}" if rel else e.name
             try:
                 st = e.stat()
             except OSError:
                 continue
             cloud = bool(getattr(st, "st_file_attributes", 0) & CLOUD_ONLY)
+            extra = {}
+            if marca:  # la reunion sin su audio: lo que dice la marca (nombre, duracion, cuando se borro)
+                extra = conservar.entrada_sin_audio(e.path, e.name[:-len(MARCA_SIN_AUDIO)], rel, st)
+                frel, ext = extra.pop("rel"), extra.pop("ext")
+                cloud = False  # la marca puede estar solo en linea; el audio ya no esta en ningun sitio
             if ext in AUDIO_EXT:
-                stem = os.path.splitext(e.name)[0]
+                stem = os.path.splitext(extra.get("name") or e.name)[0]
                 txt, srt = files.get(stem_low + ".txt"), files.get(stem_low + ".srt")
                 m = DATE_RE.search(stem)
                 label = ""
@@ -147,17 +160,20 @@ def scan(dirs=None):
                     spk_mtime = spk.stat().st_mtime if spk else 0
                 except OSError:
                     md_mtime, spk_mtime = 0, 0
-                a = {"name": e.name, "path": frel, "stem": stem, "ext": ext, "size": st.st_size,
+                a = {"name": e.name, "path": frel, "stem": stem, "ext": ext, "size": 0 if marca else st.st_size,
                      "mtime": st.st_mtime, "cloud": cloud, "txt": bool(txt), "srt": bool(srt), "tx_mtime": tx_mtime,
                      "date": "{}-{}-{}T{}:{}:{}".format(*m.groups()) if m else None,
                      "label": label, "folder": rel, "notes_mtime": md_mtime, "has_summary": bool(summ),
                      "spk_mtime": spk_mtime,
                      "_abs": e.path, "_srt": srt.path if srt else None, "_md": md.path if md else None,
                      "_sum": summ.path if summ else None, "_spk": spk.path if spk else None}
+                if marca:
+                    a.update(extra)
+                    a["_abs"] = os.path.join(abs_dir, a["name"])  # la ruta del audio que habia (ya no existe)
                 node["audios"].append(a)
                 flat.append(a)
-            elif ext in TEXT_EXT and stem_low not in audio_stems and not any(
-                    low.endswith(x) and low[:-len(x)] in audio_stems for x in (".resumen.md", ".hablantes.txt")):
+            elif ext in TEXT_EXT and stem_low not in reuniones and not any(
+                    low.endswith(x) and low[:-len(x)] in reuniones for x in (".resumen.md", ".hablantes.txt")):
                 node["docs"].append({"name": e.name, "path": frel, "ext": ext, "size": st.st_size,
                                      "mtime": st.st_mtime, "cloud": cloud})
         node["folders"].sort(key=lambda n: natural_key(n["name"]))
@@ -207,6 +223,7 @@ class Library:
         self.full_at, self.full_wall, self.clock = 0.0, 0.0, time.time  # clock: los tests ponen un reloj falso
         self.rescan_thread = None
         self.scans = 0    # escaneos completos (para los tests y el banco)
+        self.audio_no = {}  # ruta -> por que su audio no puede ir a la papelera (app_conservar; la pagina lo dice)
 
     def _props(self, a):
         p = a["_md"]
@@ -238,7 +255,7 @@ class Library:
                 real = [i for i in hs.values() if not i.get("breve")]
                 info = {"n": len(real), "known": sum(1 for i in real if i.get("persona") and not i.get("provisional")),
                         "doubt": sum(1 for i in real if i.get("persona") and i.get("provisional")),
-                        "tu": bool(d.get("tu")),
+                        "tu": bool(d.get("tu")), "parcial": bool(d.get("parcial")),
                         # sin nombre: ni persona ni «Tú» (Hoy › Para revisar, «2 voces sin nombre»)
                         "sin_nombre": sum(1 for h, i in hs.items() if not i.get("breve") and not i.get("persona")
                                           and h != d.get("tu"))}
@@ -315,6 +332,12 @@ class Library:
             a["props"] = with_theme_id(props, a["path"])  # con el id de su tema en este PC (la cache no lo lleva)
             a["speakers"] = self._speakers(a)
             a["has_speakers"] = bool(a["speakers"])
+            a.update(conservar.publico(a, props))  # que pasara con su audio (punto 17)
+            if self.audio_no.get(a["path"]):
+                a["audio_no"] = self.audio_no[a["path"]]
+            if a.get("sin_audio"):  # el audio esta en la papelera: la duracion que tenia, y nada que medir
+                a["duration"], a["partial"] = a.pop("_dur", None), False
+                continue
             open_dur = self._recording(a)
             if open_dur is not None:  # sin cachear: cambia cada pocos segundos
                 a["duration"] = open_dur
@@ -374,7 +397,7 @@ class Library:
     def _fill_durations(self):
         try:
             for a in list(self.flat):
-                if a.get("duration") is None and not a["cloud"]:
+                if a.get("duration") is None and not a["cloud"] and not a.get("sin_audio"):
                     self.durations.get(a["_abs"], a["path"], a["size"], a["mtime"], False, a["_srt"])
             self.durations.flush()
         finally:
@@ -859,7 +882,8 @@ def public_transcript(data):
 NOTE_KEYS = ("titulo", "icono", "etiquetas", "estado", "participantes", "participantes_origen", "proyecto",
              "workstream", "idioma", "contexto",
              "interrumpida",  # «hh:mm · motivo»: la grabadora se corto (o Tenca se cerro) sin que nadie la parase
-             "sin_proyecto")  # «sí»: «No es de ningún proyecto» en Hoy (punto 38); elegir un proyecto lo quita
+             "sin_proyecto",  # «sí»: «No es de ningún proyecto» en Hoy (punto 38); elegir un proyecto lo quita
+             "audio")  # «15-dias» o «borrar» (punto 17, conservar.py); sin la clave, se guarda
 # un idioma, una mezcla de dos o la de los tres («es-en-pt», punto 54): el de engines, el mismo en todo el servidor
 IDIOMA_RE = engines.IDIOMA_RE
 NOTE_KEY_RE = re.compile(r"^[a-z][a-z0-9_-]*$")  # una clave de la cabecera (las que no conocemos se conservan)

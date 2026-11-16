@@ -9,13 +9,13 @@
    openSettings, CONSENT_TEXT). app.js lo invoca con `typeof abrirGrabar === 'function'`. */
 
 const GR_FILAS = [['carpeta', 'folder'], ['idioma', 'globe'], ['vocab', 'book'], ['contexto', 'text'],
-  ['transcribe', 'monitor'], ['resume', 'spark'], ['audio', 'mic']];
+  ['transcribe', 'monitor'], ['resume', 'spark'], ['audio', 'mic'], ['conservar', 'trash']];
 // qué se puede guardar para más reuniones desde cada línea (D1: por defecto, solo esta reunión)
 const GR_ALCANCES = { carpeta: ['reunion', 'proyecto', 'ajustes'], idioma: ['reunion', 'proyecto', 'ajustes'],
   contexto: ['reunion', 'ajustes'], transcribe: ['reunion', 'ajustes'], audio: ['reunion', 'ajustes'] };
 // las claves del pedido que cambia cada línea
 const GR_CLAVES = { carpeta: ['carpeta'], idioma: ['idioma'], contexto: ['contexto'], transcribe: ['live', 'preset'],
-  audio: ['mic', 'sys'] };
+  audio: ['mic', 'sys'], conservar: ['conservar'] };  // conservar: qué pasa con el audio al terminar (solo esta reunión)
 let G = null;  // la tarjeta abierta: {d, pedido, plan, tocado, recientes, seq, ...; subir: {items, rechazados}}
 // «Usar las listas de una carpeta…» en Proyecto (rama vocab-carpeta, msg 1148: perfil.js define vocabConectar): no es un
 // proyecto, abre el selector de carpetas y vuelve a la tarjeta con lo que tenías
@@ -285,6 +285,11 @@ function grPanelHtml(k) {
       <label class="gr-l" for="grSelSys">Audio del ordenador</label><select data-gr="sys" id="grSelSys">${outs}</select>
       <div class="help">Con las opciones de arriba da igual que conectes o quites los cascos: la grabación sigue con el dispositivo nuevo. Pon algo a sonar para ver que la barra se mueve.</div>${pie()}`;
   }
+  if (k === 'conservar') {  // punto 17: por reunión, sin ajuste fijo (conservar.js tiene los textos)
+    const ayuda = typeof AUDIO_POL_AYUDA === 'object' ? AUDIO_POL_AYUDA : {};
+    return `<div class="gr-conservar" role="radiogroup" aria-label="Qué pasa con el audio al terminar">${[['guardar', 'Guardar'], ['15-dias', 'Guardar 15 días'], ['borrar', 'Borrar al terminar']].map(([v, t]) =>
+      `<label class="${v === l.politica ? 'on' : ''}"><input type="radio" name="grConservar" data-gr="conservar" value="${v}"${v === l.politica ? ' checked' : ''}><b>${t}</b><span>${esc(ayuda[v] || '')}</span></label>`).join('')}</div>${pie(false)}`;
+  }
   if (k === 'vocab') {
     const v = (S.vocab || []).find(x => x.id === p.proyecto.vocab);
     return `<div class="help" style="margin-top:0">El vocabulario es la lista del proyecto › workstream de arriba: nombres, siglas y productos que Whisper debe escribir bien.${v ? ` ${vocabFit(v)}` : ''}</div>
@@ -413,6 +418,7 @@ async function grCambio(e) {
   } else {
     c[k] = x.value;
   }
+  if (k === 'conservar') G.d.querySelectorAll('.gr-conservar label').forEach(lb => lb.classList.toggle('on', lb.querySelector('input').checked));
   if (k === 'mic' || k === 'sys') grMonitor();
   grPedir();
 }
@@ -768,7 +774,7 @@ async function sbSubir() {
     const q = new URLSearchParams({
       folder: p.rec.folder || '', name: uno ? (p.rec.name || '') : it.nombre, fecha: String(uno ? g.pedido.fecha : it.fecha),
       vocab: p.rec.vocab || '', language: p.rec.language || '', contexto: p.rec.contexto || '', preset: p.rec.preset || '',
-      archivo: it.file.name });
+      conservar: p.rec.conservar || '', archivo: it.file.name });
     try {
       hechos.push(await sbEnviar(`/api/subir?${q}`, it.file, frac => { if (G === g) sbProgreso(b, i, items.length, frac); }, g));
     } catch (err) {

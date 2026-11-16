@@ -10,6 +10,27 @@ nada de ningún proyecto concreto.
 empresa. Entre paréntesis va el número de cada hallazgo, el mismo que citan los commits; el informe de la auditoría no
 está en este repositorio. «Desarrollo y CI» es para quien mantiene el repositorio: no cambia nada en la app instalada.
 
+### El audio de cada reunión: guardarlo, 15 días o borrarlo al terminar; y «Quién habla» mientras se graba (16/11/2026)
+
+Rama `motor-lote2b` (puntos 17 y 56 de la revisión del 14/11/2026).
+
+- **Qué pasa con el audio, por reunión** (no es un ajuste fijo): «Guardar» (como siempre), «Guardar 15 días» o «Borrar
+  al terminar». Se elige en la tarjeta de grabar («El audio» › «Cambiar», también al subir un audio) y se cambia en la
+  página de la reunión (Detalles › Audio). La cabecera de la reunión dice qué pasará y cuándo.
+  - Borrar quita **solo el audio**: va a la **papelera de Windows**, nunca se borra en firme. La transcripción, el
+    resumen, las notas y quién habla se quedan, y la reunión sigue en Tenca donde estaba (sin «Reproducir»). Junto a
+    sus textos queda un `<nombre>.audio.json` con cómo era el audio y cuándo se mandó a la papelera.
+  - **Solo cuando la reunión ya está transcrita entera y resumida**, y nada de Tenca la está usando (repaso final,
+    voces, resumen, un movimiento pendiente). Si no, espera, y la reunión dice a qué.
+  - «15 días» cuenta desde que terminó la grabación. Se mira al arrancar, cada 10 minutos y al terminar el resumen;
+    **nunca mientras se graba**.
+  - Si la carpeta no tiene papelera (una unidad de red, un USB, la papelera puesta para borrar al momento) o el audio no
+    cabe en ella, no se borra y la reunión lo dice. Si sacas el audio de la papelera, vuelve a su reunión y se guarda.
+- **«Quién habla» mientras se graba, con el directo en la nube** (con el directo en este PC no cambia nada): cada 30
+  minutos de grabación se identifican las voces de ese bloque, en segundo plano y en reposo, con un solo hilo. La página
+  del directo enseña quién habla en lo ya identificado («hasta el min 30»). Al terminar solo queda el último bloque, así
+  que «Quién habla» llega antes. Se corta solo si la grabación termina o el directo pasa a este PC.
+
 ### Las huellas de voz se rehacen solas al actualizar, y lo que faltaba enganchar al servidor (15/11/2026)
 
 Rama `enganches`: lo que las ramas anteriores de esta revisión dejaron preparado y esperaba al servidor ya partido.

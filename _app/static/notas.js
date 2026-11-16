@@ -279,6 +279,7 @@ function propsHtml(a) {
     <div class="prow"><span class="pk">${I.tag}Etiquetas</span><span class="pv tags">${tags}<input class="tag-add" data-tag-add list="tagList" placeholder="+ añadir" autocomplete="off" spellcheck="false"></span></div>
     <div class="prow"><span class="pk">${I.users}Participantes</span><span class="pv"><input class="pinput" data-prop="participantes" value="${esc(p.participantes || '')}" placeholder="Vacío" autocomplete="off"></span></div>
     ${window.reunionParticipantesHtml?.(a) || ''}
+    ${typeof conservarPropHtml === 'function' ? conservarPropHtml(a) : ''}
     <div class="prow"><span class="pk">${I.chat}Transcripción</span><span class="pv">${statusPill(a)}${a.cloud ? ` <span class="pill cloud">${I.cloud}Solo en OneDrive</span>` : ''}</span></div>
   </div><datalist id="tagList"></datalist>`;
 }

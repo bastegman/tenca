@@ -117,13 +117,15 @@ class Voces:
         return {"id": self.jobs.submit_voices(b.get("path"))}
 
     def speakers_get(self, q):
-        abs_path = safe(q.get("path"), "file")
+        abs_path = safe(q.get("path"), "reunion")
         data = self.jobs.speakers_for(abs_path)
         job = self.jobs.active_for(rel_of(abs_path), kinds=("voces",))
         if not data:
             return {"exists": False, "job": job.public() if job else None, "enabled": self.jobs.voices_on()}
         real = [i for i in data["hablantes"].values() if not i.get("breve")]
         return {"exists": True, "enabled": self.jobs.voices_on(), "job": job.public() if job else None,
+                # mientras se graba con el directo en la nube (punto 56): identificadas hasta ese segundo
+                "parcial": (data.get("parcial") or {}).get("hasta") if isinstance(data.get("parcial"), dict) else None,
                 "hablantes": data["hablantes"], "tu": data.get("tu"), "creado": data.get("creado"),
                 "frases": data.get("frases", []), "who": data.get("_who", []),
                 "n": len(real), "known": sum(1 for i in real if i.get("persona") and not i.get("provisional")),
@@ -196,7 +198,8 @@ class Voces:
         self.library.refresh(max_age=30)
         por_nombre = {}
         for a in list(self.library.flat):
-            if a.get("cloud") or a.get("recording") or not a.get("_spk"):
+            # (una reunion cuyo audio ya esta en la papelera, punto 17, no sirve: para la huella hace falta oirla)
+            if a.get("cloud") or a.get("recording") or not a.get("_spk") or a.get("sin_audio"):
                 continue
             por_nombre.setdefault(a.get("name") or os.path.basename(a["path"]), []).append(a["_abs"])
         cortadas = []
@@ -329,7 +332,7 @@ class Voces:
         (la respuesta: si se calculara fuera, un movimiento que empieza justo despues la dejaria a medias). Devuelve
         (la ruta de la reunion, la nueva si se acaba de mover; lo que devuelva then)."""
         with self._voices_lock():
-            abs_path = safe(alias_of(rel_of(abs_path)), "file")
+            abs_path = safe(alias_of(rel_of(abs_path)), "reunion")
             data = self._speaker_check(abs_path, h, creado)
             fn(data["hablantes"][h], data)
             voices.write_sidecar(voices.sidecar_path(abs_path), data)
@@ -378,10 +381,10 @@ class Voces:
                 raise ApiError("Falta de qué reunión y hablante tomar la huella.")
         abs_path = None
         if path and not h:
-            safe(path, "file")  # como siempre: una reunion que ya no existe se dice
+            safe(path, "reunion")  # como siempre: una reunion que ya no existe se dice
         if path and h:
             with self._voices_lock():  # si la reunion se esta moviendo (B1c), espera y lee la de la ruta nueva
-                abs_path = safe(alias_of(path), "file")
+                abs_path = safe(alias_of(path), "reunion")
                 side = self._speaker_check(abs_path, h, b.get("creado"))  # antes de crear a nadie
             if b.get("recordar") and side.get("creado") and not b.get("creado"):  # guardar una huella: solo de la
                 raise ApiError("Vuelve a abrir la etiqueta para guardar la huella.")  # identificacion que se ve
@@ -411,7 +414,7 @@ class Voces:
         if b.get("recordar"):
             rel = alias_of(rel_of(abs_path))  # la ruta de ahora: la reunion puede haberse movido entretanto
             vec, secs = self.jobs.speaker_vector(rel, h)
-            data = voices.read_sidecar(voices.sidecar_path(safe(rel, "file"))) or {}
+            data = voices.read_sidecar(voices.sidecar_path(safe(rel, "reunion"))) or {}
             secs = secs or (data.get("hablantes", {}).get(h) or {}).get("segundos") or 0
             remembered = v.remember(pid, vec, secs, os.path.basename(abs_path), time.strftime("%Y-%m-%dT%H:%M:%S"))
             log(f"🗣 huella guardada: {v.find(pid)['nombre']} ({remembered} huellas)")
@@ -437,7 +440,7 @@ class Voces:
             for a in list(self.library.flat):  # sin mirar a["_spk"]: en pleno movimiento el sidecar ya esta en la nueva
                 with self._voices_lock():  # como las correcciones: si se esta moviendo, espera y va a la ruta nueva
                     try:
-                        abs_path = safe(alias_of(a["path"]), "file")
+                        abs_path = safe(alias_of(a["path"]), "reunion")
                     except ApiError:
                         continue  # ya no esta
                     side = voices.sidecar_path(abs_path)
@@ -497,7 +500,7 @@ class Voces:
         for rel, hs in hechas:
             with self._voices_lock():
                 try:
-                    abs_path = safe(alias_of(rel), "file")
+                    abs_path = safe(alias_of(rel), "reunion")
                 except ApiError:
                     continue  # la reunion ya no esta (borrada entretanto): no hay nada que deshacer
                 try:
@@ -537,7 +540,7 @@ class Voces:
             raise ApiError("Esa persona ya no existe.")
         uid = (v.user() or {}).get("id")
         with self._voices_lock():  # si la reunion se esta moviendo (B1c), espera y lee la de la ruta nueva
-            abs_path = safe(alias_of(b.get("path")), "file")
+            abs_path = safe(alias_of(b.get("path")), "reunion")
             before = (self._speaker_check(abs_path, h, b.get("creado"))["hablantes"][h]).get("persona")
         abs_path, out = self._speaker_update(abs_path, h, lambda info, d: voices.assign(d, h, pid, uid),
                                              b.get("creado"), then=lambda p: self.speakers_get({"path": rel_of(p)}))
@@ -549,7 +552,7 @@ class Voces:
         """«Es el mismo que…» (msg 1242): dos hablantes de esta reunion son la misma voz (la app la partio en dos)."""
         h, con, v = b.get("h"), b.get("con"), self.jobs.voices
         with self._voices_lock():  # dentro: si la reunion se acaba de mover (B1c), su ruta nueva
-            abs_path = safe(alias_of(b.get("path")), "file")
+            abs_path = safe(alias_of(b.get("path")), "reunion")
             data = self._speaker_check(abs_path, h, b.get("creado"))
             if not con or con == h or con not in (data.get("hablantes") or {}):
                 raise ApiError("Elige otro hablante de esta reunión.")
@@ -567,7 +570,7 @@ class Voces:
 
     def voices_export(self, b):
         with self._voices_lock():  # escribe junto al audio: si la reunion se esta moviendo, espera y va a la nueva
-            abs_path = safe(alias_of(b.get("path")), "file")
+            abs_path = safe(alias_of(b.get("path")), "reunion")
             data = self.jobs.speakers_for(abs_path)
             if not data or not data.get("_who"):
                 raise ApiError("Esta reunión no tiene hablantes identificados (o no tiene .srt).")

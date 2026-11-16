@@ -14,6 +14,7 @@ import threading
 import time
 
 import calendario
+import conservar
 import engines
 from ajustes import moved_rel, settings_moved
 from biblioteca import (COMPLETE, DATE_RE, IDIOMA_RE, SIDE_EXTS, Movimientos, carpetas_reunion, dump_notes, parse_notes,
@@ -23,8 +24,8 @@ from carpetas import (FORMATOS_SUBIR, SUBIENDO, backup_dir, display_rel, fecha_s
 from common import APP_NAME, WINDOWS, ApiError, clean_name, fold, log, log_exc, read_text, save_text
 from listas import _norm_dir, find_vocab, has_vocab_dir, list_vocab, perfil_de
 from recording import notify
-from rutas import (ALIASES, ALIASES_LOCK, AUDIO_EXT, DATA_DIR, LINK, LINKS, ROOT, TEXT_EXT, VLINK, _inside, alias_of,
-                   in_app_dir, is_link_root, rel_of, safe, vocab_link_path)
+from rutas import (ALIASES, ALIASES_LOCK, AUDIO_EXT, DATA_DIR, LINK, LINKS, MARCA_SIN_AUDIO, ROOT, TEXT_EXT, VLINK,
+                   _inside, alias_of, in_app_dir, is_link_root, rel_of, safe, sin_audio, vocab_link_path)
 
 
 class Carpetas:
@@ -76,7 +77,7 @@ class Carpetas:
             return self._delete(dict(b, path=alias_of(b.get("path"))))
 
     def _delete(self, b):
-        p = safe(b.get("path"), "file")
+        p = safe(b.get("path"), "reunion")  # tambien una reunion cuyo audio ya esta en la papelera (sus textos)
         rel = rel_of(p)
         a = self.library.find(rel)
         mine = self.rec and self.rec.alive() and os.path.normcase(self.rec.path) == os.path.normcase(p)
@@ -84,7 +85,7 @@ class Carpetas:
             raise ApiError("Se está grabando o transcribiendo; espera a que termine.")
         if self.jobs.active_for(rel, kinds=("summary",)):
             raise ApiError("Se está resumiendo esta reunión; espera a que termine (o cancela el resumen en la cola).")
-        group = [p]
+        group = [p] if os.path.isfile(p) else []
         stem, ext = os.path.splitext(p)
         own = None
         if ext.lower() in AUDIO_EXT:
@@ -271,6 +272,8 @@ class Carpetas:
         ctx = " ".join(str(ctx or "").split())[:engines.ABOUT_CHARS]
         if ctx:
             props["contexto"] = ctx
+        if conservar.politica(q.get("conservar")) != conservar.POR_DEFECTO:  # qué pasa con su audio (punto 17)
+            props[conservar.CLAVE] = conservar.politica(q.get("conservar"))
         if props:
             try:
                 self.notes_save({"path": rel, "props": props, "_al_grabar": True})
@@ -313,7 +316,7 @@ class Carpetas:
         return self.jobs.busy_for(rel)
 
     def move(self, b):
-        src = safe(b.get("path"), "file")
+        src = safe(b.get("path"), "reunion")
         dest_dir = safe(b.get("folder", ""), "dir")
         if in_app_dir(dest_dir):
             raise ApiError("No se puede mover ahí")
@@ -374,8 +377,16 @@ class Carpetas:
                      if os.path.normcase(os.path.join(own, n)) not in mine]
         else:
             new_dir, moves = dest_dir, []
-        # el audio el ultimo: si algo falla a medias, la reunion sigue en su ruta (move_files deshace lo movido)
-        moves += [(f, os.path.join(new_dir, renamed(f))) for f in sibs] + [(src, os.path.join(new_dir, renamed(src)))]
+        # el audio el ultimo: si algo falla a medias, la reunion sigue en su ruta (move_files deshace lo movido). Sin
+        # audio (ya en la papelera, conservar.py), su marca, que es la que la hace reunion
+        nuevo = os.path.join(new_dir, renamed(src))
+        if audio and sin_audio(src):
+            if os.path.exists(nuevo):  # alli hay otro audio con ese nombre: la marca acabaria siendo suya
+                raise ApiError("Ya existe un archivo con ese nombre: " + os.path.basename(nuevo))
+            sibs.sort(key=lambda f: f.lower().endswith(MARCA_SIN_AUDIO))
+            moves += [(f, os.path.join(new_dir, renamed(f))) for f in sibs]
+        else:
+            moves += [(f, os.path.join(new_dir, renamed(f))) for f in sibs] + [(src, nuevo)]
         seen = {}
         for f, t in moves:  # nada se pisa: ni lo que ya hay en el destino ni dos archivos que acabarian con un nombre
             k = os.path.normcase(t)
@@ -398,7 +409,7 @@ class Carpetas:
                     except OSError:
                         pass
                 raise
-            return self._after_move(src, moves, own, new_dir, fuera, dest_dir)
+            return self._after_move(src, moves, own, new_dir, fuera, dest_dir, nuevo)
 
     def _write_locks(self):
         """Los candados de quien escribe en los archivos de una reunion desde la interfaz (notas_save,
@@ -409,8 +420,8 @@ class Carpetas:
         stack.enter_context(self._tx_save_lock)
         return stack
 
-    def _after_move(self, src, moves, own, new_dir, fuera, dest_dir):
-        old, new = rel_of(src), rel_of(moves[-1][1])
+    def _after_move(self, src, moves, own, new_dir, fuera, dest_dir, nuevo=None):
+        old, new = rel_of(src), rel_of(nuevo or moves[-1][1])
         reg = carpetas_reunion()
         if own and _norm_dir(new_dir) != _norm_dir(own):  # la carpeta de la reunion se ha quedado vacia
             try:
@@ -553,7 +564,10 @@ class Carpetas:
 
     def _al_quedar_libre(self, rel):
         """Jobs.on_idle: la reunion ha terminado su ultimo trabajo. Si tiene un movimiento pendiente, se hace en otro
-        hilo (no se para la cola mientras se mueve un audio grande)."""
+        hilo (no se para la cola mientras se mueve un audio grande). Y el vigilante del audio (punto 17) mira si ya
+        toca mandar el suyo a la papelera («Borrar al terminar»: justo despues del resumen)."""
+        if hasattr(self, "audio_despertar"):
+            self.audio_despertar()
         if self._movs().get(rel):
             threading.Thread(target=self._aplicar_movimientos, args=(rel,), daemon=True, name="mover").start()
 
@@ -821,6 +835,9 @@ class Carpetas:
     def reveal(self, b):
         rel = str(b.get("path") or "")
         p = vocab_link_path(rel) if rel.replace("\\", "/").strip("/").startswith(VLINK) else safe(rel)
+        if sin_audio(p):  # su audio ya esta en la papelera (conservar.py): se senala lo que queda, su transcripcion
+            p = next((os.path.splitext(p)[0] + e for e in (".txt", ".srt", ".md", MARCA_SIN_AUDIO)
+                      if os.path.isfile(os.path.splitext(p)[0] + e)), p)
         if WINDOWS:
             if os.path.isdir(p):
                 subprocess.Popen(["explorer", p])

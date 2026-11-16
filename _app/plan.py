@@ -30,7 +30,11 @@ IDIOMA_TRES = ("es-en-pt", "Español + inglés + portugués")
 IDIOMAS[IDIOMA_TRES[0]] = IDIOMA_TRES[1]
 MESES = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
 DIAS = ("lun", "mar", "mié", "jue", "vie", "sáb", "dom")
-CLAVES_CAMBIOS = ("carpeta", "idioma", "contexto", "mic", "sys", "live", "preset")
+CLAVES_CAMBIOS = ("carpeta", "idioma", "contexto", "mic", "sys", "live", "preset", "conservar")
+# qué pasa con el audio al terminar (punto 17 del review; conservar.py): solo para esta reunión, sin ajuste fijo (msg
+# de Bernardo: «que sea por reu, no fijo»). Copiado y no importado, como IDIOMA_RE (test_motor_lote2b: son los mismos)
+CONSERVAR = {"guardar": "Se guarda", "15-dias": "Se guarda 15 días y luego va a la papelera",
+             "borrar": "A la papelera al terminar (cuando tenga texto y resumen)"}
 ALCANCES = ("reunion", "proyecto", "workstream", "ajustes")
 # el mismo que server.IDIOMA_RE (engines.IDIOMA_RE, con la mezcla de los tres): si no, la tarjeta de grabar ensenaria
 # «es-en-pt» mientras se graba detectando. Copiado y no importado (plan no depende de engines); test_enganches comprueba
@@ -361,6 +365,14 @@ def resolver(st, listas, sug=None, historial=None, pedido=None, carpeta_de=None,
                              "cambiado para esta reunión" if a_origen == "reunion" else "Ajustes › Al grabar",
                              mic=mic, sys=sys_dev, **extra))
 
+    # --- qué pasa con el audio al terminar: «Guardar» salvo que se cambie para esta reunión (no hay ajuste fijo)
+    conservar = str(cambios.get("conservar") or "guardar")
+    conservar = conservar if conservar in CONSERVAR else "guardar"
+    k_origen = "reunion" if conservar != "guardar" else "defecto"
+    lineas.append(_linea("conservar", "El audio", CONSERVAR[conservar], k_origen,
+                         f"cambiado para {esta}" if k_origen == "reunion" else "como siempre",
+                         politica=conservar))
+
     # --- participantes: los de la cita de Outlook (sin confirmar) salvo que la tarjeta los quite
     if "participantes" in pedido:
         part, sugerido = " ".join(str(pedido.get("participantes") or "").split()), ""
@@ -370,9 +382,9 @@ def resolver(st, listas, sug=None, historial=None, pedido=None, carpeta_de=None,
 
     rec = {"name": nombre, "vocab": vid, "folder": base, "language": lang, "contexto": ctx, "mic": mic,
            "sys": sys_dev, "live": live, "preset": preset, "participantes": part, "sugerido": sugerido, "plan": True,
-           "recordar_carpeta": c_origen != "reunion"}
+           "recordar_carpeta": c_origen != "reunion", "conservar": conservar}
     if subir:  # el cuerpo de /api/subir: lo de la reunión y con qué se transcribe, nada de la grabadora
-        rec = {k: rec[k] for k in ("name", "vocab", "folder", "language", "contexto", "preset", "plan")}
+        rec = {k: rec[k] for k in ("name", "vocab", "folder", "language", "contexto", "preset", "plan", "conservar")}
     proyecto = {"vocab": vid, "texto": proyecto_txt(v), "proyecto": v["project"] if v else "",
                 "workstream": v["name"] if v else "", "origen": p_origen, "motivo": motivo}
     plan = {"nombre": {"valor": nombre, "origen": n_origen, "texto": n_txt}, "proyecto": proyecto,

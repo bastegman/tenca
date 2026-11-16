@@ -38,7 +38,7 @@ _HEAD_BYTES = 4096
 # comprueba que no se desincronicen): un documento con uno de esos nombres junto a un audio pasaria por sus notas
 AUDIO_EXT = (".wav", ".mp3", ".m4a", ".mp4", ".flac", ".ogg", ".aac", ".wma", ".opus", ".mkv", ".mov", ".webm",
              ".oga", ".amr", ".3gp", ".3gpp", ".3ga", ".caf", ".qta", ".aif", ".aiff", ".waptt")
-SIDECAR_TAILS = (".txt", ".srt", ".md", ".resumen.md", ".hablantes.json", ".hablantes.txt")
+SIDECAR_TAILS = (".txt", ".srt", ".md", ".resumen.md", ".hablantes.json", ".hablantes.txt", ".audio.json")
 REPLACE_ATTEMPTS = 20  # Word u OneDrive pueden tener el documento abierto un instante (como common.write_bytes)
 
 

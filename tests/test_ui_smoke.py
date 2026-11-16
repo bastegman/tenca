@@ -274,7 +274,8 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         pg.wait_for_selector(".dialog.gr [data-fila='carpeta'] .gr-v code", timeout=8000)
         pg.wait_for_function("!document.querySelector('#rGo').disabled", timeout=5000)
         vis = pg.evaluate("[...document.querySelectorAll('.gr-fila:not(.hidden)')].map(f => f.dataset.fila)")
-        self.assertEqual(vis, ["carpeta", "idioma", "vocab", "transcribe", "resume", "audio"])
+        # (y qué pasa con el audio al terminar, punto 17 del review del 14/11/2026)
+        self.assertEqual(vis, ["carpeta", "idioma", "vocab", "transcribe", "resume", "audio", "conservar"])
         for f in vis:
             self.assertTrue(pg.text_content(f".gr-fila[data-fila='{f}'] .gr-origen").strip(), f)
         b = pg.evaluate("(() => { const r = document.querySelector('#rGo').getBoundingClientRect();"

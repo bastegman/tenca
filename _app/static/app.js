@@ -1038,7 +1038,7 @@ function renderAudioHead(a, force) {
     ? `<button class="btn primary" data-act="live" data-path="${esc(a.path)}">${I.spark}Transcribir en directo</button>`
     : has ? '' : `<button class="btn primary" data-act="tx-toggle">${I.spark}Transcribir</button>`;
   const menu = [
-    !job && !a.recording && has ? `<button type="button" role="menuitem" data-act="tx-toggle">${I.spark}Volver a transcribir</button>` : '',
+    !job && !a.recording && has && !a.sin_audio ? `<button type="button" role="menuitem" data-act="tx-toggle">${I.spark}Volver a transcribir</button>` : '',
     `<button type="button" role="menuitem" data-act="move" data-path="${esc(a.path)}">${I.move}Mover / renombrar</button>`,
     `<button type="button" role="menuitem" data-act="reveal" data-path="${esc(a.path)}">${I.ext}Mostrar en carpeta</button>`,
     a.txt ? `<button type="button" role="menuitem" data-act="open-txt" data-path="${esc(a.path)}">${I.text}Abrir .txt</button>` : '',
@@ -1047,9 +1047,9 @@ function renderAudioHead(a, force) {
   el.innerHTML = `${crumbs(a.folder)}${typeof destinoPendienteHtml === 'function' ? destinoPendienteHtml(a) : ''}
     ${titleRowHtml(a)}
     <div class="pmeta-row"><div class="pmeta"><span>${esc(longTitle(a))}</span><span>${fmtDur(estDuration(a))}</span><button type="button" class="plink${proy ? '' : ' muted'}" data-act="det-proy" title="Cambiar el proyecto (en Detalles)">${esc(proy || 'Sin proyecto')}</button>${statusPill(a)}</div>
-      <div class="pacts"><button class="btn primary" data-act="play" data-path="${esc(a.path)}">${I.play}${S.playing === a.path && !audio.paused ? 'Pausa' : 'Reproducir'}</button>${visible}
+      <div class="pacts">${a.sin_audio ? '' : `<button class="btn primary" data-act="play" data-path="${esc(a.path)}">${I.play}${S.playing === a.path && !audio.paused ? 'Pausa' : 'Reproducir'}</button>`}${visible}
         <span class="pmas"><button class="btn pmas-btn" type="button" data-act="mas" aria-haspopup="menu" aria-expanded="false" aria-label="Más acciones" title="Más acciones">⋯</button><span class="pmenu hidden" role="menu" aria-label="Más acciones">${menu}</span></span></div></div>
-    ${interrumpidaHtml(a)}
+    ${interrumpidaHtml(a)}${typeof conservarLineaHtml === 'function' ? conservarLineaHtml(a) : ''}
     <details class="pdet"${S.detPara === a.path || localStorage.getItem('detalles') === '1' ? ' open' : ''}><summary>Detalles${sinConfirmar ? ' <span class="muted">· participantes sin confirmar</span>' : ''}</summary>${propsHtml(a)}</details>
     ${docs.length ? `<div class="related">${docs.map(d => `<a href="${href('d', d.path)}">${I.doc}${esc(nfc(d.name))}</a>`).join('')}</div>` : ''}`;
   fillTagList();
@@ -1515,7 +1515,7 @@ function renderTxBody(fromModel) {
   const span = i => `<span class="s${i >= fresh ? ' fresh' : ''}" data-i="${i}"${edit}>${hl(tx.segs[i], terms)}</span>`;
   // quien habla (voces.js): etiqueta al cambiar de hablante, parrafo nuevo por turno
   const who = whoFor(tx);
-  const chip = i => who && (i === 0 || who[i] !== who[i - 1]) ? spkChip(who[i]) : '';
+  const chip = i => who && who[i] && (i === 0 || who[i] !== who[i - 1]) ? spkChip(who[i]) : '';
   if (S.mode === 'lines' && tx.kind === 'srt') {
     body.innerHTML = tx.segs.map((s, i) => `<div class="ln"><span class="ts" data-i="${i}">${fmtClock(s.start)}</span><span>${chip(i)}${span(i)}</span></div>`).join('');
   } else {
@@ -1586,7 +1586,19 @@ main.addEventListener('scroll', updateToLive, { passive: true });
 
 // quien habla en cada frase (el sidecar de voces casado con el .srt): el mismo para la pantalla y para «Copiar texto»
 function whoFor(tx) {
-  return tx && S.spk && S.spk.path === tx.path && S.spk.exists && tx.kind === 'srt' && S.spk.who && S.spk.who.length === tx.segs.length ? S.spk.who : null;
+  if (!(tx && S.spk && S.spk.path === tx.path && S.spk.exists && tx.kind === 'srt' && S.spk.who)) return null;
+  // mientras se graba con el directo en la nube (punto 56) las voces van por bloques de 30 min: cada frase, por su
+  // segundo (el directo sigue añadiendo y puede rehacer el último minuto); lo escrito después de lo identificado, nadie
+  if (S.spk.parcial && S.spk.frases) return whoParcial(tx.segs, S.spk.frases);
+  return S.spk.who.length === tx.segs.length ? S.spk.who : null;
+}
+function whoParcial(segs, frases) {
+  const m = new Map(frases.map(f => [Math.round(f.inicio * 100), f.h]));
+  return segs.map(s => {
+    if (s.start == null) return null;
+    const k = Math.round(s.start * 100);
+    return m.get(k) ?? m.get(k - 1) ?? m.get(k + 1) ?? null;
+  });
 }
 
 // «Copiar texto»: como en pantalla, un parrafo por turno y el nombre de quien habla al cambiar (msg 1160)
@@ -1691,6 +1703,7 @@ $('#gq').addEventListener('keydown', e => { if (e.key === 'Enter') { clearTimeou
 
 /* ---------------------------------------------------------------- reproductor */
 function loadAudio(a, t, autoplay = true) {
+  if (typeof audioNoSeOye === 'function' && audioNoSeOye(a)) return;  // el audio ya está en la papelera (conservar.js)
   // grabacion en curso: si se pide un punto mas alla de lo que el reproductor cargo, se recarga
   if (S.playing === a.path && isLive(a) && t != null && !(t < (audio.duration || 0) - 1)) S.playing = null;
   if (S.playing !== a.path) {

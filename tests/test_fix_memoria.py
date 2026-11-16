@@ -152,7 +152,8 @@ class HilosTests(unittest.TestCase):
         self.assertIn(voices.hilos(), (2, 3, 4))
 
     def test_el_servidor_los_usa(self):
-        self.assertIn('"--threads", str(voices.hilos())', codigo_del_servidor())
+        # (salvo quien pide otros: «Quién habla» mientras se graba usa 1 hilo, voces_directo.HILOS; punto 56)
+        self.assertIn('"--threads", str(hilos or voices.hilos())', codigo_del_servidor())
 
 
 # ----------------------------------------------------------------------------- decode_16k con dobles de PyAV
