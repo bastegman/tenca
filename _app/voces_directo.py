@@ -12,7 +12,9 @@ El directo es la prioridad (condición de Bernardo: «no puede ir más lento»):
 nada (Whisper ya usa la CPU), y en la nube el subproceso va en prioridad de reposo (Windows; nice 19 fuera), con un
 solo hilo, y se corta en cuanto la grabación termina, el directo pasa a este PC o la app se cierra. Lo medido está en
 scripts/directo_bench.py (--con-voces) y en la nota de la rama."""
+import hashlib
 import os
+import shutil
 import threading
 import time
 import uuid
@@ -23,6 +25,7 @@ from common import log, log_exc
 from rutas import DATA_DIR, safe
 
 PASO_S = 15        # cada cuánto se mira si algún directo en la nube ha completado un bloque
+VIEJO_S = 12 * 3600  # lo de los bloques de una reunión que no se ha cerrado en tanto tiempo (la app se cerró…), fuera
 MARGEN_S = 20      # segundos grabados más allá del bloque: la grabadora escribe con ~1 s de retraso
 HILOS = 1          # hilos de onnxruntime: el resto de la CPU, para el directo y la llamada
 
@@ -31,8 +34,40 @@ def en_la_nube(job):
     return (engines.PRESETS_BY_ID.get(getattr(job, "preset", None)) or {}).get("engine") == "cloud"
 
 
-def cache_dir():
-    return os.path.join(DATA_DIR, voices.BLOQUES_DIR)
+def cache_dir(audio_abs):
+    """Lo de cada bloque de esa grabación (voices.bloque_guardar): en una carpeta suya, que se borra en cuanto termina
+    su identificación de siempre (lleva las huellas de voz de todos los que hablan; revisión 1, P2), al arrancar si
+    es vieja y al apagar «Voces»."""
+    k = hashlib.md5(os.path.normcase(os.path.abspath(audio_abs)).encode("utf-8")).hexdigest()[:16]
+    return os.path.join(DATA_DIR, voices.BLOQUES_DIR, k)
+
+
+def borrar_cache(audio_abs):
+    shutil.rmtree(cache_dir(audio_abs), ignore_errors=True)
+
+
+def purgar(todo=False):
+    """Las carpetas de bloques viejas (o todas: «Voces» apagado). Devuelve cuántas."""
+    base, n = os.path.join(DATA_DIR, voices.BLOQUES_DIR), 0
+    try:
+        entradas = list(os.scandir(base))
+    except OSError:
+        return 0
+    for e in entradas:
+        try:
+            viejo = time.time() - e.stat().st_mtime > VIEJO_S
+        except OSError:
+            continue
+        if todo or viejo:
+            if e.is_dir(follow_symlinks=False):
+                shutil.rmtree(e.path, ignore_errors=True)
+            else:
+                try:
+                    os.remove(e.path)
+                except OSError:
+                    continue
+            n += 1
+    return n
 
 
 class VocesDirecto:
@@ -93,7 +128,7 @@ class VocesDirecto:
         self.en_curso = (rel, hasta)
         try:
             res = jobs._voices_subprocess(None, ["--diarize", abs_path, "--out", tmp, "--rejilla", "--cache",
-                                                 cache_dir(), "--hasta", str(hasta)],
+                                                 cache_dir(abs_path), "--hasta", str(hasta)],
                                           idle_timeout=1800, cancel=lambda: not self.sigue(job), reposo=True,
                                           hilos=HILOS)
             data = voices.read_sidecar(tmp)
@@ -114,20 +149,23 @@ class VocesDirecto:
         if not data or not data.get("tramos"):
             self.hechos[rel] = hasta
             return False
-        huellas = res.get("huellas") or {}
         with self.lock, voices.SIDECAR_LOCK:
             if not self.sigue(job) or jobs.active_for(rel, kinds=("voces",)):
                 return False
             side = voices.sidecar_path(abs_path)
             old = voices.read_sidecar(side) or {}
             uid = (jobs.voices.user() or {}).get("id")
-            voices.identify(data, huellas, jobs.voices)
-            voices.carry_manual(old, data, usuario=uid, known=jobs.voices.names())
+            voices.identify(data, res.get("huellas") or {}, jobs.voices)
+            # lo que dijiste de las voces del bloque anterior (sus nombres), medido solo hasta donde llegaba
+            antes = (old.get("parcial") or {}).get("hasta") if isinstance(old.get("parcial"), dict) else None
+            voices.carry_manual(old, data, usuario=uid, known=jobs.voices.names(), hasta=antes)
             data["micro"] = old.get("micro")
             data["parcial"] = {"hasta": hasta}
             data["rejilla"] = voices.BLOQUE_S  # al terminar, los mismos bloques (_run_voices: --rejilla y la cache)
             voices.write_sidecar(side, data)
-            jobs.voice_vectors[rel] = huellas
+            # (las huellas no se guardan en jobs.voice_vectors: con el bloque siguiente, «h2» puede ser otra voz;
+            # «Recordar» espera al final: Jobs.speaker_vector)
+            jobs.voice_vectors.pop(rel, None)
         self.hechos[rel] = hasta
         jobs.library.at = 0
         real = [i for i in data["hablantes"].values() if not i.get("breve")]
@@ -135,10 +173,11 @@ class VocesDirecto:
             f"{time.time() - t0:.0f} s)")
         return True
 
-    def final(self, rel):
+    def final(self, rel, audio_abs):
         """Empieza la identificación de siempre de esa reunión: lo parcial ya no se escribe (y el subproceso de un
         bloque que siga en marcha se corta). Devuelve los argumentos de voices.py para usar los mismos bloques y lo ya
-        hecho; quien llama solo los pasa si el sidecar dice que se identificó en directo («rejilla»)."""
+        hecho; quien llama solo los pasa si el sidecar dice que se identificó en directo («rejilla») y, al terminar
+        bien, borra la carpeta de sus bloques (borrar_cache)."""
         with self.lock:
             self.finales.add(rel)
-        return ["--rejilla", "--cache", cache_dir()]
+        return ["--rejilla", "--cache", cache_dir(audio_abs)]

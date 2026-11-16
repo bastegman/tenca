@@ -41,13 +41,16 @@ function renderVoicesBar(a) {
     const sinNombre = qhFilas(s).filter(f => !f.nombre).length;
     if (S.irQuien === a.path) { S.qhAbierto = a.path; S.irQuien = null; S.qhIr = true; }
     const abierto = S.qhAbierto === a.path;
-    // mientras se graba con el directo en la nube (punto 56): identificadas por bloques de 30 min
-    const parcial = s.parcial ? ` · hasta el min ${Math.round(s.parcial / 60)} (el resto, al terminar)` : '';
+    // mientras se graba con el directo en la nube (punto 56): identificadas por bloques de 30 min; si la grabación ya
+    // terminó y la identificación del resto no llegó a hacerse (se canceló o falló), se dice cómo terminarla
+    const grabando = typeof isLive === 'function' && isLive(a);
+    const parcial = !s.parcial ? '' : grabando || j ? ` · hasta el min ${Math.round(s.parcial / 60)} (el resto, al terminar)`
+      : ` · solo hasta el min ${Math.round(s.parcial / 60)}: «Volver a identificar» hace el resto`;
     html = `<span class="vz-st">${I.voice}Voces: ${s.n} ${s.n === 1 ? 'persona' : 'personas'} · ${s.known} reconocida${s.known === 1 ? '' : 's'}${Object.values(s.hablantes || {}).some(x => x.usuario && !x.provisional) ? ' · Tú' : ''}${parcial}</span>
       <button class="btn sm${sinNombre && !abierto ? ' primary' : ''}" type="button" data-act="qh-abrir" aria-expanded="${abierto}" aria-controls="qhBloque">${abierto ? 'Plegar' : sinNombre ? `Ponles nombre (${sinNombre})` : 'Quién habla'}</button>
       <span class="sp"></span>
       ${S.tx && S.tx.kind === 'srt' ? `<button class="btn ghost sm" data-act="voz-export" title="Guarda <reunión>.hablantes.txt junto al audio">${I.text}Exportar con hablantes</button>` : ''}
-      ${on ? `<button class="btn ghost sm" data-act="voz-identify" title="Repetir la identificación">${I.refresh}Volver a identificar</button>` : ''}
+      ${on && !(typeof isLive === 'function' && isLive(a)) ? `<button class="btn ghost sm" data-act="voz-identify" title="Repetir la identificación">${I.refresh}Volver a identificar</button>` : ''}
       ${abierto ? qhBloqueHtml(a, s) : ''}`;
   } else if (on && (a.txt || a.srt) && !a.recording && !jobFor(a.path)) {
     html = `${last && last.status === 'error' ? `<span class="vz-st err">No se pudieron identificar las voces: ${esc(last.aviso?.frase || last.error || '')}</span>` : '<span class="muted">' + I.voice + 'Quién habla: aún sin identificar</span>'}

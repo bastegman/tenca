@@ -17,16 +17,18 @@ import codecs
 import os
 import re
 import threading
+import time
 
-from common import fold, read_text, write_bytes
+from common import fold, read_text
 from rutas import CLOUD_ONLY
 
 # un leer-cambiar-escribir del .resumen.md a la vez: «marcar» (Hoy y la vista del resumen) y el resumen regenerado
 LOCK = threading.Lock()
+ESCRIBIR_INTENTOS = 3  # marcar: si el resumen está abierto en otro programa (OneDrive un instante), 3 × 0,2 s y se dice
 
 # «- [ ] texto», «* [x] texto», «+ [X] texto», «1. [ ] texto», «2) [ ] texto», con sangría o sin ella; el texto no puede
 # estar vacío. Las mismas líneas abiertas que cuenta plan.tareas_abiertas (test_pendientes lo comprueba).
-_TAREA = re.compile(r"^([ \t]*(?:[-*+]|\d+[.)])[ \t]+\[)([ xX])\][ \t]*(\S.*?)[ \t\r]*$")
+_TAREA = re.compile(r"^([ \t]*(?:[-*+]|\d+[.)])[ \t]+\[)([ xX])\][ \t]*(\S.*)$")  # el final, rstrip (lineal)
 # un minuto de la transcripción entre corchetes: [12:34], [1:02:10], [105:20], [12:34–13:10], [1:12, 3:40]
 _MINUTOS = re.compile(r"\[\s*(?:\d+:)?\d{1,3}:\d{2}(?:[^\]\n]*)\]")
 _PRIMER_MINUTO = re.compile(r"\[\s*(?:(\d+):)?(\d{1,3}):(\d{2})")
@@ -105,9 +107,10 @@ def extraer(texto):
         m = _TAREA.match(linea)
         if not m:
             continue
-        resp, tarea = partir(m.group(3))
-        out.append({"i": i, "hecha": m.group(2) != " ", "texto": m.group(3), "clave": clave_de(m.group(3)),
-                    "responsable": resp, "tarea": tarea, "segundo": primer_segundo(m.group(3)), "pos": m.end(1)})
+        texto = m.group(3).rstrip(" \t\r")
+        resp, tarea = partir(texto)
+        out.append({"i": i, "hecha": m.group(2) != " ", "texto": texto, "clave": clave_de(texto),
+                    "responsable": resp, "tarea": tarea, "segundo": primer_segundo(texto), "pos": m.end(1)})
     return out
 
 
@@ -127,10 +130,13 @@ def marcar(texto, i, tarea, hecha):
     tareas = [t for t in extraer(texto) if t["clave"] == clave]
     if not tareas:
         raise NoEsta("Esa tarea ya no está en el resumen: puede que se haya regenerado o editado. Vuelve a abrirlo.")
-    t = next((t for t in tareas if t["i"] == i), None)
-    if t is None:
+    seg, exacto = primer_segundo(tarea), " ".join((tarea or "").split())
+    t = next((t for t in tareas if t["i"] == i and " ".join(t["texto"].split()) == exacto), None)
+    if t is None:  # se movió (o en su línea está ahora su gemela, la misma tarea en otro minuto): la del mismo texto
         cambian = [t for t in tareas if t["hecha"] != hecha] or tareas
-        t = min(cambian, key=lambda x: (abs(x["i"] - i), x["i"]))
+        t = min(cambian, key=lambda x: (" ".join(x["texto"].split()) != exacto,
+                                        abs(x["segundo"] - seg) if x["segundo"] is not None and seg is not None
+                                        else 1e12, abs(x["i"] - i), x["i"]))
     if t["hecha"] == hecha:
         return texto, t["i"], False
     lineas = texto.split("\n")
@@ -158,7 +164,17 @@ def marcar_fichero(path, i, tarea, hecha):
                        "fichero.")
     nuevo, linea, cambiado = marcar(texto, i, tarea, hecha)
     if cambiado:
-        write_bytes(path, (codecs.BOM_UTF8 if bom else b"") + nuevo.encode("utf-8"))
+        datos = (codecs.BOM_UTF8 if bom else b"") + nuevo.encode("utf-8")
+        for intento in range(ESCRIBIR_INTENTOS):  # pocos: se tienen cogidos los candados (revisión 1, P2)
+            try:
+                with open(path, "r+b") as f:  # en su sitio, como write_bytes (OneDrive y el Explorador no lo ven irse)
+                    f.write(datos)
+                    f.truncate()
+                break
+            except PermissionError:
+                if intento == ESCRIBIR_INTENTOS - 1:
+                    raise
+                time.sleep(0.2)
     return linea, cambiado
 
 
@@ -205,6 +221,16 @@ def _emparejar(hechas, tareas):
     return marcar
 
 
+def _misma_tarea(vieja, tareas, usadas, minuto_s=60):
+    """La tarea del resumen nuevo que es `vieja` con otro responsable, o None (ver conservar_hechas)."""
+    k = normalizar(vieja["tarea"])
+    if len(k.split()) < 3:
+        return None
+    cand = [t for t in tareas if not t["hecha"] and t["i"] not in usadas and normalizar(t["tarea"]) == k
+            and (vieja["segundo"] is None or t["segundo"] is None or abs(t["segundo"] - vieja["segundo"]) <= minuto_s)]
+    return cand[0] if len(cand) == 1 else None
+
+
 def _por_clave(tareas):
     out = {}
     for t in tareas:
@@ -225,12 +251,23 @@ def conservar_hechas(viejo, nuevo):
         return nuevo
     lineas = nuevo.split("\n")
     tareas = extraer(nuevo)
-    for t in _emparejar(hechas, tareas):
+    marcadas = _emparejar(hechas, tareas)
+    for t in marcadas:
         lineas[t["i"]] = _poner(lineas[t["i"]], t, True)
     en_el_nuevo, sobran = {t["clave"] for t in tareas}, []
+    usadas = {t["i"] for t in marcadas}
     for t in hechas:
         if t["clave"] not in en_el_nuevo:
             en_el_nuevo.add(t["clave"])  # (una vez aunque el viejo la tuviera repetida)
+            # la misma tarea con otro responsable: «Persona 2: enviar el acta» y, tras poner nombre a esa voz y
+            # regenerar, «Ana: enviar el acta» (revisión 1 de motor-lote2b, P1). Solo si la tarea, sin el responsable,
+            # es la misma, tiene al menos tres palabras y una sola del nuevo encaja (y en el mismo minuto, si los dos
+            # citan uno): nunca por parecido
+            otra = _misma_tarea(t, tareas, usadas)
+            if otra is not None:
+                usadas.add(otra["i"])
+                lineas[otra["i"]] = _poner(lineas[otra["i"]], otra, True)
+                continue
             sobran.append("- [x] " + t["texto"])
     if not sobran:
         return "\n".join(lineas)
@@ -275,6 +312,13 @@ def solo_en_linea(st):
     return bool(getattr(st, "st_file_attributes", 0) & CLOUD_ONLY)
 
 
+def solo_en_linea_ruta(path):
+    try:
+        return solo_en_linea(os.stat(path))
+    except OSError:
+        return False
+
+
 class Cache:
     """Las tareas de cada .resumen.md, releídas solo si cambian su fecha o su tamaño. Un resumen «solo en línea» de
     OneDrive no se abre (None); tampoco uno que no se puede leer."""
@@ -287,13 +331,13 @@ class Cache:
             st = self.stat(path)
         except OSError:
             return None
-        if solo_en_linea(st):
-            return None
         clave = (st.st_mtime_ns, st.st_size)
         with self.lock:
             hit = self.datos.get(path)
-        if hit and hit[0] == clave:
+        if hit and hit[0] == clave:  # (también si OneDrive lo ha pasado a «solo en línea» sin cambiarlo)
             return hit[1]
+        if solo_en_linea(st):
+            return None
         try:
             tareas = extraer(read_text(path))
         except OSError:

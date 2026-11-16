@@ -478,7 +478,9 @@ function hoyPendHtml() {
   const d = PEND.datos;
   if (!d) return PEND.error ? `<div class="mp-nada">Mis pendientes: ${esc(PEND.error)}</div>` : '';
   const todas = d.tareas || [], abiertas = todas.filter(t => !PEND.hechas.has(t._k));
-  if (!todas.length) return `<div class="mp-nada">${I.check}<span>Mis pendientes: ninguna tarea abierta en los resúmenes de tus reuniones</span></div>`;
+  // los resúmenes que OneDrive tiene «solo en línea» no se abren (se descargarían): se dice cuántos
+  const sinLeer = d.sin_leer ? ` · ${d.sin_leer} ${d.sin_leer === 1 ? 'resumen está' : 'resúmenes están'} solo en OneDrive: ábrelos para ver sus tareas` : '';
+  if (!todas.length) return `<div class="mp-nada">${I.check}<span>Mis pendientes: ${d.sin_leer ? 'ninguna tarea abierta en lo que se puede leer' : 'ninguna tarea abierta en los resúmenes de tus reuniones'}${esc(sinLeer)}</span></div>`;
   // «Tuyas» si hay alguna (también recién marcada, con su «Deshacer»); si no, todas y sin los dos botones
   const tuyas = abiertas.filter(t => t.tuya).length, hayTuyas = todas.some(t => t.tuya);
   const filtro = hayTuyas ? (PEND.filtro || 'tuyas') : 'todas';
@@ -490,7 +492,7 @@ function hoyPendHtml() {
   const filas = vista.map(hoyPendFilaHtml).join('');
   const mas = lista.length - vista.length;
   return `<section class="hoy-pendientes"><div class="mp-h"><h2>Mis pendientes <span class="count">${abiertas.length}</span></h2>${fil}</div>
-    <div class="card hr-lista mp-lista">${filas}</div>
+    <div class="card hr-lista mp-lista">${filas}</div>${sinLeer ? `<div class="muted mp-sin-leer">${esc(sinLeer.slice(3))}</div>` : ''}
     ${mas > 0 ? `<button class="btn ghost sm mp-mas" type="button" data-act="hoy-pend-todas">Ver todas (${lista.length})</button>` : ''}</section>`;
 }
 const hoyPendDe = k => (PEND.datos?.tareas || []).find(t => String(t._id) === k);

@@ -281,6 +281,60 @@ class CacheTests(unittest.TestCase):
         rt.assert_not_called()
 
 
+class Revision1PendientesTests(unittest.TestCase):
+    """Revisión 1 de motor-lote2b, punto 28."""
+
+    def test_regenerar_con_otro_responsable_no_la_reabre(self):
+        """P1: marcas «Persona 2: enviar el presupuesto», pones nombre a esa voz y regeneras: «Ana: enviar el
+        presupuesto» sale hecha y la vieja no se duplica debajo."""
+        viejo = "## Próximos pasos\n- [x] Persona 2: enviar el presupuesto al cliente [12:34]\n- [ ] Yo: demo\n"
+        nuevo = "## Próximos pasos\n- [ ] Ana: enviar el presupuesto al cliente [12:40]\n- [ ] Yo: demo\n"
+        out = pendientes.conservar_hechas(viejo, nuevo)
+        self.assertEqual(out, "## Próximos pasos\n- [x] Ana: enviar el presupuesto al cliente [12:40]\n"
+                              "- [ ] Yo: demo\n")
+
+    def test_por_parecido_nunca(self):
+        """Lo que no es la misma tarea sin el responsable (otra palabra, otro minuto, dos candidatas, o de menos de
+        tres palabras) no se marca: la vieja se añade hecha, como antes."""
+        viejo = "## Próximos pasos\n- [x] Persona 2: enviar el presupuesto al cliente [12:34]\n"
+        for nuevo in ("## Próximos pasos\n- [ ] Ana: enviar el presupuesto revisado al cliente [12:34]\n",
+                      "## Próximos pasos\n- [ ] Ana: enviar el presupuesto al cliente [40:00]\n",
+                      "## Próximos pasos\n- [ ] Ana: enviar el presupuesto al cliente\n"
+                      "- [ ] Luis: enviar el presupuesto al cliente\n"):
+            out = pendientes.conservar_hechas(viejo, nuevo)
+            self.assertNotIn("- [x] Ana", out)
+            self.assertIn("- [x] Persona 2: enviar el presupuesto al cliente [12:34]", out)
+        corto = pendientes.conservar_hechas("- [x] Persona 2: acta\n", "- [ ] Ana: acta\n")
+        self.assertIn("- [ ] Ana: acta", corto)
+
+    def test_la_gemela_no_se_marca(self):
+        """P3: dos tareas iguales en distinto minuto; si las líneas se movieron, se marca la del mismo texto."""
+        texto = "- [ ] Yo: llamar a Ana [10:00]\n- [ ] Yo: llamar a Ana [50:00]\n"
+        nuevo, linea, cambiado = pendientes.marcar(texto, 0, "Yo: llamar a Ana [50:00]", True)
+        self.assertEqual((linea, cambiado), (1, True))
+        self.assertEqual(nuevo, "- [ ] Yo: llamar a Ana [10:00]\n- [x] Yo: llamar a Ana [50:00]\n")
+
+    def test_una_linea_enorme_no_cuelga(self):
+        t0 = time.time()
+        self.assertEqual(len(pendientes.extraer("- [ ] Yo: x" + " " * 40000 + "y\n")), 1)
+        self.assertLess(time.time() - t0, 1.0)
+        self.assertEqual(pendientes.extraer("- [ ] Yo: acta   \r")[0]["texto"], "Yo: acta")
+
+    def test_solo_en_linea_lo_ya_leido_se_sigue_viendo(self):
+        d = tempfile.mkdtemp(prefix="tenca-pend-")
+        self.addCleanup(shutil.rmtree, d, True)
+        p = os.path.join(d, "r.resumen.md")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write("- [ ] Yo: x\n")
+        st = os.stat(p)
+        attrs = {"v": 0}
+        c = pendientes.Cache(stat=lambda q: types.SimpleNamespace(st_file_attributes=attrs["v"],
+                                                                  st_mtime_ns=st.st_mtime_ns, st_size=st.st_size))
+        self.assertEqual(len(c.tareas(p)), 1)
+        attrs["v"] = 0x400000  # «Liberar espacio»: misma fecha y tamaño
+        self.assertEqual(len(c.tareas(p)), 1)
+
+
 # ----------------------------------------------------------------------------- 2. el servidor
 
 class ServidorTests(TempTree):
@@ -402,6 +456,28 @@ class ServidorTests(TempTree):
         self.assertEqual(e.exception.code, 409)
         self.assertIn("ya no está en el resumen", e.exception.msg)
         self.assertEqual(server.read_text(p).split("\n")[5], "- [ ] Ana García: llamar a otra persona")
+
+    def test_post_resumen_que_no_se_puede_escribir(self):
+        """Revisión 1, P2: de solo lectura o abierto en otro programa: un 409 legible en menos de un segundo (antes,
+        ~5 s con el candado de mover cogido y un 500)."""
+        flat = self.flat()
+        a = self.app(flat)
+        t0 = time.time()
+        with mock.patch("pendientes.open", side_effect=PermissionError(13, "denegado"), create=True), \
+                mock.patch("pendientes.time.sleep"):
+            with self.assertRaises(server.ApiError) as cm:
+                a.pendiente_hecha({"path": "Alfa/nueva.wav", "i": 3, "texto": "Yo: acta", "hecha": True})
+        self.assertEqual(cm.exception.code, 409)
+        self.assertIn("No se puede escribir en ese resumen", cm.exception.msg)
+        self.assertLess(time.time() - t0, 1.0)
+
+    def test_get_dice_cuantos_estan_solo_en_onedrive(self):
+        """Revisión 1, P2: los resúmenes «solo en línea» no se abren, pero se dicen (sin_leer)."""
+        a = self.app(self.flat())
+        with mock.patch.object(pendientes.CACHE, "tareas", return_value=None), \
+                mock.patch.object(pendientes, "solo_en_linea_ruta", return_value=True):
+            r = a.pendientes_lista({})
+        self.assertEqual((r["total"], r["sin_leer"]), (0, 3))  # (sin la que no tiene resumen ni la que se graba)
 
     def test_post_peticiones_no_validas(self):
         a = self.app(self.flat())

@@ -10,6 +10,7 @@ import threading
 import time
 
 import engines
+import voces_directo
 import voices
 from biblioteca import Transcripts
 from carpetas import display_rel
@@ -110,6 +111,8 @@ class Voces:
             self._download_models()
         if on:  # las huellas de un modelo anterior que hubiera, ya con los modelos (rehacer_huellas espera la descarga)
             threading.Thread(target=self.rehacer_huellas, daemon=True, name="rehacer-huellas").start()
+        else:  # lo de los bloques de «Quién habla» mientras se graba (punto 56) lleva huellas de voz: fuera
+            voces_directo.purgar(todo=True)
         log(f"🗣 voces {'activadas' if on else 'desactivadas'}")
         return self.voices_state()
 
@@ -323,9 +326,15 @@ class Voces:
     def _voices_lock(self):
         """Quien corrige los hablantes de una reunion desde la interfaz coge el candado de las notas: mientras la
         reunion se mueve (B1c, _move_now) espera y, al soltarlo, alias_of ya da su ruta nueva. Sin el, la correccion
-        se escribia en la ruta vieja y se perdia (revision de la integracion del 08/11/2026)."""
+        se escribia en la ruta vieja y se perdia (revision de la integracion del 08/11/2026). Y el del sidecar
+        (voices.SIDECAR_LOCK): lo identificado por bloques mientras se graba (punto 56) no lo pisa entre leerlo y
+        escribirlo (revision 1 de motor-lote2b, P2)."""
+        stack = contextlib.ExitStack()
         lock = getattr(self, "notes_lock", None)
-        return lock if lock is not None else contextlib.nullcontext()
+        if lock is not None:
+            stack.enter_context(lock)
+        stack.enter_context(voices.SIDECAR_LOCK)
+        return stack
 
     def _speaker_update(self, abs_path, h, fn, creado=None, then=None):
         """Aplica fn(info, data) al hablante h y guarda el sidecar; con `then`, then(ruta) tambien dentro del candado

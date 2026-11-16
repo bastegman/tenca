@@ -270,7 +270,7 @@ function propsHtml(a) {
   const tags = (p.etiquetas || []).map(t => `<span class="tag-chip">${esc(t)}<button data-act="tag-del" data-tag="${esc(t)}" title="Quitar">×</button></span>`).join('');
   return `<div class="props">
     <div class="prow"><span class="pk">${I.calendar}Fecha</span><span class="pv">${esc(longTitle(a))}</span></div>
-    <div class="prow"><span class="pk">${I.clock}Duración</span><span class="pv">${fmtDur(estDuration(a))} <span class="muted">· ${fmtSize(a.size)} · ${esc(a.ext.slice(1).toUpperCase())}</span></span></div>
+    <div class="prow"><span class="pk">${I.clock}Duración</span><span class="pv">${fmtDur(estDuration(a))} <span class="muted">· ${a.sin_audio ? 'audio en la papelera' : `${fmtSize(a.size)} · ${esc(a.ext.slice(1).toUpperCase())}`}</span></span></div>
     <div class="prow"><span class="pk">${I.folder}Carpeta</span><span class="pv"><a href="${a.folder ? href('f', a.folder) : '#/r/'}">${esc(a.folder ? pathLabel(a.folder) : 'Sin clasificar')}</a>
       <button class="btn ghost sm" data-act="move" data-path="${esc(a.path)}">cambiar</button></span></div>
     <div class="prow"><span class="pk">${I.topic}Proyecto</span><span class="pv">${wsSelect(a)}</span></div>

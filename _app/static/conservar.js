@@ -13,15 +13,19 @@ const AUDIO_POL_AYUDA = {
   '15-dias': 'A los 15 días de terminar la grabación, el audio va a la papelera de Windows. La transcripción, el resumen y las notas se quedan.',
   borrar: 'En cuanto la reunión tenga la transcripción y el resumen, el audio va a la papelera de Windows. La transcripción, el resumen y las notas se quedan.',
 };
-// por qué no se ha mandado aún (lo mismo que mira conservar.debe_borrar en el servidor)
+// por qué no se ha mandado aún (conservar.debe_borrar en el servidor: a.audio_espera; y lo que sabe la interfaz)
 const AUDIO_ESPERA = {
   grabando: 'cuando termine de grabarse', sin_texto: 'cuando esté transcrita',
-  a_medias: 'cuando la transcripción llegue hasta el final', sin_resumen: 'cuando tenga resumen',
+  a_medias: 'cuando la transcripción llegue hasta el final',
+  huecos: 'cuando esté transcrita entera: al directo le faltan trozos («Volver a transcribir» la completa)',
+  sin_resumen: 'cuando tenga resumen',
+  voces: 'cuando se sepa quién habla en toda la reunión («Volver a identificar»)',
   ocupada: `cuando ${APP_NAME} termine con ella`, nube: 'cuando OneDrive la tenga en este PC (ahora está solo en línea)',
 };
 const AUDIO_NO = {
   sin_papelera: 'Esta carpeta no tiene papelera de Windows (una unidad de red o un USB, o la papelera borra al momento): el audio no se borra. Bórralo a mano si quieres.',
   grande: 'El audio no cabe en la papelera de Windows (Windows lo borraría para siempre): no se borra. Bórralo a mano si quieres.',
+  en_uso: 'No se ha podido mandar el audio a la papelera: está abierto en otro programa (o en el reproductor). Se vuelve a intentar cada pocos minutos.',
 };
 const AUDIO_MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
@@ -33,12 +37,8 @@ function audioFecha(iso) {  // «30 nov» (y el año si no es este)
 function audioPol(a) { return (a && a.audio_pol) || 'guardar'; }
 function audioEspera(a) {
   if (isLive(a) || a.recording) return 'grabando';
-  if (!(a.txt || a.srt)) return 'sin_texto';
-  if (a.partial || a.duration == null) return 'a_medias';
-  if (!a.has_summary) return 'sin_resumen';
   if (jobFor(a.path)) return 'ocupada';
-  if (a.cloud) return 'nube';
-  return null;
+  return a.audio_espera || null;
 }
 /* qué pasará con el audio, en una frase (null si se guarda y no hay nada que decir) */
 function audioDestinoTxt(a) {
@@ -51,9 +51,10 @@ function audioDestinoTxt(a) {
   if (a.audio_no && AUDIO_NO[a.audio_no]) return AUDIO_NO[a.audio_no];
   const esp = audioEspera(a), hasta = a.audio_hasta ? new Date(a.audio_hasta) : null;
   if (pol === '15-dias' && hasta && hasta > new Date()) {
-    return `El audio irá a la papelera el ${audioFecha(a.audio_hasta)}, 15 días después de grabarla${esp && esp !== 'ocupada' ? ` (si para entonces ya tiene ${esp === 'sin_resumen' ? 'resumen' : 'la transcripción entera'})` : ''}. Los textos se quedan.`;
+    const falta = { sin_texto: 'la transcripción', a_medias: 'la transcripción entera', huecos: 'la transcripción entera', sin_resumen: 'resumen', voces: 'quién habla en toda la reunión' }[esp];
+    return `El audio irá a la papelera el ${audioFecha(a.audio_hasta)}, 15 días después de grabarla${falta ? ` (si para entonces ya tiene ${falta})` : ''}. Los textos se quedan.`;
   }
-  return `El audio irá a la papelera ${esp ? AUDIO_ESPERA[esp] : 'en unos minutos'}. Los textos se quedan.`;
+  return `El audio irá a la papelera ${(esp && AUDIO_ESPERA[esp]) || 'en unos minutos'}. Los textos se quedan.`;
 }
 function conservarLineaHtml(a) {
   const t = audioDestinoTxt(a);

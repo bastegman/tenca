@@ -271,6 +271,7 @@ class Jobs:
         self.held, self.on_idle, self.on_tick = {}, None, None
         # «Quién habla» bloque a bloque mientras se graba, solo con el directo en la nube (punto 56, voces_directo.py)
         self.voces_directo = voces_directo.VocesDirecto(self)
+        voces_directo.purgar(todo=not voices.enabled(settings.get()))  # bloques de reuniones que no se cerraron
         threading.Thread(target=self.voces_directo.bucle, daemon=True, name="voces-directo").start()
         for kind in self.queues:
             threading.Thread(target=self._worker, args=(kind,), daemon=True, name=f"worker-{kind}").start()
@@ -629,6 +630,9 @@ class Jobs:
                 if job.edits:  # lo que transcribio Whisper, para poder "Restaurar original" despues
                     save_original(job.path, segs)
                 COMPLETE.set(job.path)  # llego hasta el final (si se corta antes, queda "a medias")
+                # pero si se salto algun trozo de la nube, su texto tiene huecos hasta que lo recupere el repaso final
+                # (o «Volver a transcribir»): mientras, su audio no va a la papelera (punto 17, conservar.Huecos)
+                conservar.huecos().set(job.path, bool(err))
                 if not self._final_pass(job):  # si hay repaso final, el resumen se hace al acabar este
                     self._after_transcribe(job.path)
                 job.status, job.stage, job.progress = "done", "Hecho", 1.0
@@ -1206,6 +1210,10 @@ class Jobs:
         if vec:
             return vec, None
         abs_path = _con_audio(rel)
+        if (voices.read_sidecar(voices.sidecar_path(abs_path)) or {}).get("parcial"):
+            # identificada por bloques mientras se graba (punto 56): con el bloque siguiente «h2» puede ser otra voz
+            raise ApiError("Mientras se graba no se guarda la huella de una voz: ponle nombre ahora y pulsa "
+                           "«Recordar» al terminar.", 409)
         args = ["--fingerprint", h, "--diarize", abs_path, "--out", voices.sidecar_path(abs_path)]
         m = self._voices_subprocess(None, args, idle_timeout=600, cancel=cancel)
         vec = (m.get("huellas") or {}).get(h)
@@ -1300,9 +1308,10 @@ class Jobs:
             # quien habla mientras se grababa (voces_directo): desde aqui ya no se escribe nada parcial, y se usan los
             # mismos bloques (solo se diariza lo que falta)
             vd = getattr(self, "voces_directo", None)
-            rejilla = vd.final(job.path) if vd is not None else []
+            rejilla = vd.final(job.path, abs_path) if vd is not None else []
             old = voices.read_sidecar(side) or {}  # lo que el usuario ya dijo de esta reunion (se conserva)
             rejilla = rejilla if old.get("rejilla") else []
+            hasta = (old.get("parcial") or {}).get("hasta") if isinstance(old.get("parcial"), dict) else None
             restore = (side, json.loads(json.dumps(old))) if old else None
             uid = (self.voices.user() or {}).get("id")
             # sin huellas y sin huellas por rehacer: una persona que solo tiene las de antes del cambio de modelo
@@ -1322,15 +1331,16 @@ class Jobs:
             if not data or not data.get("tramos"):
                 raise engines.EngineError("No se ha detectado voz en la grabación.")
             voices.identify(data, huellas, self.voices)
-            voices.carry_manual(old, data, usuario=uid, known=self.voices.names())
-            if rejilla:  # identificada en directo: volver a identificarla usa los mismos bloques
-                data["rejilla"] = voices.BLOQUE_S
+            # lo que dijiste de sus voces; si era lo parcial de mientras se grababa, medido hasta donde llegaba
+            voices.carry_manual(old, data, usuario=uid, known=self.voices.names(), hasta=hasta)
             srt = Transcripts().load(os.path.splitext(abs_path)[0])
             if srt and srt["kind"] == "srt":
                 voices.refresh_frases(data, srt["segments"])
             voices.write_sidecar(side, data)
             restore = None
             self.voice_vectors[job.path] = huellas
+            if rejilla:  # lo de sus bloques ya no hace falta (y lleva huellas de voz): fuera
+                voces_directo.borrar_cache(abs_path)
             try:
                 self._suggest_participants(abs_path, data)
             except OSError:
@@ -1476,6 +1486,7 @@ class Jobs:
             # en la nube solo si lo fue este trabajo y, al continuar una a medias, tambien lo de antes
             self._cloud_text().set(job.path, job.engine == "cloud" and (not start or job.path in self._cloud_text()))
             COMPLETE.set(job.path)  # aunque el texto acabe antes que el audio, esta completa
+            conservar.huecos().set(job.path, False)  # transcrita entera: si el directo dejo huecos, ya no los hay
             if job.final_pass:
                 self._final_pass_over(job.path)
             self._after_transcribe(job.path)
@@ -1504,12 +1515,10 @@ class Jobs:
             log(f"✖ {job.name}  {job.error}")
             if not isinstance(e, (engines.EngineError, ApiError)):
                 log_exc()
-            if job.final_pass:  # se queda el texto del directo, y con el se resume
-                self._aprendido(job.path)  # como en _after_transcribe, antes de soltar la reunion (_final_pass_over)
-                self._final_pass_over(job.path)
-                log("   se mantiene el texto del directo")
-                self.write_outputs(job.path)
-                self.auto_summary(job.path)
+            if job.final_pass:  # se queda el texto del directo y, con el, lo que encadena: lo aprendido, los destinos,
+                # las voces y el resumen (como al cancelarlo; antes, sin las voces: un «Quién habla» que se identifico
+                # por bloques mientras se grababa se quedaba a medias)
+                self._final_pass_over(job.path, keep_live_text=True)
         finally:
             job.finished = time.time()
             self.library.at = 0

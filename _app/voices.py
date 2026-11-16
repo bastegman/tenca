@@ -551,10 +551,15 @@ def diarize(samples16, data_dir, threads=2, progress=None, cancelled=None, shift
     total_s = len(samples16) / SR
     n_blocks = max(1, int(math.ceil(total_s / BLOQUE_S)))
     block = int(BLOQUE_S * SR) if rejilla else int(math.ceil(len(samples16) / n_blocks))
+    bounds = [(off, min(off + block, len(samples16))) for off in range(0, len(samples16), block)] or [(0, 0)]
+    if rejilla and len(bounds) > 1 and bounds[-1][1] - bounds[-1][0] < COLA_MIN_S * SR:
+        # una cola corta (la grabacion acabo poco despues de un bloque) va con el bloque anterior: sola, sus pocos
+        # segundos daban una huella que no se parecia a nadie y salia una «persona» de mas (revision 1, P2)
+        bounds[-2:] = [(bounds[-2][0], bounds[-1][1])]
+    n_blocks = len(bounds)
     speakers = []  # globales: {"vec", "vecs": [(vec, s)], "segundos", "tramos": [(a, b)]}
-    for bi in range(n_blocks):
-        off = bi * block
-        part = samples16[off:off + block]
+    for bi, (off, fin) in enumerate(bounds):
+        part = samples16[off:fin]
         if not len(part):
             continue
         t_off = off / SR
@@ -636,6 +641,7 @@ def _bloque(so, paths, threads, shift, umbral_grupos, part, t_off, samples16, cb
 
 
 BLOQUES_DIR = "voces-bloques"   # en DATA_DIR: lo de cada bloque ya diarizado (bloque_guardar)
+COLA_MIN_S = 600.0              # con rejilla, un ultimo bloque mas corto que esto va con el anterior
 BLOQUES_VIEJO_S = 3 * 86400     # lo de hace mas de esto ya no es de ninguna reunion en curso
 
 
@@ -1410,10 +1416,13 @@ def join_speakers(data, h, con, usuario=None, names=None):
     return data
 
 
-def carry_manual(old, new, usuario=None, known=None):
+def carry_manual(old, new, usuario=None, known=None, hasta=None):
     """Volver a identificar no borra lo que el usuario ya dijo: cada hablante nuevo hereda la decision manual del
     hablante antiguo con el que mas coincide en el tiempo (si cubre al menos la mitad de su voz), salvo que esa
-    persona ya no exista (`known`: ids que siguen en voces.json). Modifica new."""
+    persona ya no exista (`known`: ids que siguen en voces.json). Modifica new.
+    hasta: el antiguo solo llegaba hasta ese segundo (lo identificado por bloques mientras se grababa, punto 56): la
+    mitad se mide con la voz del nuevo hasta ahi, no con la de toda la reunion (si no, quien sigue hablando despues
+    perdia el nombre que le pusiste durante la grabacion)."""
     olds = {h: i for h, i in (old.get("hablantes") or {}).items() if i.get("origen") == "manual"}
     if not olds or not new.get("tramos"):
         return new
@@ -1428,8 +1437,11 @@ def carry_manual(old, new, usuario=None, known=None):
                 m[max(0, int(float(t["inicio"]) / step)):max(0, int(math.ceil(float(t["fin"]) / step)))] = True
         return m
     old_masks = {k: mask(old.get("tramos") or [], k) for k in olds}
+    corte = int(math.ceil(float(hasta) / step)) if hasta else None
     for h in list(new.get("hablantes") or {}):
         mine = mask(new["tramos"], h)
+        if corte is not None:
+            mine[corte:] = False
         total = int(mine.sum())
         if not total:
             continue
@@ -1538,6 +1550,22 @@ def _borrar_tmp(path):
             pass
 
 
+def _vigilar_padre(ppid):
+    """Como worker.watch_parent: si la app (el padre) termina, este proceso tambien, aunque este a mitad (antes se
+    quedaba huerfano gastando un nucleo hasta acabar; revision 1 de motor-lote2b). Su .pcm lo borra la app al arrancar
+    (CloudEngine.purge_tmp) o el siguiente subproceso (_borrar_tmp)."""
+    if sys.platform != "win32":
+        while os.getppid() == ppid:
+            time.sleep(2)
+        os._exit(0)
+    import ctypes
+    k32 = ctypes.windll.kernel32
+    h = k32.OpenProcess(0x00100000, False, ppid)  # SYNCHRONIZE
+    if h:
+        k32.WaitForSingleObject(h, 0xFFFFFFFF)
+        os._exit(0)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Diarizacion en local (subproceso de la app)")
     ap.add_argument("--diarize", required=True, metavar="AUDIO")
@@ -1552,6 +1580,8 @@ def main(argv=None):
     ap.add_argument("--cache", metavar="DIR", help="lo de cada bloque ya diarizado (diarize; voces_directo.py)")
     ap.add_argument("--hasta", type=float, default=0, help="solo los primeros SEGUNDOS (una grabacion en curso)")
     a = ap.parse_args(argv)
+    if argv is None:  # como subproceso de la app: si la app muere de golpe, este tambien (no se queda huerfano)
+        threading.Thread(target=_vigilar_padre, args=(os.getppid(),), daemon=True).start()
     proto = os.fdopen(os.dup(1), "wb")
     os.dup2(2, 1)  # cualquier print de las librerias nativas va a stderr y no rompe el protocolo
 

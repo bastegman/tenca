@@ -97,11 +97,14 @@ class PoliticaTests(unittest.TestCase):
     def test_politica_tal_como_venga(self):
         for v, esperado in (("borrar", "borrar"), ("Borrar al terminar", "borrar"), ("15-dias", "15-dias"),
                             ("15 días", "15-dias"), ("Guardar 15 días", "15-dias"), ("guardar", "guardar"),
-                            ("", "guardar"), (None, "guardar"), ("basura", "guardar"), ("30 días", "guardar")):
+                            ("", "guardar"), (None, "guardar"), ("basura", "guardar"), ("30 días", "guardar"),
+                            # revisión 1, P3: lo dudoso se guarda
+                            ("borrar nunca", "guardar"), ("150 días", "guardar"), ("15 días no", "guardar"),
+                            ("15-11-2026 reunion.wav", "guardar"), ("BORRAR", "borrar"), ("15dias", "15-dias")):
             self.assertEqual(conservar.politica(v), esperado, v)
 
     def test_debe_borrar(self):
-        base = {"txt": True, "srt": True, "partial": False, "duration": 600.0, "has_summary": True,
+        base = {"txt": True, "srt": True, "partial": False, "duration": 600.0, "tx_end": 590.0, "has_summary": True,
                 "mtime": time.time(), "cloud": False}
         f = conservar.debe_borrar
         self.assertEqual(f(base, "guardar"), (False, None))
@@ -119,11 +122,22 @@ class PoliticaTests(unittest.TestCase):
         self.assertEqual(f(dict(base, mtime=time.time() - 14 * 86400), "15-dias"), (False, "plazo"))
         # sin resumen no se borra aunque haya pasado el plazo
         self.assertEqual(f(dict(viejo, has_summary=False), "15-dias"), (False, "sin_resumen"))
+        # revisión 1, P1: el texto tiene que llegar de verdad al final. Sin saberse completa, a menos de 60 s (la
+        # etiqueta «a medias» tolera un 5 %: 6 min en 2 h); con huecos de un directo, nunca
+        larga = dict(base, duration=7200.0, tx_end=6850.0)
+        self.assertEqual(f(larga, "borrar"), (False, "a_medias"))
+        self.assertEqual(f(dict(larga, _completa=True), "borrar"), (True, None))
+        self.assertEqual(f(dict(base, _completa=True, _huecos=True), "borrar"), (False, "huecos"))
+        self.assertEqual(f(dict(base, srt=False), "borrar"), (False, "a_medias"))  # solo .txt: sin saber hasta dónde
+        self.assertEqual(f(dict(base, srt=False, _completa=True), "borrar"), (True, None))
+        # revisión 1, P2: «Quién habla» a medias (lo de mientras se grababa) espera a que se identifique entero
+        self.assertEqual(f(dict(base, speakers={"n": 2, "parcial": True}), "borrar"), (False, "voces"))
+        self.assertEqual(f(dict(base, speakers={"n": 2, "parcial": False}), "borrar"), (True, None))
 
     def test_plazo_y_publico(self):
         t = datetime(2026, 11, 1, 18, 30).timestamp()
-        self.assertEqual(conservar.publico({"mtime": t}, {"audio": "15 días"}),
-                         {"audio_pol": "15-dias", "audio_hasta": "2026-11-16T18:30"})
+        self.assertEqual(conservar.publico({"mtime": t, "txt": True}, {"audio": "15 días"}),
+                         {"audio_pol": "15-dias", "audio_hasta": "2026-11-16T18:30", "audio_espera": "a_medias"})
         self.assertEqual(conservar.publico({"mtime": t}, {}), {"audio_pol": "guardar"})
 
     def test_el_plan_y_conservar_dicen_lo_mismo(self):
@@ -146,7 +160,8 @@ class SinAudioTests(Base):
         rel, p = self.reunion()
         marca = self.borrar(rel, p)
         self.assertFalse(os.path.exists(p))
-        self.assertEqual(self.en_papelera(), [os.path.basename(p)])  # a la papelera (fuera de Windows, DATA_DIR)
+        if not WINDOWS:  # a la papelera: fuera de Windows, DATA_DIR/papelera (en Windows, la de verdad)
+            self.assertEqual(self.en_papelera(), [os.path.basename(p)])
         base = os.path.splitext(p)[0]
         for e in (".srt", ".txt", ".md", ".resumen.md", ".audio.json"):
             self.assertTrue(os.path.isfile(base + e), e)
@@ -225,9 +240,11 @@ class SinAudioTests(Base):
     def test_mostrar_en_carpeta_senala_lo_que_queda(self):
         rel, p = self.reunion()
         self.borrar(rel, p)
-        with mock.patch.object(server.subprocess, "Popen") as po:
+        import app_carpetas
+        with mock.patch.object(server.subprocess, "Popen") as po, mock.patch.object(app_carpetas, "WINDOWS", False), \
+                mock.patch.object(app_carpetas, "sys", mock.Mock(platform="darwin")):  # el del Mac: «open -R»
             self.a.reveal({"path": rel})
-        self.assertIn(os.path.splitext(p)[0] + ".txt", " ".join(map(str, po.call_args[0][0])))
+        self.assertEqual(po.call_args[0][0], ["open", "-R", os.path.normpath(os.path.splitext(p)[0] + ".txt")])
 
     def test_si_la_papelera_falla_no_queda_marca(self):
         rel, p = self.reunion()
@@ -280,13 +297,17 @@ class SinAudioTests(Base):
             self.a._rehacer_huellas()
         self.assertEqual(visto, [[]])
 
-    def test_scan_no_se_cae_con_una_marca_rota(self):
+    def test_scan_no_se_cae_con_una_marca_rota_ni_ajena(self):
+        """Una marca rota, o un «.audio.json» de otro programa, no hace una reunión: sus textos salen como documentos
+        (revisión 1, P3)."""
         rel, p = self.reunion()
         os.remove(p)
-        self.write(os.path.relpath(conservar.marca_de(p), self.root), "{esto no es json")
-        a = self.entrada(rel)
-        self.assertTrue(a["sin_audio"])
-        self.assertIsNone(a["duration"])
+        for contenido in ("{esto no es json", json.dumps({"formato": "de otro programa"})):
+            self.write(os.path.relpath(conservar.marca_de(p), self.root), contenido)
+            self.a.library.at = 0
+            self.assertIsNone(self.entrada(rel))
+            alfa = next(f for f in self.a.tree({})["tree"]["folders"] if f["name"] == "Alfa")
+            self.assertIn(os.path.basename(os.path.splitext(p)[0] + ".txt"), [d["name"] for d in alfa["docs"]])
 
 
 # ----------------------------------------------------------------------------- el vigilante
@@ -382,9 +403,11 @@ class VigiaTests(Base):
 
     def test_sacado_de_la_papelera_se_guarda(self):
         rel, p = self.reunion(pol="borrar")
+        with open(p, "rb") as f:
+            audio = f.read()
         self.assertEqual(self.a.audio_repaso(), 1)
-        shutil.copyfile(os.path.join(self.data_dir, "papelera", os.listdir(os.path.join(self.data_dir, "papelera"))[0],
-                                     os.path.basename(p)), p)  # «Restaurar» de la papelera
+        with open(p, "wb") as f:  # «Restaurar» de la papelera: el mismo audio vuelve a su sitio
+            f.write(audio)
         self.a.library.at = 0
         self.assertEqual(self.a.audio_repaso(), 0)
         self.assertTrue(os.path.isfile(p))
@@ -413,6 +436,121 @@ class VigiaTests(Base):
     def test_otra_carpeta_vinculada_de_red_no(self):
         """papelera_motivo fuera de Windows siempre deja (DATA_DIR/papelera); en Windows lo prueba la CI."""
         self.assertIsNone(conservar.papelera_motivo(__file__, 10))
+
+
+class Revision1ConservarTests(Base):
+    """Revisión 1 de motor-lote2b, punto 17."""
+
+    def test_un_directo_con_huecos_no_se_borra_hasta_transcribirse_entero(self):
+        """P1: el directo en la nube se saltó trozos y el repaso final falló: la reunión se da por completa, pero su
+        audio no va a la papelera hasta que una transcripción entera termine bien."""
+        rel, p = self.reunion(pol="borrar")
+        server.COMPLETE.set(rel)
+        jobs = server.Jobs.__new__(server.Jobs)
+        jobs.list, jobs.lock, jobs.settings, jobs.library = [], threading.Lock(), self.a.settings, self.a.library
+        job = server.Job(rel, os.path.basename(rel), "nube", None)
+        job.live, job.recording, job.edits = True, False, {}
+
+        def run(job_, path, opts, write, log):
+            job_.live_error = "HTTP 500 de la nube"  # un trozo saltado
+            return [(0.0, 5.0, "Hola.")], "es"
+        with mock.patch.object(server.live, "run", run), mock.patch.object(jobs, "_final_pass", return_value=True), \
+                mock.patch("trabajos.meeting_setup", return_value={"language": None, "prompt": None, "about": ""},
+                           create=True):
+            jobs.live_worker = jobs.cloud = jobs.summarizer = None
+            jobs._run_live(job, p, self.a.settings.get())
+        self.assertIn(rel, conservar.huecos())
+        self.a.library.at = 0
+        self.assertEqual(self.entrada(rel)["audio_espera"], "huecos")
+        self.assertEqual(self.a.audio_repaso(), 0)
+        self.assertTrue(os.path.isfile(p))
+        # «Volver a transcribir» (o el repaso final) que termina bien: ya no hay huecos
+        conservar.huecos().set(rel, False)
+        self.a.library.at = 0
+        self.assertEqual(self.a.audio_repaso(), 1)
+
+    def test_los_huecos_siguen_a_la_reunion(self):
+        rel, p = self.reunion()
+        conservar.huecos().set(rel)
+        os.makedirs(os.path.join(self.root, "Beta"))
+        r = self.a.move({"path": rel, "folder": "Beta"})
+        self.assertIn(r["path"], conservar.huecos())
+        self.assertNotIn(rel, conservar.huecos())
+        self.a.delete({"path": r["path"]})
+        self.assertNotIn(r["path"], conservar.huecos())
+
+    def test_el_repaso_final_que_falla_encadena_las_voces(self):
+        """P2: si el repaso final falla, el texto del directo sigue con todo lo que encadena, también las voces (antes
+        se resumía sin ellas y lo parcial del punto 56 se quedaba a medias)."""
+        src = open(os.path.join(os.path.dirname(server.__file__), "trabajos.py"), encoding="utf-8").read()
+        i = src.index("if job.final_pass:  # se queda el texto del directo y, con el, lo que encadena")
+        self.assertIn("self._final_pass_over(job.path, keep_live_text=True)", src[i:i + 500])
+
+    def test_todos_sus_audios_a_la_vez(self):
+        """P2: dos audios con el mismo nombre (OBS: .mkv y .mp4) comparten textos y marca: van los dos a la papelera
+        (antes, uno; y el otro se tomaba por «vuelto de la papelera» y pasaba a «Guardar»)."""
+        rel, p = self.reunion(pol="borrar")
+        otro = os.path.splitext(p)[0] + ".m4a"
+        with open(otro, "wb") as f:
+            f.write(b"\0" * 100)
+        self.a.library.at = 0
+        self.assertEqual(self.a.audio_repaso(), 1)
+        self.assertFalse(os.path.exists(p) or os.path.exists(otro))
+        self.assertEqual(sorted(self.en_papelera()), sorted([os.path.basename(p), os.path.basename(otro)]))
+        m = conservar.leer_marca(conservar.marca_de(p))
+        self.assertEqual(sorted(m["archivos"]), sorted([os.path.basename(p), os.path.basename(otro)]))
+        self.assertEqual(self.a.audio_repaso(), 0)
+        self.assertIn("audio: borrar", server.read_text(os.path.splitext(p)[0] + ".md"))
+
+    def test_devuelto_de_la_papelera_con_el_md_bloqueado(self):
+        """P2: si no se puede apuntar «Guardar», la marca se queda y el audio no vuelve a la papelera."""
+        rel, p = self.reunion(pol="borrar")
+        with open(p, "rb") as f:
+            audio = f.read()
+        self.assertEqual(self.a.audio_repaso(), 1)
+        with open(p, "wb") as f:
+            f.write(audio)
+        self.a.library.at = 0
+        with mock.patch.object(self.a, "notes_save", side_effect=OSError("bloqueado")):
+            self.assertEqual(self.a.audio_repaso(), 0)
+        self.assertTrue(os.path.isfile(conservar.marca_de(p)))
+        self.assertTrue(os.path.isfile(p))
+        self.assertEqual(self.a.audio_repaso(), 0)  # ahora sí se apunta y se quita la marca
+        self.assertFalse(os.path.exists(conservar.marca_de(p)))
+        self.assertTrue(os.path.isfile(p))
+        self.assertNotIn("audio:", server.read_text(os.path.splitext(p)[0] + ".md"))
+
+    def test_lo_que_decide_se_relee_del_disco(self):
+        """P3: el .md editado a mano a «guardar» justo antes (la carpeta no cambia de fecha) manda."""
+        rel, p = self.reunion(pol="borrar")
+        self.a.library.refresh()
+        md = os.path.splitext(p)[0] + ".md"
+        texto = server.read_text(md).replace("audio: borrar", "audio: guardar")
+        st = os.stat(md)
+        with open(md, "w", encoding="utf-8") as f:
+            f.write(texto)
+        os.utime(md, (st.st_atime, st.st_mtime))
+        self.assertEqual(self.a._audio_borrar(rel), 0)
+        self.assertTrue(os.path.isfile(p))
+
+    def test_si_sigue_en_uso_se_dice(self):
+        rel, p = self.reunion(pol="borrar")
+        en_uso = mock.Mock(side_effect=server.ApiError("No se pudo mandar a la papelera (¿archivo en uso?)."))
+        with mock.patch("app_conservar.to_recycle_bin", en_uso):
+            for _ in range(3):
+                self.assertEqual(self.a.audio_repaso(), 0)
+        self.assertEqual(self.entrada(rel)["audio_no"], "en_uso")
+        self.assertEqual(self.a.audio_repaso(), 1)  # se sigue intentando: ya no está en uso
+        self.assertNotIn(rel, self.a.library.audio_no)
+
+    def test_cambiar_de_carpeta_una_sin_audio(self):
+        """P3: «Cambiar» la carpeta (POST /api/reunion/destino) también en una sin audio."""
+        rel, p = self.reunion()
+        conservar.borrar_audio(p, self.entrada(rel), "borrar", server.to_recycle_bin)
+        os.makedirs(os.path.join(self.root, "Beta"))
+        r = self.a.destino({"path": rel, "folder": "Beta"})
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "Beta", os.path.basename(os.path.splitext(p)[0])
+                                                    + ".audio.json")), r)
 
 
 class GrabarTests(Base):
@@ -512,7 +650,7 @@ class DiarizeBloquesTests(TempTree):
         self.falsos = BloquesFalsos()
         for p in (mock.patch.object(voices, "_bloque", self.falsos), mock.patch.object(voices, "_sherpa"),
                   mock.patch.object(voices, "models_ready", return_value=True),
-                  mock.patch.object(voices, "BLOQUE_S", 10.0)):
+                  mock.patch.object(voices, "BLOQUE_S", 10.0), mock.patch.object(voices, "COLA_MIN_S", 3.0)):
             p.start()
             self.addCleanup(p.stop)
         self.cache = os.path.join(self.data_dir, voices.BLOQUES_DIR)
@@ -545,6 +683,18 @@ class DiarizeBloquesTests(TempTree):
         self.assertEqual(final["hablantes"], entera["hablantes"])
         for h in entera["huellas"]:
             np.testing.assert_allclose(final["huellas"][h], entera["huellas"][h], atol=1e-5)
+
+    def test_una_cola_corta_va_con_el_bloque_anterior(self):
+        """Revisión 1, P2: una grabación que acaba poco después de un bloque no deja un bloque de pocos segundos (su
+        huella no se parecía a nadie y salía una persona de más): va con el anterior."""
+        sr = voices.SR
+        with mock.patch.object(voices, "COLA_MIN_S", 6.0):
+            self.diar(self.audio, rejilla=True)  # 35 s: la cola de 5 s, con el bloque de 20 a 30
+        self.assertEqual(self.falsos.llamadas, [0.0, 10.0, 20.0])
+        self.falsos.llamadas.clear()
+        with mock.patch.object(voices, "COLA_MIN_S", 6.0):
+            self.diar(self.audio[:21 * sr], rejilla=True)  # 21 s: dos bloques, el segundo de 11 s
+        self.assertEqual(self.falsos.llamadas, [0.0, 10.0])
 
     def test_otro_audio_no_usa_la_cache(self):
         self.diar(self.audio[:10 * voices.SR], rejilla=True, cache=self.cache)
@@ -644,6 +794,7 @@ class VocesDirectoTests(Base):
         side = voices.sidecar_path(os.path.join(self.root, self.rel))
         voices.write_micro(side, {"paso": 0.25, "activo": "0101"})  # (la linea del micro, si ya estuviera)
         self.job.recorded = voices.BLOQUE_S + 30
+        self.a.jobs.voice_vectors[self.rel] = {"h1": [0.2] * voices.DIM}  # de antes: con el parcial no valen
         with mock.patch.object(self.a.jobs, "_voices_subprocess", self.subproceso, create=True):
             self.vd.paso()
             self.vd.paso()  # el mismo bloque no se repite
@@ -657,7 +808,9 @@ class VocesDirectoTests(Base):
         self.assertEqual(d["parcial"], {"hasta": voices.BLOQUE_S})
         self.assertEqual(d["rejilla"], voices.BLOQUE_S)
         self.assertEqual(d["micro"], {"paso": 0.25, "activo": "0101"})
-        self.assertIn(self.rel, self.a.jobs.voice_vectors)
+        # las huellas del parcial no quedan en memoria: con el bloque siguiente «h1» puede ser otra voz (revisión 1)
+        self.assertNotIn(self.rel, self.a.jobs.voice_vectors)
+        self.assertIn(voces_directo.cache_dir(os.path.join(self.root, self.rel)), c["args"])
         # lo que pide la interfaz
         r = self.a.speakers_get({"path": self.rel})
         self.assertEqual((r["exists"], r["parcial"]), (True, voices.BLOQUE_S))
@@ -681,7 +834,7 @@ class VocesDirectoTests(Base):
         self.job.preset, self.job.recording = "nube", False
         self.assertTrue(cancel())
         self.job.recording = True
-        self.vd.final(self.rel)
+        self.vd.final(self.rel, os.path.join(self.root, self.rel))
         self.assertTrue(cancel())
 
     def test_nada_parcial_despues_de_la_identificacion_final(self):
@@ -697,7 +850,7 @@ class VocesDirectoTests(Base):
             t = threading.Thread(target=self.vd.paso)
             t.start()
             time.sleep(0.2)
-            self.vd.final(self.rel)
+            self.vd.final(self.rel, os.path.join(self.root, self.rel))
             lento.set()
             t.join(10)
         self.assertIsNone(voices.read_sidecar(side))
@@ -731,6 +884,7 @@ class VocesDirectoTests(Base):
                                         "hablantes": {"h1": {"segundos": 5.0, "breve": False}}, "creado": "y"})
             return {"huellas": {}}
         jobs._voices_subprocess = sub
+        os.makedirs(voces_directo.cache_dir(abs_path))
         with mock.patch.object(voices, "models_ready", return_value=True):
             j = FakeJob(self.rel, kind="voces")
             j.then_summary, j.started, j.name, j.error = False, 0, "Comité", None
@@ -741,11 +895,13 @@ class VocesDirectoTests(Base):
                                         "rejilla": 1800, "creado": "x"})
             jobs._run_voices(j)
         self.assertIn("--rejilla", visto[1])
-        self.assertIn(voces_directo.cache_dir(), visto[1])
+        cache = voces_directo.cache_dir(abs_path)
+        self.assertIn(cache, visto[1])
         self.assertIn(self.rel, self.vd.finales)
         d = voices.read_sidecar(side)
         self.assertNotIn("parcial", d)
-        self.assertEqual(d["rejilla"], voices.BLOQUE_S)
+        self.assertNotIn("rejilla", d)  # volver a identificar, como siempre (revisión 1: sin la cola de la rejilla)
+        self.assertFalse(os.path.exists(cache))  # sus bloques (con huellas de voz) fuera al terminar bien
         self.write(os.path.relpath(os.path.splitext(abs_path)[0] + ".md", self.root),
                    server.dump_notes({"participantes": "Ana, Luis, Marta"}, ""))
         self.assertEqual(jobs._participant_hint(abs_path, {"tramos": [1], "parcial": {"hasta": 1800}}), 3)
@@ -764,6 +920,77 @@ class VocesDirectoTests(Base):
     def test_jobs_arranca_el_hilo(self):
         src = open(os.path.join(os.path.dirname(server.__file__), "trabajos.py"), encoding="utf-8").read()
         self.assertIn("target=self.voces_directo.bucle", src)
+
+
+class Revision1VocesTests(VocesDirectoTests):
+    """Revisión 1 de motor-lote2b, punto 56."""
+
+    def _sidecar(self, hablantes, tramos, **extra):
+        return dict({"version": 1, "creado": "x", "hablantes": hablantes, "tramos": tramos}, **extra)
+
+    def test_los_nombres_de_mientras_se_graba_se_quedan(self):
+        """P1: quien siguió hablando después del bloque no pierde el nombre que le pusiste (carry_manual mide la mitad
+        solo hasta donde llegaba lo parcial)."""
+        old = self._sidecar({"h1": {"persona": "p-ana", "origen": "manual", "segundos": 600},
+                             "h2": {"persona": "p-luis", "origen": "manual", "segundos": 1200}},
+                            [{"inicio": 0, "fin": 600, "h": "h1"}, {"inicio": 600, "fin": 1800, "h": "h2"}],
+                            parcial={"hasta": 1800})
+        # con el bloque siguiente, cada uno habla mucho más después del min 30 que antes
+        nuevo = self._sidecar({"h1": {"segundos": 3400}, "h2": {"segundos": 2600}},
+                              [{"inicio": 600, "fin": 1800, "h": "h1"}, {"inicio": 1800, "fin": 4000, "h": "h1"},
+                               {"inicio": 0, "fin": 600, "h": "h2"}, {"inicio": 4000, "fin": 6000, "h": "h2"}])
+        sin = json.loads(json.dumps(nuevo))
+        voices.carry_manual(old, sin, known={"p-ana": "Ana", "p-luis": "Luis"})
+        self.assertEqual((sin["hablantes"]["h1"].get("persona"), sin["hablantes"]["h2"].get("persona")),
+                         (None, None))  # lo de antes: perdía los dos
+        voices.carry_manual(old, nuevo, known={"p-ana": "Ana", "p-luis": "Luis"}, hasta=1800)
+        self.assertEqual((nuevo["hablantes"]["h1"]["persona"], nuevo["hablantes"]["h2"]["persona"]),
+                         ("p-luis", "p-ana"))
+
+    def test_una_correccion_y_el_parcial_no_se_pisan(self):
+        """P2: corregir un hablante coge el candado del sidecar; el parcial espera a que se escriba la corrección."""
+        orden = []
+        with self.a._voices_lock():
+            t = threading.Thread(target=lambda: (voices.SIDECAR_LOCK.acquire(), orden.append("parcial"),
+                                                 voices.SIDECAR_LOCK.release()))
+            t.start()
+            time.sleep(0.2)
+            orden.append("correccion")
+        t.join(5)
+        self.assertEqual(orden, ["correccion", "parcial"])
+
+    def test_recordar_espera_al_final(self):
+        """P2: con lo parcial, «Recordar» no calcula la huella (h2 puede ser otra voz con el bloque siguiente)."""
+        abs_path = os.path.join(self.root, self.rel)
+        voices.write_sidecar(voices.sidecar_path(abs_path), self._sidecar(
+            {"h1": {"segundos": 30}}, [{"inicio": 0, "fin": 30, "h": "h1"}], parcial={"hasta": 1800}))
+        jobs = server.Jobs.__new__(server.Jobs)
+        jobs.voice_vectors = {}
+        with self.assertRaises(server.ApiError) as cm:
+            jobs.speaker_vector(self.rel, "h1")
+        self.assertIn("al terminar", cm.exception.msg)
+
+    def test_la_cache_de_bloques_se_purga(self):
+        """P2: la carpeta de bloques (con huellas de voz) de una reunión se borra al terminar (otro test), al arrancar
+        si es vieja y al apagar «Voces»."""
+        vieja = voces_directo.cache_dir(os.path.join(self.root, "a.wav"))
+        nueva = voces_directo.cache_dir(os.path.join(self.root, "b.wav"))
+        for d in (vieja, nueva):
+            os.makedirs(d)
+            with open(os.path.join(d, "x.json"), "w") as f:
+                f.write("{}")
+        t = time.time() - voces_directo.VIEJO_S - 60
+        os.utime(vieja, (t, t))
+        self.assertEqual(voces_directo.purgar(), 1)
+        self.assertEqual((os.path.isdir(vieja), os.path.isdir(nueva)), (False, True))
+        with mock.patch.object(self.a, "_download_models", create=True), \
+                mock.patch.object(self.a, "voices_state", return_value={}, create=True):
+            self.a.voices_toggle({"on": False})
+        self.assertFalse(os.path.isdir(nueva))
+
+    def test_el_subproceso_vigila_a_la_app(self):
+        src = open(os.path.join(os.path.dirname(server.__file__), "voices.py"), encoding="utf-8").read()
+        self.assertIn("threading.Thread(target=_vigilar_padre", src)
 
 
 def engines_error(msg):
@@ -787,7 +1014,8 @@ class BloquesDeVerdadTests(unittest.TestCase):
         def espia(*a, **k):
             llamadas.append(a[6])
             return real(*a, **k)
-        with mock.patch.object(voices, "BLOQUE_S", 20.0), mock.patch.object(voices, "_bloque", espia):
+        with mock.patch.object(voices, "BLOQUE_S", 20.0), mock.patch.object(voices, "COLA_MIN_S", 2.0), \
+                mock.patch.object(voices, "_bloque", espia):
             for k in range(1, int(len(x) / voices.SR // 20) + 1):
                 voices.diarize(x[:k * 20 * voices.SR], VOCES_DATA, rejilla=True, cache=cache)
             n_dir = len(llamadas)

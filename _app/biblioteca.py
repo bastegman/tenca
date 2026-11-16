@@ -116,10 +116,18 @@ def scan(dirs=None):
                 continue
         audio_stems = {os.path.splitext(k)[0] for k in files if os.path.splitext(k)[1] in AUDIO_EXT}
         # reuniones cuyo audio se mando a la papelera (conservar.py): su marca hace de audio, con la ruta de siempre
-        sin_audio = {k[:-len(MARCA_SIN_AUDIO)]: e for k, e in files.items()
-                     if k.endswith(MARCA_SIN_AUDIO) and k[:-len(MARCA_SIN_AUDIO)] not in audio_stems}
+        # (solo las marcas de la app: un «.audio.json» de otro programa, o uno roto, no hace una reunion)
+        sin_audio = {}
+        for k, e in files.items():
+            if k.endswith(MARCA_SIN_AUDIO) and k[:-len(MARCA_SIN_AUDIO)] not in audio_stems:
+                try:
+                    extra = conservar.entrada_sin_audio(e.path, e.name[:-len(MARCA_SIN_AUDIO)], rel, e.stat())
+                except OSError:
+                    extra = None
+                if extra:
+                    sin_audio[k[:-len(MARCA_SIN_AUDIO)]] = (e, extra)
         reuniones = audio_stems | set(sin_audio)
-        for low, e in list(files.items()) + [(k + "\0", e) for k, e in sin_audio.items()]:
+        for low, e in list(files.items()) + [(k + "\0", e) for k, (e, _) in sin_audio.items()]:
             marca = low.endswith("\0")
             stem_low, ext = (low[:-1], "") if marca else os.path.splitext(low)
             frel = f"{rel}/{e.name}" if rel else e.name
@@ -130,7 +138,7 @@ def scan(dirs=None):
             cloud = bool(getattr(st, "st_file_attributes", 0) & CLOUD_ONLY)
             extra = {}
             if marca:  # la reunion sin su audio: lo que dice la marca (nombre, duracion, cuando se borro)
-                extra = conservar.entrada_sin_audio(e.path, e.name[:-len(MARCA_SIN_AUDIO)], rel, st)
+                extra = dict(sin_audio[stem_low][1])
                 frel, ext = extra.pop("rel"), extra.pop("ext")
                 cloud = False  # la marca puede estar solo en linea; el audio ya no esta en ningun sitio
             if ext in AUDIO_EXT:
@@ -332,17 +340,22 @@ class Library:
             a["props"] = with_theme_id(props, a["path"])  # con el id de su tema en este PC (la cache no lo lleva)
             a["speakers"] = self._speakers(a)
             a["has_speakers"] = bool(a["speakers"])
-            a.update(conservar.publico(a, props))  # que pasara con su audio (punto 17)
             if self.audio_no.get(a["path"]):
                 a["audio_no"] = self.audio_no[a["path"]]
+            # para decidir si su audio puede ir a la papelera (punto 17, conservar.entera): si se sabe completa y si
+            # su texto tiene huecos (un directo que se salto trozos sin un repaso que los recuperase)
+            a["_completa"] = bool(COMPLETE is not None and a["path"] in COMPLETE)
+            a["_huecos"] = a["path"] in conservar.huecos()
             if a.get("sin_audio"):  # el audio esta en la papelera: la duracion que tenia, y nada que medir
                 a["duration"], a["partial"] = a.pop("_dur", None), False
+                a.update(conservar.publico(a, props))
                 continue
             open_dur = self._recording(a)
             if open_dur is not None:  # sin cachear: cambia cada pocos segundos
                 a["duration"] = open_dur
                 a["partial"] = False
                 watch[a["_abs"]] = (a["size"], a["mtime"])
+                a.update(conservar.publico(a, props))  # mientras se graba tambien se ve que pasara con su audio
                 continue
             # duraciones: las rapidas (cabecera WAV) ya; las demas (PyAV) en segundo plano
             quick = a["ext"] == ".wav" or a["cloud"]
@@ -350,6 +363,7 @@ class Library:
                                                a["_srt"], compute=quick)
             missing |= a["duration"] is None and not quick
             a["partial"] = is_partial(a)
+            a.update(conservar.publico(a, props))  # que pasara con su audio y, si no es «guardar», por que aun no
         self.durations.flush()
         public = strip_private(tree)
         payload = json.dumps(public, ensure_ascii=False, sort_keys=True)

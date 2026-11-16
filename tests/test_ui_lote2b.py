@@ -138,7 +138,7 @@ class ConservarTests(Base):
 class QuienHablaParcialTests(Base):
     """Punto 56: «Quién habla» identificado hasta el min 30 mientras se graba con el directo en la nube (el sidecar
     parcial que escribe voces_directo.py): las frases de antes llevan quién habla, las de después no, y la línea de
-    voces lo dice."""
+    voces lo dice (aquí, la grabación ya terminó sin identificarse el resto: cómo terminarlo)."""
 
     @classmethod
     def preparar(cls, root):
@@ -159,7 +159,8 @@ class QuienHablaParcialTests(Base):
         pg.goto(f"{self.srv.base}/?t={self.srv.token}#/a/{quote(rel)}", wait_until="networkidle")
         pg.wait_for_selector("#aTx :text('Esto ya es del segundo bloque')", timeout=15000)
         pg.wait_for_selector("#aVoz .vz-st", timeout=10000)
-        self.assertIn("hasta el min 30 (el resto, al terminar)", pg.inner_text("#aVoz .vz-st"))
+        # (ya no se graba y el resto no se identificó: se dice cómo terminarlo; grabando diría «el resto, al terminar»)
+        self.assertIn("solo hasta el min 30: «Volver a identificar» hace el resto", pg.inner_text("#aVoz .vz-st"))
         pg.wait_for_selector("#aTx .spk", timeout=10000)
         chips = pg.locator("#aTx .spk").all_inner_texts()
         self.assertEqual(chips, ["Persona 1", "Persona 2"])

@@ -106,6 +106,7 @@ class Carpetas:
             except OSError:
                 pass
         COMPLETE.set(rel, False)
+        conservar.huecos().set(rel, False)
         self._movs().pop(rel)  # un movimiento pendiente (cambiar la carpeta en pleno directo) ya no tiene a quien mover
         self.jobs._cloud_text().set(rel, False)  # otra reunion que acabe con este nombre no hereda su origen
         shutil.rmtree(backup_dir(rel), ignore_errors=True)
@@ -452,6 +453,7 @@ class Carpetas:
             return
         self.library.at = 0
         COMPLETE.moved(old, new)
+        conservar.huecos().moved(old, new)  # los huecos de su texto (punto 17) van con ella
         self.jobs._cloud_text().moved(old, new)  # el origen de su texto va con ella
         vv = getattr(self.jobs, "voice_vectors", None)
         if vv is not None and old in vv:
@@ -523,7 +525,7 @@ class Carpetas:
             inside = _inside(p, ROOT) or any(_inside(p, l["path"]) for l in LINKS.values())
             folder = rel_of(p) if inside and os.path.isdir(p) else self.link_add({"path": p})["rel"]
         with self._move_lock():  # con un movimiento en marcha se espera: despues, la ruta nueva (y ya no hay nada)
-            src = safe(alias_of(b.get("path")), "file")
+            src = safe(alias_of(b.get("path")), "reunion")  # también sin audio (punto 17): se mueve con sus textos
             if os.path.splitext(src)[1].lower() not in AUDIO_EXT:
                 raise ApiError("Solo se puede cambiar la carpeta de una reunión.")
             rel = rel_of(src)
@@ -538,7 +540,7 @@ class Carpetas:
             return self._destino_pendiente_locked(rel, folder_rel)
 
     def _destino_pendiente_locked(self, rel, folder_rel):
-        src = safe(alias_of(rel), "file")
+        src = safe(alias_of(rel), "reunion")
         rel = rel_of(src)
         dest = safe(folder_rel, "dir")
         if in_app_dir(dest):
@@ -764,6 +766,7 @@ class Carpetas:
                 old_b, new_b = backup_dir(r_old), backup_dir(r_new)
                 if os.path.isdir(old_b) and not os.path.exists(new_b):
                     os.replace(old_b, new_b)
+        conservar.huecos().moved(old, new, folder=True)
         for r in [r for r in list(COMPLETE.data) if moved_rel(r, old, new, folder=True)]:
             COMPLETE.moved(r, moved_rel(r, old, new, folder=True))
         vv = self.jobs.voice_vectors

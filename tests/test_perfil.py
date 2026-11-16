@@ -654,7 +654,12 @@ class JobsOutputsTests(TempTree):
         summ = src[src.index("def _run_summary"):src.index("def _cloud_ready")]
         self.assertLess(summ.index('save_text(base + ".resumen.md"'), summ.index("self.write_outputs(job.path)"))
         self.assertNotIn("write_outputs", src[src.index("def _run_live"):src.index("def submit(")])  # no a medias
-        self.assertIn("self.write_outputs(job.path)", src[src.index("if job.final_pass:  # se queda el texto"):])
+        # el repaso final que falla se queda con el texto del directo y encadena como al cancelarlo: _final_pass_over
+        # con keep_live_text → _after_transcribe, que escribe los destinos (revisión 1 de motor-lote2b: y las voces)
+        fallo = src[src.index("if job.final_pass:  # se queda el texto"):]
+        self.assertIn("self._final_pass_over(job.path, keep_live_text=True)", fallo[:600])
+        over = src[src.index("def _final_pass_over"):src.index("def _resume_final_passes")]
+        self.assertIn("self._after_transcribe(rel)", over)
         notes = src[src.index("    def notes_save"):src.index("    def tags")]
         self.assertIn("self.jobs.schedule_outputs(rel_of(abs_path))", notes)
         tx = src[src.index("    def save_transcript"):src.index("    def _save_live_edits")]

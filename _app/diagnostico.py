@@ -103,6 +103,7 @@ DIAG_LINES = (
     "   {t}: el audio no se ha podido mandar a la papelera ({e}); se reintenta",
     "   {t}: el borrado del audio no terminó; se vuelve a mirar",
     "🔊 {t}: el audio ha vuelto de la papelera; se guarda",
+    "   {t}: el audio ha vuelto de la papelera, pero no se ha podido apuntar «Guardar» ({c}); se reintenta",
     "   audio: no se pudo comprobar la papelera ({c})",
     # quién habla mientras se graba con el directo en la nube (punto 56, voces_directo.py)
     "🗣 quién habla en directo: {n} min identificados ({n} personas, {n} s)",

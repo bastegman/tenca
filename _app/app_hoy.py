@@ -385,13 +385,15 @@ class Hoy:
         lib = getattr(self, "library", None)
         if hasattr(lib, "refresh"):
             lib.refresh(max_age=5)
-        out, vivos = [], set()
+        out, vivos, sin_leer = [], set(), 0
         for a in list(getattr(lib, "flat", None) or []):
             p = a.get("_sum")
             if not p or a.get("recording") or a.get("path") == grabando:
                 continue
             vivos.add(p)
             tareas = pendientes.CACHE.tareas(p)
+            if tareas is None and pendientes.solo_en_linea_ruta(p):
+                sin_leer += 1  # «solo en línea» de OneDrive: no se abre, pero se dice (revisión 1, P2)
             if not tareas:
                 continue
             fecha = a.get("date") or ""
@@ -407,7 +409,7 @@ class Hoy:
                             "tuya": pendientes.es_tuya(t["responsable"], yo), "sin_audio": bool(a.get("sin_audio"))})
         pendientes.CACHE.podar(vivos)
         out.sort(key=lambda x: x["fecha"], reverse=True)  # estable: cada reunión, en el orden de su resumen
-        return {"tareas": out, "total": len(out), "tuyas": sum(1 for x in out if x["tuya"])}
+        return {"tareas": out, "total": len(out), "tuyas": sum(1 for x in out if x["tuya"]), "sin_leer": sin_leer}
 
     PENDIENTE_MOVER_S = 5  # segundos que «marcar» espera a que acabe de moverse una reunión
 
@@ -451,6 +453,9 @@ class Hoy:
                     linea, cambiado = pendientes.marcar_fichero(p, i, texto, hecha)
                 except (pendientes.NoEsta, pendientes.NoSeToca) as e:
                     raise ApiError(str(e), 409)
+                except OSError as e:  # de solo lectura o abierto en otro programa (revisión 1, P2)
+                    raise ApiError("No se puede escribir en ese resumen: está protegido o abierto en otro programa. "
+                                   f"Prueba otra vez en un momento ({e.__class__.__name__}).", 409)
             finally:
                 mover.release()
         pendientes.CACHE.olvidar(p)
