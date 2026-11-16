@@ -685,13 +685,16 @@ def actividad(x16, paso=pistas.PASO, umbral_db=PISTA_VOZ_DB, trozo_s=60.0):
     return niveles_db(x16, paso, trozo_s) > umbral_db
 
 
-def _suelos(d, b):
-    """El ruido de fondo de una serie de niveles por paso: el percentil 10 de cada bloque de b pasos, sin pasar del de
-    toda la reunión + 6 dB (quien habla un bloque entero sin pausas no se convierte en «ruido de fondo»)."""
+def _suelos(d, b, tope=True):
+    """El ruido de fondo de una serie de niveles por paso: el percentil 10 de cada bloque de b pasos. Con tope (el del
+    micro), sin pasar del de toda la reunión + 6 dB: quien habla un bloque entero sin pausas no se convierte en «ruido
+    de fondo». Sin tope, el de lo que suena (que ya tiene el suyo en PISTA_SUENA_MAX_DB): con el tope, un ruido por la
+    llamada que no durase toda la reunión daba el PC por sonando siempre (revisión 3)."""
     out = np.empty(len(d))
     total = float(np.percentile(d, 10)) if len(d) else -120.0
     for i in range(0, len(d), b):
-        out[i:i + b] = min(float(np.percentile(d[i:i + b], 10)), total + 6.0)
+        p = float(np.percentile(d[i:i + b], 10))
+        out[i:i + b] = min(p, total + 6.0) if tope else p
     return out
 
 
@@ -714,7 +717,10 @@ def pasos_micro(dl, dr, bits=None, bloque_s=30.0, paso=pistas.PASO):
         ref[d:] = np.maximum(ref[d:], dr[:-d])
     # «el PC suena»: por encima de su fondo; el umbral, entre -45 dB (un PC callado) y -30 dB (por alto que salga el
     # fondo, una voz de los demás, nivelada hacia -22 dB, siempre cuenta)
-    umbral = np.clip(_suelos(dr, b) + PISTA_SUENA_SOBRE_DB, pistas.ECO_SOBRE_DB, PISTA_SUENA_MAX_DB)
+    # el fondo de lo que suena, por bloques de 10 s (un ruido que entra a media reunion se nota pronto; un bloque todo
+    # voz da un fondo alto, pero el umbral no pasa de PISTA_SUENA_MAX_DB y la voz sigue contando)
+    umbral = np.clip(_suelos(dr, max(1, int(10.0 / paso)), tope=False) + PISTA_SUENA_SOBRE_DB, pistas.ECO_SOBRE_DB,
+                     PISTA_SUENA_MAX_DB)
     out &= ref <= umbral
     if bits is not None and len(bits):
         m = min(k, len(bits))
@@ -805,7 +811,7 @@ def diarize_pistas(stereo16, micro, data_dir, threads=2, progress=None, cancelle
         PISTA_COPIA_DB por debajo de lo que suena es su eco y se quita; uno de los demas que coincide con el micro
         (PISTA_VUELTA), se parece a uno del micro y va por debajo de el es tu voz que vuelve por la llamada y se quita.
         El nivel decide cual es el original (sin el, tu voz y su vuelta se quitaban las dos).
-    «Tú» lo decide despues mark_user con la linea de la grabadora, entre los grupos del micro (fuera_de_tu): tu grupo
+    «Tú» lo decide despues elegir_tu con la linea de la grabadora, entre los grupos del micro (fuera_de_tu): tu grupo
     coincide con ella y quien este a tu lado casi nada."""
     progress = progress or (lambda **k: None)
     cancelled = cancelled or (lambda: False)
@@ -903,13 +909,14 @@ def fuera_de_tu(data):
 
 
 def elegir_tu(data, micro, ratios=None):
-    """«Tú»: el hablante que coincide >= 60 % con la linea del micro y el siguiente <= 30 % (pick_user), entre los que
-    pueden serlo (fuera_de_tu). En dos pistas, si asi no sale (dos voces del micro con «1»: alguien a tu lado, la charla
-    de la oficina con cascos), el del micro que coincide >= 60 % y suena PISTA_TU_NIVEL_DB mas que los otros del micro:
-    el que esta junto a el (revision 2: charla 13 dB por debajo, «Tú» no salia y la base si). ratios: mic_ratios ya
-    calculado (si no, se calcula)."""
+    """(«Tú», dudoso). «Tú»: el hablante que coincide >= 60 % con la linea del micro y el siguiente <= 30 % (pick_user),
+    entre los que pueden serlo (fuera_de_tu). En dos pistas, si asi no sale (dos voces del micro con «1»: la charla de
+    la oficina con cascos, o alguien a tu lado), el del micro que coincide >= 60 % y suena PISTA_TU_NIVEL_DB mas que
+    los otros del micro, pero DUDOSO: por nivel no se distingue la charla lejana de un compañero mas cerca del micro
+    que tu (revision 3: con el compañero 15 dB mas cerca, «Tú» era el; y con tu huella guardada salian dos «Tú»). Lo
+    dudoso se enseña «¿Tú?» y una huella tuya en otro grupo manda (identify). ratios: mic_ratios ya calculado."""
     if not micro:
-        return None
+        return None, False
     hablantes = (data or {}).get("hablantes") or {}
     fuera = fuera_de_tu(data)
     if ratios is None:
@@ -917,12 +924,21 @@ def elegir_tu(data, micro, ratios=None):
     r = {h: v for h, v in ratios.items() if h not in fuera}
     tu = pick_user(r)
     if tu or not (data or {}).get("pistas"):
-        return tu
+        return tu, False
     cands = sorted(((float(hablantes[h].get("nivel_db", -120.0)), h) for h in r
                     if hablantes.get(h, {}).get("pista") == "micro"), reverse=True)
     if cands and r[cands[0][1]] >= 0.6 and (len(cands) < 2 or cands[0][0] - cands[1][0] >= PISTA_TU_NIVEL_DB):
-        return cands[0][1]
-    return None
+        return cands[0][1], True
+    return None, False
+
+
+def poner_tu(data, tu, dudoso):
+    """data["tu"] y, si es dudoso, data["tu_dudoso"] (si no, se quita)."""
+    data["tu"] = tu
+    if tu and dudoso:
+        data["tu_dudoso"] = True
+    else:
+        data.pop("tu_dudoso", None)
 
 
 def canal_de(data, h):
@@ -1566,7 +1582,18 @@ def identify(data, huellas, voices, micro=None):
     breve = {h for h, i in hablantes.items() if i.get("breve")}
     ratios = mic_ratios(data.get("tramos", []), micro, skip=breve) if micro else {}
     if micro:
-        data["tu"] = elegir_tu(data, micro, ratios)
+        tu, dudoso = elegir_tu(data, micro, ratios)
+        if dudoso:  # «Tú» solo por nivel: lo que digan las huellas manda
+            suyos = sorted((h for h, i in hablantes.items() if uid and i.get("persona") == uid
+                            and i.get("origen") == "huella" and not i.get("provisional")),
+                           key=lambda h: -float(hablantes[h].get("segundos") or 0))
+            otro = (hablantes.get(tu) or {}).get("origen") == "huella" and (hablantes.get(tu) or {}).get("persona") \
+                and hablantes[tu]["persona"] != uid and not hablantes[tu].get("provisional")
+            if suyos:
+                tu, dudoso = suyos[0], False
+            elif otro:  # su huella dice que es otra persona
+                tu, dudoso = None, False
+        poner_tu(data, tu, dudoso)
     tu = data.get("tu")
     for h, info in hablantes.items():
         if info.get("origen") != "huella" or not info.get("persona"):
@@ -1578,8 +1605,8 @@ def identify(data, huellas, voices, micro=None):
             info["provisional"] = True
     if tu and uid:
         info = hablantes.get(tu)
-        if info and not info.get("persona"):  # el micro ya dice que eres tu: no hace falta huella
-            info.update(persona=uid, provisional=False, origen="micro")
+        if info and not info.get("persona"):  # el micro ya dice que eres tu: no hace falta huella (dudoso: «¿Tú?»)
+            info.update(persona=uid, provisional=bool(data.get("tu_dudoso")), origen="micro")
     return data
 
 
@@ -1593,6 +1620,7 @@ def assign(data, h, pid, usuario=None):
         raise KeyError(h)
     old_tu = data.get("tu")
     info.update(persona=pid, provisional=False, origen="manual")
+    data.pop("tu_dudoso", None)  # lo dice el usuario: ya no hay duda (dos pistas, elegir_tu)
     if pid and pid == usuario:
         data["tu"] = h
         for k, other in hablantes.items():  # sin «origen» (sidecar de antes del 07/11/2026): el que era «tu»
@@ -1709,7 +1737,8 @@ def label(h, data, names, for_llm=False, usuario=None):
             shown = name
         return f"¿{shown}?" if doubt else shown
     if data.get("tu") == h:
-        return "Yo" if for_llm else "Tú"
+        shown = "Yo" if for_llm else "Tú"
+        return f"¿{shown}?" if data.get("tu_dudoso") else shown
     if info.get("breve"):
         return "(breve)"
     n = h[1:] if h.startswith("h") and h[1:].isdigit() else h
@@ -1867,7 +1896,7 @@ def main(argv=None):
                 "micro": micro}
         if res.get("pistas"):
             data["pistas"] = True
-        data["tu"] = elegir_tu(data, data["micro"]) if data["micro"] else None
+        poner_tu(data, *(elegir_tu(data, data["micro"]) if data["micro"] else (None, False)))
         write_sidecar(a.out, data)
         send({"type": "result", "sidecar": a.out, "huellas": res["huellas"], "hablantes": len(res["hablantes"]),
               "duracion_s": res["duracion_s"]})

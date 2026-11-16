@@ -297,7 +297,9 @@ class AvisosDirectoE2E(unittest.TestCase):
         print(f"   parada sola a los {time.time() - t1:.1f} s del aviso", flush=True)
         pg.wait_for_function("() => (window.__toasts || []).some(t => t.includes('grabación parada y guardada'))",
                              timeout=10000)
-        self.assertIn("parada al terminar la llamada de Teams", self.log())
+        # el log se escribe después de parar (y en Windows, del pitido, que suena sin hilo aparte): la interfaz puede
+        # verlo parado antes; en la CI de dos-pistas (Windows) faltó así 2 veces de 6
+        self.esperar(lambda: "parada al terminar la llamada de Teams" in self.log(), 10, "la línea del log")
         self.esperar(lambda: not any(j.get("live") and j["status"] == "running" for j in self.api("/api/jobs")["jobs"]),
                      60, "el directo termina")
         with open(os.path.join(self.root, *rel.split("/")), "rb") as f:

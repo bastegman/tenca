@@ -265,6 +265,17 @@ class SueloMic:
         return db > self.suelo + self.SOBRE_DB
 
 
+def marcar_eco(path, valor=b"1"):
+    """eco=1 (o 0) en la cabecera de un WAV de dos pistas, con un descriptor propio (el de la grabadora no se mueve).
+    True si se ha escrito."""
+    try:
+        with open(path, "r+b", buffering=0) as g:
+            g.seek(pistas.eco_off(SR))
+            return g.write(valor) == 1
+    except OSError:
+        return False
+
+
 class PasosTu:
     """La linea de tiempo de «Tú» en pasos de PASO s del archivo: «1» si al menos UMBRAL del paso son bloques en los que
     el micro lleva su voz (MicLeveler.mine: por encima del ruido y, con altavoces, pasando del eco que cabe esperar
@@ -770,14 +781,11 @@ def main():
                     w.write((mix * 32767).astype("<i2").tobytes())
                 if a.pistas and f and not eco_dicho[0] and getattr(levelers.get("mic"), "eco_visto", False):
                     # en cuanto la puerta ve el eco, eco=1 en la cabecera: asi lo sabe el reproductor tambien mientras
-                    # se graba o si se corta sin cerrar (revision 2: ahi quedaba «?» y se quitaba el eco con cascos)
-                    eco_dicho[0] = True
-                    try:
-                        f.seek(pistas.eco_off(SR))
-                        f.write(b"1")
-                        f.seek(0, 2)
-                    except OSError:
-                        pass
+                    # se graba o si se corta sin cerrar (revision 2: ahi quedaba «?» y se quitaba el eco con cascos).
+                    # Con OTRO descriptor: el del audio no se mueve nunca (revision 3, P0: si este write fallaba, el
+                    # seek de vuelta no se hacia y el audio seguia escribiendose sobre la cabecera). Si falla, se
+                    # reintenta en la vuelta siguiente; al cerrar se escribe igual
+                    eco_dicho[0] = marcar_eco(a.out)
                 written += n
             elif w and w.pend:
                 w.flush()  # lo que quedo en memoria por un fallo al escribir

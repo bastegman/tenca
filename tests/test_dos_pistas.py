@@ -316,10 +316,17 @@ class GrabadoraRealTests(unittest.TestCase):
                    for f, b in ((p.stdout, out), (p.stderr, err))]
         for t in readers:
             t.start()
-        time.sleep(13)
-        with open(cls.wav, "rb") as f:  # mientras graba: la puerta ya vio el eco y la cabecera lo dice
-            cls.cab_grabando = f.read(4096)
-        time.sleep(3)
+        fin, cls.cab_grabando = time.time() + 16, b""
+        while time.time() < fin:  # mientras graba: en cuanto la puerta ve el eco, la cabecera lo dice
+            time.sleep(0.25)
+            try:
+                with open(cls.wav, "rb") as f:
+                    cls.cab_grabando = f.read(4096)
+            except OSError:
+                continue
+            if pistas.eco_de(cls.cab_grabando):
+                break
+        time.sleep(max(0.0, fin - time.time()))
         p.stdin.write(b"stop\n")
         p.stdin.flush()
         p.wait(timeout=60)
@@ -414,6 +421,83 @@ class GrabadoraRealTests(unittest.TestCase):
         self.assertIs(pistas.eco_de(self.cab_grabando), True)
         with open(self.wav, "rb") as f:
             self.assertIs(pistas.eco_de(f.read(4096)), True)
+
+
+FALLA_ESCRITURA = r"""
+import errno, os, sys, time
+sys.path.insert(0, os.environ["FAKE_APP"])
+import recorder
+T0, A, B = time.monotonic(), float(os.environ["FALLA_DESDE"]), float(os.environ["FALLA_HASTA"])
+_open = open
+class Falla:
+    def __init__(self, f):
+        self.f = f
+    def write(self, b):
+        if A <= time.monotonic() - T0 < B:
+            raise PermissionError(errno.EACCES, "otro programa tiene bloqueada una parte del archivo")
+        return self.f.write(b)
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        self.f.close()
+    def __getattr__(self, k):
+        return getattr(self.f, k)
+def abrir(path, mode="r", *a, **k):
+    f = _open(path, mode, *a, **k)
+    return Falla(f) if ("w" in mode or "+" in mode) and str(path).endswith(".wav") else f
+recorder.open = abrir
+sys.argv = [os.path.join(os.environ["FAKE_APP"], "recorder.py")] + sys.argv[1:]
+recorder.main()
+"""
+
+
+class EcoConEscriturasQueFallanTests(unittest.TestCase):
+    """Revisión 3, P0: la grabadora escribe eco=1 en la cabecera en cuanto ve el eco. Si ese write fallaba (un bloqueo
+    de rango de otro programa, un disco de red que se va unos segundos: no «disco lleno»), la posición del archivo se
+    quedaba en la cabecera y todo el audio siguiente se escribía encima: la grabación, ilegible y sin aviso. Aquí
+    fallan TODOS los writes del WAV (también el del byte de eco) de 2 a 10 s, que es cuando la puerta ve el eco."""
+
+    def test_la_grabacion_sigue_entera(self):
+        tmp = tempfile.mkdtemp(prefix="tenca-pistas-falla-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        script, wav = os.path.join(tmp, "falla.py"), os.path.join(tmp, "r.wav")
+        with open(script, "w", encoding="utf-8") as f:
+            f.write(FALLA_ESCRITURA)
+        env = dict(os.environ, PYTHONPATH=FAKE, PYTHONIOENCODING="utf-8", FAKE_APP=APP, FALLA_DESDE="2",
+                   FALLA_HASTA="10")
+        p = subprocess.Popen([sys.executable, "-u", script, wav, "--mic", "default", "--sys", "all", "--pistas"],
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=APP)
+        out, err = [], []
+        for f, b in ((p.stdout, out), (p.stderr, err)):
+            threading.Thread(target=lambda f=f, b=b: b.extend(f), daemon=True).start()
+        time.sleep(15)
+        p.stdin.write(b"stop\n")
+        p.stdin.flush()
+        p.wait(timeout=60)
+        log = b"".join(err).decode("utf-8", "replace")
+        self.assertEqual(p.returncode, 0, log)
+        self.assertIn("no se puede escribir la grabacion", log)  # el fallo pasó de verdad
+        info = live.wav_info(wav)
+        self.assertIsNotNone(info, log)  # la cabecera sigue en su sitio, con su trozo «data»
+        self.assertTrue(info["pistas"])
+        self.assertEqual(info["data_off"], len(pistas.cabecera()))
+        self.assertEqual(info["data_size"], os.path.getsize(wav) - info["data_off"])
+        t = [json.loads(line) for line in b"".join(out).decode("utf-8", "replace").splitlines() if line.strip()]
+        self.assertAlmostEqual(info["data_size"] / info["byte_rate"], t[-1]["t"], delta=0.05)  # todo lo grabado
+        self.assertGreater(info["data_size"] / info["byte_rate"], 11)
+        with open(wav, "rb") as f:
+            self.assertIs(pistas.eco_de(f.read(4096)), True)  # reintentado (o escrito al cerrar)
+
+    def test_marcar_eco_no_toca_el_descriptor_del_audio(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = dual_wav(os.path.join(d, "r.wav"), np.zeros(4800), np.zeros(4800), open_header=True)
+            with open(path, "ab", buffering=0) as f:
+                pos = f.tell()
+                self.assertTrue(recorder.marcar_eco(path))
+                self.assertEqual(f.tell(), pos)
+            self.assertFalse(recorder.marcar_eco(os.path.join(d, "no", "existe.wav")))
+            with open(path, "rb") as f:
+                self.assertIs(pistas.eco_de(f.read(4096)), True)
 
 
 class SueloMicTests(unittest.TestCase):
@@ -894,6 +978,10 @@ class DiarizarPistasTests(unittest.TestCase):
         m5 = voices.pasos_micro(dl, dr5, bits)
         self.assertTrue(m5[(t >= 50) & (t < 80)].all())
         self.assertFalse(m5[(t >= 100) & (t < 160.75)].any())
+        # ...también si ese fondo solo dura parte de la reunión (el resto, silencio digital: revisión 3)
+        dr7 = dr5.copy()
+        dr7[t < 45] = -120.0
+        self.assertTrue(voices.pasos_micro(dl, dr7, bits)[(t >= 50) & (t < 80)].all())
         # alguien de la sala que habla 30 s seguidos sin pausas: su voz no es el «ruido de fondo» de ese bloque
         dl6 = dl.copy()
         dl6[(t >= 30) & (t < 60)] = -40
@@ -930,15 +1018,52 @@ class DiarizarPistasTests(unittest.TestCase):
                               "h3": {"pista": "sistema", "segundos": 20.0}}}
         mic = micro("1" * 80 + "1" * 60 + "0" * 20 + "0" * 80)
         self.assertIsNone(voices.mark_user(data["tramos"], mic, skip=voices.fuera_de_tu(data)))
-        self.assertEqual(voices.elegir_tu(data, mic), "h1")
+        # por nivel, pero dudoso: un compañero más cerca del micro que tú daría lo mismo (revisión 3)
+        self.assertEqual(voices.elegir_tu(data, mic), ("h1", True))
         data2 = json.loads(json.dumps(data))
         voices.identify(data2, {}, None, mic)
-        self.assertEqual(data2["tu"], "h1")
+        self.assertEqual((data2["tu"], data2.get("tu_dudoso")), ("h1", True))
+        self.assertEqual(voices.label("h1", data2, {}), "¿Tú?")
+        self.assertEqual(voices.label("h1", data2, {}, for_llm=True), "¿Yo?")
         # alguien a tu lado (4 dB): no se adivina
         data["hablantes"]["h2"]["nivel_db"] = -26.0
-        self.assertIsNone(voices.elegir_tu(data, mic))
+        self.assertEqual(voices.elegir_tu(data, mic), (None, False))
         # sin dos pistas, como siempre
-        self.assertIsNone(voices.elegir_tu(dict(data, pistas=False), mic))
+        self.assertEqual(voices.elegir_tu(dict(data, pistas=False), mic), (None, False))
+
+    def test_tu_por_nivel_la_huella_manda(self):
+        # el compañero suena más en el micro (sala_cerca15 de la revisión 3) y tu huella guardada casa con el otro grupo
+        # del micro: «Tú» es el de la huella, sin duda, y el compañero se queda como «Persona N» (no dos «Tú»)
+        uid = "yo"
+        vec = [1.0] + [0.0] * 191
+        voces_ = types.SimpleNamespace(
+            personas=lambda: [{"id": uid, "nombre": "Yo", "es_usuario": True, "huellas": [{"vector": vec}]}],
+            user=lambda: {"id": uid, "huellas": [{"vector": vec}]})
+        data = {"pistas": True,
+                "tramos": [{"inicio": 0.0, "fin": 20.0, "h": "h1"}, {"inicio": 20.0, "fin": 40.0, "h": "h2"}],
+                "hablantes": {"h1": {"pista": "micro", "segundos": 20.0, "nivel_db": -22.0},
+                              "h2": {"pista": "micro", "segundos": 20.0, "nivel_db": -35.0}}}
+        mic = micro("1" * 160)
+        with mock.patch.object(voices, "match", lambda v, p, **k: {"persona": uid if v[0] > 0.5 else None,
+                                                                   "score": 0.9, "provisional": False,
+                                                                   "segunda": None}):
+            voices.identify(data, {"h1": [0.0, 1.0] + [0.0] * 190, "h2": vec}, voces_, mic)
+        self.assertEqual(data["tu"], "h2")
+        self.assertNotIn("tu_dudoso", data)
+        self.assertEqual(voices.label("h2", data, {uid: "Yo"}, usuario=uid), "Tú")
+        self.assertEqual(voices.label("h1", data, {uid: "Yo"}, usuario=uid), "Persona 1")
+        # sin huellas: «¿Tú?» provisional, a confirmar
+        data3 = {"pistas": True, "tramos": data["tramos"],
+                 "hablantes": {"h1": {"pista": "micro", "segundos": 20.0, "nivel_db": -22.0},
+                               "h2": {"pista": "micro", "segundos": 20.0, "nivel_db": -35.0}}}
+        voces_sin = types.SimpleNamespace(personas=lambda: [], user=lambda: {"id": uid, "huellas": []})
+        voices.identify(data3, {}, voces_sin, mic)
+        self.assertEqual(data3["hablantes"]["h1"]["persona"], uid)
+        self.assertTrue(data3["hablantes"]["h1"]["provisional"])
+        self.assertEqual(voices.label("h1", data3, {uid: "Yo"}, usuario=uid), "¿Tú?")
+        voices.assign(data3, "h1", uid, usuario=uid)  # «Soy yo»: ya sin duda
+        self.assertNotIn("tu_dudoso", data3)
+        self.assertEqual(voices.label("h1", data3, {uid: "Yo"}, usuario=uid), "Tú")
 
     def test_compactar(self):
         x = np.arange(100 * voices.SR, dtype=np.int64).astype(np.int16)

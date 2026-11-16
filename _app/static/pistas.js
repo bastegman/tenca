@@ -111,10 +111,10 @@ const Pistas = (() => {
   /* loadAudio (app.js) la llama al cambiar de audio. Hasta saber qué es, el nodo pasa el audio tal cual: un audio de
      antes nunca suena mezclado como si fuera de dos pistas, aunque su cabecera tarde en llegar. */
   async function cargar(path) {
+    if (path !== ruta) ecoForzado = null;  // recargar la misma (una grabación que crece) no borra lo marcado
     ruta = path;
     doble = false;
     ecoArchivo = null;
-    ecoForzado = null;
     enviar();
     $('#player').classList.remove('pistas');
     const v = await esDoble(path);

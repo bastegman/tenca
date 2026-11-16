@@ -26,9 +26,9 @@ SR = 48000
 OPEN = 0xFFFFFFFF
 MARCA = b"tenca:pistas=micro,sistema"
 # lo que se ve en las propiedades del archivo en Windows («Comentarios»): ASCII, por si lo lee otro programa
-# eco=?: la grabadora lo cambia al cerrar por 1 si vio el eco de los altavoces en el micro y por 0 si no (cascos); el
-# reproductor solo quita el eco por defecto si lo hubo (revision 1, P2-5: con cascos no hay eco y quitarlo se comia
-# tu voz al hablar a la vez). «?»: no se sabe (sigue grabando, o se corto sin cerrar).
+# eco=?: la grabadora lo cambia por 1 en cuanto ve el eco de los altavoces en el micro y, al cerrar, por 0 si no lo
+# vio (cascos); el reproductor solo quita el eco por defecto si lo hubo (revision 1, P2-5: con cascos no hay eco y
+# quitarlo se comia tu voz al hablar a la vez). «?»: no se sabe (sigue grabando sin eco visto, o se corto).
 ECO = b" eco="
 COMENTARIO = (b"Tenca, dos pistas: izquierda = tu micro, derecha = el audio del PC (los demas). Para oirlo mezclado, "
               b"Exportar audio mezclado en Tenca. " + MARCA + ECO + b"?")
@@ -48,7 +48,7 @@ def cabecera(sr=SR):
 
 
 def eco_off(sr=SR):
-    """Posicion en el archivo del byte de eco=? (lo escribe la grabadora al cerrar)."""
+    """Posicion en el archivo del byte de eco=? (lo escribe la grabadora: al ver el eco y al cerrar)."""
     return cabecera(sr).index(MARCA + ECO) + len(MARCA + ECO)
 
 
