@@ -16,7 +16,8 @@ on:
         default: "1200"
   push:
     branches: [main, fix-subir-memoria]
-    paths: ["_app/voices.py", "_app/engines.py", "scripts/e2e/voces_memoria.py", ".github/workflows/voces-memoria.yml"]
+    paths: ["_app/voices.py", "_app/engines.py", "_app/app_voces.py", "_app/carga.py", "_app/trabajos.py",
+            "scripts/e2e/voces_memoria.py", ".github/workflows/voces-memoria.yml"]
 
 permissions:
   contents: read

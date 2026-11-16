@@ -102,13 +102,78 @@ function Wait-Process-Gone($procId, $seconds) {
     }
     return $false
 }
-function Run-Installer($dir, $label, $timeoutMin) {
+# la ventana del instalador tiene que atender a Windows mientras trabaja (incidencia del 16/11/2026: en un portatil
+# modesto, «Windows PowerShell is not responding» y la instalacion cortada con «Close the program»). Windows la da por
+# colgada a los 5 s sin atender mensajes; aqui se le manda WM_NULL cada ~0,3 s con 0,5 s de tope y se mide el rato mas
+# largo seguido sin respuesta. Solo las ventanas WinForms (WindowsForms10.*) de un powershell.exe que no es este script:
+# la consola de INSTALAR.bat se llama igual pero es de conhost y siempre contesta
+if (-not ("E2E.Sonda" -as [type])) {
+    Add-Type -TypeDefinition @"
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+namespace E2E {
+  public static class Sonda {
+    delegate bool EnumProc(IntPtr h, IntPtr l);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr l);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+    [DllImport("user32.dll")] static extern IntPtr SendMessageTimeout(IntPtr h, uint m, UIntPtr w, IntPtr l, uint f, uint t, out UIntPtr r);
+    public static IntPtr Ventana(int[] pids) {
+      IntPtr hallada = IntPtr.Zero;
+      EnumWindows(delegate (IntPtr h, IntPtr l) {
+        uint pid; GetWindowThreadProcessId(h, out pid);
+        if (Array.IndexOf(pids, (int)pid) < 0 || !IsWindowVisible(h)) return true;
+        StringBuilder c = new StringBuilder(256); GetClassName(h, c, 256);
+        if (c.ToString().StartsWith("WindowsForms10.")) { hallada = h; return false; }
+        return true;
+      }, IntPtr.Zero);
+      return hallada;
+    }
+    public static bool Responde(IntPtr h, uint ms) {
+      UIntPtr r;
+      return SendMessageTimeout(h, 0, UIntPtr.Zero, IntPtr.Zero, 0x2, ms, out r) != IntPtr.Zero;
+    }
+  }
+}
+"@
+}
+function Run-Installer($dir, $label, $timeoutMin, $sondear = $true) {
     # como el usuario: doble clic en INSTALAR.bat (cmd -> powershell 5.1 -> instalar.ps1 en modo ventana)
+    # $sondear: medir si su ventana deja de responder (no en el instalador de la Chuleta de main, fase v: es el de antes)
     $bat = Join-Path $dir "INSTALAR.bat"
     $t0 = Get-Date
     $p = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "`"$bat`"" -WorkingDirectory $dir -PassThru
     $end = $t0.AddMinutes($timeoutMin)
-    while (-not $p.HasExited -and (Get-Date) -lt $end) { Start-Sleep -Seconds 2 }
+    $peor, $desde, $vista, $pids, $pidsT = 0.0, $null, $false, @(), [DateTime]::MinValue
+    while (-not $p.HasExited -and (Get-Date) -lt $end) {
+        if (((Get-Date) - $pidsT).TotalSeconds -ge 2) {
+            $pids = [int[]]@(Get-Process -Name powershell -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $PID } | ForEach-Object { $_.Id })
+            $pidsT = Get-Date
+        }
+        $h = $(if ($pids.Count) { [E2E.Sonda]::Ventana($pids) } else { [IntPtr]::Zero })
+        if ($h -ne [IntPtr]::Zero) {
+            $vista = $true
+            if ([E2E.Sonda]::Responde($h, 500)) { $desde = $null }
+            else {
+                if (-not $desde) { $desde = (Get-Date).AddMilliseconds(-500) }
+                $peor = [Math]::Max($peor, ((Get-Date) - $desde).TotalSeconds)
+            }
+        } else { $desde = $null }
+        Start-Sleep -Milliseconds 300
+    }
+    $txt = "lo mas largo seguido sin responder: {0:N1} s" -f $peor
+    if ($sondear -and $vista) { Check "$label.ventana_responde" ($peor -lt 2.5) $txt }
+    else { Note "$label.ventana_responde" $(if ($vista) { $txt } else { "sin ventana WinForms" }) }
+    if ($sondear -and $vista -and $p.HasExited) {
+        # y lo que dice el propio instalador (su latido: un temporizador de la ventana; mide la cola de mensajes, que
+        # es lo que mira Windows para darla por colgada). La "a" con tilde de "mas" no se escribe aqui: este script
+        # no lleva BOM y PowerShell 5.1 lo lee como ANSI
+        $m = [regex]::Match((Last-Run-Log), "ventana: lo m\S{1,2}s largo sin atenderla, ([\d.,]+) s")
+        $hueco = $(if ($m.Success) { [double]($m.Groups[1].Value -replace ",", ".") } else { $null })
+        Check "$label.ventana_latido" ($null -ne $hueco -and $hueco -lt 2.5) $(if ($m.Success) { $m.Value } else { "sin la linea del latido en instalar.log" })
+    }
     if (-not $p.HasExited) {
         Check "$label.termina" $false "INSTALAR.bat no termino en $timeoutMin min (se mata)"
         Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*instalar.ps1*" -or $_.CommandLine -like "*INSTALAR.bat*" } |
@@ -849,7 +914,7 @@ if (-not $Chuleta) {
     Expand-Archive -LiteralPath $vZip -DestinationPath $vTest -Force
     $vExtr = Join-Path $vTest $Legacy
     $env:NOTAS_INSTALADOR_AUTOCERRAR = "15"
-    $rcv = Run-Installer $vExtr "v.chuleta_instalador" 20
+    $rcv = Run-Installer $vExtr "v.chuleta_instalador" 20 $false
     Copy-Logs "v-chuleta"
     Check "v.chuleta_instalada" ($rcv -eq 0 -and (Test-Path -LiteralPath (Join-Path $vInst "_app\server.py")) -and (Test-Path -LiteralPath $LegacyKey) -and (Test-Path -LiteralPath $deskLegacy) -and (Test-Path -LiteralPath $progLegacy) -and -not (Test-Path -LiteralPath $desk)) "rc=$rcv"
     $cfgv = Wait-Http "$Base/api/config" 150

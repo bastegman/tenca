@@ -823,6 +823,14 @@ def strip_private(node):
 TX_SAVE_LOCK = threading.Lock()
 
 
+def _solo_en_linea(path):
+    """Un fichero «solo en linea» de OneDrive (abrirlo lo descarga). Si no existe o no se puede mirar, no."""
+    try:
+        return bool(getattr(os.stat(path), "st_file_attributes", 0) & CLOUD_ONLY)
+    except OSError:
+        return False
+
+
 class Transcripts:
     """Lee .srt / .txt con cache por fecha de modificacion (para la busqueda global)."""
 
@@ -869,14 +877,21 @@ class Transcripts:
             self.cache[abs_path] = (mtime, data)
         return data
 
-    def warm(self, library):
-        """Precarga todas las transcripciones para que la primera busqueda sea instantanea."""
+    def warm(self, library, pausa=0.005):
+        """Precarga todas las transcripciones para que la primera busqueda sea instantanea. Es trabajo de fondo del
+        arranque: sin abrir las «solo en linea» de OneDrive (leerlas las descargaria todas al arrancar) y con un
+        respiro entre una y otra, para no quitarle el turno a la interfaz mientras se abre (16/11/2026)."""
         for a in list(library.flat):
             if a["txt"] or a["srt"]:
+                base = os.path.splitext(a["_abs"])[0]
+                if any(_solo_en_linea(base + ext) for ext in (".srt", ".txt")):
+                    continue
                 try:
-                    self.load(os.path.splitext(a["_abs"])[0])
+                    self.load(base)
                 except OSError:
                     pass
+                if pausa:
+                    time.sleep(pausa)
 
 
 def public_transcript(data):

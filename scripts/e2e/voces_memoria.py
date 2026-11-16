@@ -202,7 +202,7 @@ print(json.dumps({"persona": p["id"], "yo": yo["id"], "modelo": voices.MODEL_ID}
 '''
 
 
-def tras_actualizar(antes, m4a, side, datos, trabajo, vec_antes, vec_ahora, espera=600):
+def tras_actualizar(antes, m4a, side, datos, trabajo, vec_antes, vec_ahora, espera=900):
     """El paso 5: el voces.json de la de antes, la de ahora arrancada con él y la huella rehecha sola."""
     import numpy as np
     sys.path.insert(0, os.path.join(REPO, "_app"))

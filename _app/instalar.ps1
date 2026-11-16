@@ -28,6 +28,11 @@
 # nombre visible (el de common.APP_NAME); las carpetas, los .bat y la clave de registro no cambian.
 # Con escritorio abre su propia ventana (WinForms: pasos, barra y detalle) y esconde la consola; -Consola, -NoShortcut o
 # -NoLaunch (pruebas, CI) lo dejan como consola de siempre.
+# Con ventana, lo que tarda (cerrar la version abierta, buscar Python, pip, comprobar las librerias, compilar los tipos
+# de Windows) corre en segundo plano (Invoke-Fondo) y este hilo sigue atendiendo la ventana: Windows da por colgada una
+# ventana a los 5 s sin atenderla y, si se pulsa entonces, ofrece cerrarla («Windows PowerShell is not responding»), lo
+# que cortaba la instalacion a medias en un portatil lento (16/11/2026). instalar.log apunta la hora de cada paso y lo
+# mas largo que la ventana ha estado sin atender.
 # Solo para CI: -AutoCerrar N (o la variable NOTAS_INSTALADOR_AUTOCERRAR=N) cierra la ventana sola N segundos despues de
 # terminar, bien o mal; si termino bien, como si se hubiera pulsado "Abrir". NOTAS_INSTALADOR_SIMULAR_FALLO=pip ensaya la
 # pantalla de error sin tocar la red. Ninguna de las dos se usa en un PC normal.
@@ -94,7 +99,7 @@ function Say($text, $color = "Gray") { Write-Host $text -ForegroundColor $color;
 function Step($text) {
     Write-Host ""; Write-Host "  > $text" -ForegroundColor Cyan
     Log-File ""
-    Log-File "> $text"
+    Log-File ("> $text  [" + (Get-Date -Format "HH:mm:ss") + "]")
     if ($script:ui) {
         $ui = $script:ui
         if ($ui.current) { $ui.current.Text = [string][char]0x2713 + " " + $ui.current.Tag; $ui.current.ForeColor = $ui.verde }
@@ -129,6 +134,7 @@ function Finish-Ui($ok, $text) {
     $ui.done = $true
     Ui-Log $(if ($ok) { "Listo." } else { "X $text" })
     $ui.btnClose.Focus() | Out-Null
+    if ($script:latido) { Log-File ("ventana: lo más largo sin atenderla, {0:0.0} s" -f $script:hueco) }
     $t0 = Get-Date
     while ($ui.form.Visible) {
         [System.Windows.Forms.Application]::DoEvents()
@@ -151,7 +157,8 @@ function Fail($text) {
     exit 1
 }
 function Hide-Console {
-    # la consola de INSTALAR.bat se esconde mientras la ventana esta abierta (INSTALAR.bat solo hace pause si fallamos)
+    # la consola de INSTALAR.bat se esconde mientras la ventana esta abierta (INSTALAR.bat solo hace pause si fallamos).
+    # Se ejecuta en segundo plano (Invoke-Fondo): Add-Type compila C#, y eso son segundos en un portatil con antivirus
     try {
         if (-not ("TencaLnk.Win" -as [type])) {
             Add-Type -Namespace TencaLnk -Name Win -MemberDefinition '[DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow(); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);'
@@ -238,10 +245,20 @@ function New-InstallerWindow {
                         btnCopy = $btnCopy; current = $null; n = 0; total = 7; done = $false; abrir = $false
                         verde = [System.Drawing.Color]::FromArgb(22, 128, 61); rojo = [System.Drawing.Color]::FromArgb(185, 28, 28)
                         azul = [System.Drawing.Color]::FromArgb(37, 99, 235) }
+        # latido: un temporizador de la propia ventana apunta el rato mas largo entre dos atenciones (instalar.log)
+        $script:latido = [Diagnostics.Stopwatch]::StartNew()
+        $script:hueco = 0.0
+        $tm = New-Object System.Windows.Forms.Timer
+        $tm.Interval = 200
+        $tm.Add_Tick({ $g = $script:latido.Elapsed.TotalSeconds; if ($g -gt $script:hueco) { $script:hueco = $g }; $script:latido.Restart() })
+        $script:ui.timer = $tm
+        Open-Fondo  # el runspace de Invoke-Fondo, antes de ensenar la ventana (abrirlo en frio tarda)
         $f.Show()
         $f.Activate()
         [System.Windows.Forms.Application]::DoEvents()
-        Hide-Console
+        $script:latido.Restart()  # desde que se ve: abrir el runspace y ensenarla no cuentan como «sin atender»
+        $tm.Start()
+        $null = Invoke-Fondo "Hide-Console" @{} @("Hide-Console")
         return $true
     } catch {
         $script:ui = $null
@@ -250,13 +267,10 @@ function New-InstallerWindow {
     }
 }
 
-function Set-ShortcutAppId($path, $id) {
-    # System.AppUserModel.ID del .lnk (IPropertyStore de la shell). Con el mismo id que fija server.py en su proceso,
-    # Windows agrupa la ventana bajo este acceso directo y "Anclar a la barra de tareas" ancla el acceso directo
-    # (icono y argumentos) y no pythonw.exe a secas. Si falla, el acceso directo funciona igual.
-    try {
-        if (-not ("TencaLnk.PropertyStore" -as [type])) {
-            Add-Type -TypeDefinition @"
+function Add-TipoLnk {
+    # el tipo de Set-ShortcutAppId (compila C#: segundos en un PC lento; el instalador lo pide antes en segundo plano)
+    if (-not ("TencaLnk.PropertyStore" -as [type])) {
+        Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
 namespace TencaLnk {
@@ -294,7 +308,15 @@ namespace TencaLnk {
   }
 }
 "@
-        }
+    }
+}
+
+function Set-ShortcutAppId($path, $id) {
+    # System.AppUserModel.ID del .lnk (IPropertyStore de la shell). Con el mismo id que fija server.py en su proceso,
+    # Windows agrupa la ventana bajo este acceso directo y "Anclar a la barra de tareas" ancla el acceso directo
+    # (icono y argumentos) y no pythonw.exe a secas. Si falla, el acceso directo funciona igual.
+    try {
+        Add-TipoLnk
         [TencaLnk.PropertyStore]::SetAppId($path, $id)
         return $true
     } catch {
@@ -303,14 +325,102 @@ namespace TencaLnk {
     }
 }
 
+# --- lo que tarda, en segundo plano
+$script:fondo = $null  # el runspace (se crea al primer uso y se reutiliza)
+$script:fondoLineas = @()  # lo que dijo con Say la ultima llamada (pip: para explicar un fallo)
+function Pump { if ($script:ui) { [System.Windows.Forms.Application]::DoEvents() } }
+function Wait-Ui($ms) {
+    # Start-Sleep que, con ventana, la sigue atendiendo
+    if (-not $script:ui) { Start-Sleep -Milliseconds $ms; return }
+    $fin = [DateTime]::UtcNow.AddMilliseconds($ms)
+    while ([DateTime]::UtcNow -lt $fin) { Pump; Start-Sleep -Milliseconds 30 }
+}
+function Get-FnText([string[]]$nombres) {
+    # el texto de unas funciones de este script, para definirlas en el runspace de Invoke-Fondo (solo funciones sin
+    # parametros: el texto de su ScriptBlock no lleva los que se declaran entre parentesis)
+    return (@($nombres | Where-Object { $_ } | ForEach-Object { "function $_ {`n" + (Get-Item "function:$_").ScriptBlock.ToString() + "`n}" }) -join "`n")
+}
+function Invoke-Fondo([string]$codigo, [hashtable]$vars = @{}, [string[]]$funciones = @()) {
+    # $codigo en un runspace aparte del mismo proceso (mismas variables de entorno y los mismos tipos .NET) mientras este
+    # hilo sigue atendiendo la ventana. Dentro estan las variables de $vars, las funciones $funciones y Say, que manda
+    # cada linea aqui y se dice al llegar (pip, winget). Devuelve lo que devuelva $codigo; si falla, $null (al log).
+    # Sin ventana (consola, CI) hace lo mismo: un solo camino
+    $script:fondoLineas = @()
+    Open-Fondo
+    $q = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
+    $pre = 'param($salida, $vars) foreach ($k in $vars.Keys) { Set-Variable -Name $k -Value $vars[$k] }' + "`n" +
+           'function Say($text, $color = "Gray") { $salida.Enqueue("$color`t$text") }' + "`n"
+    $ps = [powershell]::Create()
+    $ps.Runspace = $script:fondo
+    # en un ambito propio ($true): lo que deje una llamada (variables, funciones) no lo ve la siguiente
+    $null = $ps.AddScript($pre + (Get-FnText $funciones) + "`n" + $codigo, $true).AddArgument($q).AddArgument($vars)
+    $r = $null
+    try {
+        $h = $ps.BeginInvoke()
+        while (-not $h.IsCompleted) { Read-Fondo $q; Pump; Start-Sleep -Milliseconds 40 }
+        $r = $ps.EndInvoke($h)
+        foreach ($e in @($ps.Streams.Error)) { Log-File "    (en segundo plano) $e" }
+    } catch {
+        Log-File "    (en segundo plano) $($_.Exception.Message)"
+        $r = $null
+    } finally {
+        Read-Fondo $q
+        $ps.Dispose()
+    }
+    if (-not $r -or $r.Count -eq 0) { return $null }
+    return $r[$r.Count - 1]
+}
+function Open-Fondo {
+    if (-not $script:fondo) {
+        $script:fondo = [runspacefactory]::CreateRunspace()
+        $script:fondo.Open()
+    }
+}
+function Read-Fondo($q) {
+    $l = $null
+    while ($q.TryDequeue([ref]$l)) {
+        $c, $t = "$l" -split "`t", 2
+        $script:fondoLineas += $t
+        Say $t $c
+    }
+}
+# un programa con su salida linea a linea (pip, winget): se dice al llegar; devuelve rc
+$CodigoExe = @'
+$global:LASTEXITCODE = $null
+& $exe @argv 2>&1 | ForEach-Object { Say "    $_" }
+[pscustomobject]@{ rc = $LASTEXITCODE }
+'@
+# un programa con su salida guardada (comprobar una libreria): rc y out
+$CodigoSalida = @'
+$global:LASTEXITCODE = $null
+$o = $(if ($conErr) { & $exe @argv 2>&1 } else { & $exe @argv 2>$null })
+[pscustomobject]@{ rc = $LASTEXITCODE; out = @($o | ForEach-Object { "$_" }) }
+'@
+
 function Find-Python {
     # devuelve la ruta de un python.exe que funcione, de 3.10 a 3.13 y probando primero el mas nuevo;
-    # si solo hay uno mas nuevo (3.14+) lo devuelve con aviso: pip dira si aun no hay librerias para el
+    # si solo hay uno mas nuevo (3.14+) lo devuelve con aviso: pip dira si aun no hay librerias para el.
+    # Al actualizar, primero el de la instalacion anterior ($Previo, su python.txt): ya tiene las librerias (otro
+    # Python mas nuevo las instalaria todas de nuevo) y no hay que probar los demas (cada prueba es un proceso: en el
+    # runner de la CI, 23 s para llegar al que vale)
     $probe = "import sys; print(sys.executable); print(sys.version_info[0] * 100 + sys.version_info[1])"
     $tries = @(@("py", "-3.13"), @("py", "-3.12"), @("py", "-3.11"), @("py", "-3.10"), @("py", "-3"), @("python"), @("python3"))
-    foreach ($dir in @("$env:LOCALAPPDATA\Programs\Python", "$env:ProgramFiles\Python*", "${env:ProgramFiles(x86)}\Python*")) {
-        Get-ChildItem -Path $dir -Filter python.exe -Recurse -Depth 1 -ErrorAction SilentlyContinue |
-            Sort-Object FullName -Descending | ForEach-Object { $tries += , @($_.FullName) }
+    if ($Previo) { $tries = @(, @($Previo)) + $tries }
+    # las carpetas de Python de siempre (%LOCALAPPDATA%\Programs\Python\PythonXY, C:\Program Files\PythonXY): solo
+    # su primer nivel y python.exe dentro. Antes, Get-ChildItem -Path "...\Python*" -Recurse: con un comodin y -Recurse,
+    # PowerShell recorre la carpeta de arriba entera (todo Program Files): 23 s en un runner de la CI con la cache
+    # caliente, casi 5 min en frio, y el disco a tope con el antivirus mirando cada fichero (16/11/2026)
+    $carpetas = @()
+    if ($env:LOCALAPPDATA) {
+        $lp = Join-Path $env:LOCALAPPDATA "Programs\Python"
+        $carpetas += @(Get-ChildItem -LiteralPath $lp -Directory -ErrorAction SilentlyContinue)
+    }
+    foreach ($pf in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+        if ($pf) { $carpetas += @(Get-ChildItem -LiteralPath $pf -Directory -Filter "Python*" -ErrorAction SilentlyContinue) }
+    }
+    $carpetas | Sort-Object FullName -Descending | ForEach-Object {
+        $exe = Join-Path $_.FullName "python.exe"
+        if (Test-Path -LiteralPath $exe -PathType Leaf) { $tries += , @($exe) }
     }
     $newer = $null
     foreach ($t in $tries) {
@@ -345,17 +455,33 @@ function Get-ApiHeaders($post) {
     return $h
 }
 
+function Find-PythonFondo {
+    # Find-Python en segundo plano: prueba varios python.exe (cada uno, un proceso nuevo que el antivirus revisa).
+    # Con el python.txt de la instalacion que se actualiza ($app ya es la de destino), ese primero
+    $previo = ""
+    try { $previo = "$(Get-Content -LiteralPath (Join-Path $app 'python.txt') -TotalCount 1 -Encoding UTF8 -ErrorAction Stop)".Trim().TrimStart([char]0xFEFF) } catch {}
+    return "$((Invoke-Fondo '[pscustomobject]@{ v = (Find-Python) }' @{ MaxPy = $MaxPy; Previo = $previo } @("Find-Python")).v)"
+}
+# Python 3.13 con winget, solo para este usuario (si no hay ningun Python)
+$WingetPython = @("install", "-e", "--id", "Python.Python.3.13", "--scope", "user", "--silent", "--accept-package-agreements",
+                  "--accept-source-agreements")
+
 function Invoke-Api($path, $post = $false, $timeout = 2) {
     # @{ code; body }: 200 si contesta bien, el codigo HTTP si contesta con error (409 grabando, 401/403 sin token
     # valido...) y 0 si no contesta (apagada)
     $a = @{ Uri = "http://127.0.0.1:$Port$path"; TimeoutSec = $timeout; Headers = (Get-ApiHeaders $post) }
     if ($post) { $a.Method = "Post"; $a.ContentType = "application/json"; $a.Body = "{}" }
-    try { return @{ code = 200; body = (Invoke-RestMethod @a) } }
+    # en segundo plano: esperar a la app (hasta 20 s al apagarla) no congela la ventana
+    $r = Invoke-Fondo @'
+    try { [pscustomobject]@{ code = 200; body = (Invoke-RestMethod @a) } }
     catch {
         $c = 0
         try { if ($_.Exception.Response) { $c = [int]$_.Exception.Response.StatusCode } } catch {}
-        return @{ code = $c; body = $null }
+        [pscustomobject]@{ code = $c; body = $null }
     }
+'@ @{ a = $a }
+    if (-not $r) { return [pscustomobject]@{ code = 0; body = $null } }
+    return $r
 }
 
 function Test-Grabadora {
@@ -369,7 +495,8 @@ function Test-Grabadora {
 function Unblock-AppFiles($appDir, $rootDir) {
     # quita la marca de Internet (Zone.Identifier) solo a los ficheros del paquete: _app y los de la raiz que trae el
     # zip. Sin esto Windows pregunta al abrirlos; las reuniones y demas ficheros del usuario conservan su marca
-    Get-ChildItem -LiteralPath $appDir -Recurse -File -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue
+    Get-ChildItem -LiteralPath $appDir -Recurse -File -ErrorAction SilentlyContinue |
+        ForEach-Object { $_ | Unblock-File -ErrorAction SilentlyContinue; if ($script:ui) { [System.Windows.Forms.Application]::DoEvents() } }
     foreach ($n in @("INSTALAR.bat", $Launcher, "LEEME.txt", "LICENSE")) {
         $f = Join-Path $rootDir $n
         if (Test-Path -LiteralPath $f -PathType Leaf) { Unblock-File -LiteralPath $f -ErrorAction SilentlyContinue }
@@ -576,11 +703,11 @@ function Copy-AppFiles($fromApp, $fromRoot, $toApp, $toRoot) {
     # paquete, sin pisar las que ya haya. Las grabaciones de la carpeta de destino no se tocan.
     New-Item -ItemType Directory -Force $toApp | Out-Null
     Get-ChildItem -LiteralPath $fromApp -File | Where-Object { $_.Extension -in ".py", ".bat", ".ps1" } |
-        ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $toApp -Force }
+        ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $toApp -Force; Pump }
     foreach ($sub in @("static", "export")) {  # export: plantillas del instalador (para "Compartir $AppName")
         New-Item -ItemType Directory -Force (Join-Path $toApp $sub) | Out-Null
         Get-ChildItem -LiteralPath (Join-Path $fromApp $sub) -File -ErrorAction SilentlyContinue |
-            ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $toApp $sub) -Force }
+            ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $toApp $sub) -Force; Pump }
     }
     # la version del paquete (la ensena Ajustes > Acerca de), el manual y los .bat de la raiz tambien se renuevan
     if (Test-Path -LiteralPath (Join-Path $fromApp "version.txt")) { Copy-Item -LiteralPath (Join-Path $fromApp "version.txt") -Destination $toApp -Force }
@@ -824,11 +951,13 @@ $running = Invoke-Api "/api/ping" $false 5
 # tiempo pero con un server.py de la app escuchando en el puerto: esta abierta y ocupada
 $ocupada = $false
 if ($running.code -eq 0) {
-    try {
-        $lpid = (Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $Port -State Listen -ErrorAction Stop | Select-Object -First 1).OwningProcess
-        $lp = Get-CimInstance Win32_Process -Filter "ProcessId=$lpid" -ErrorAction Stop
-        $ocupada = [bool]($lp -and $lp.Name -match '^pythonw?\.exe$' -and "$($lp.CommandLine)" -match 'server\.py')
-    } catch {}
+    $ocupada = [bool](Invoke-Fondo @'
+try {
+    $lpid = (Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $Port -State Listen -ErrorAction Stop | Select-Object -First 1).OwningProcess
+    $lp = Get-CimInstance Win32_Process -Filter "ProcessId=$lpid" -ErrorAction Stop
+    [pscustomobject]@{ v = [bool]($lp -and $lp.Name -match '^pythonw?\.exe$' -and "$($lp.CommandLine)" -match 'server\.py') }
+} catch { [pscustomobject]@{ v = $false } }
+'@ @{ Port = $Port }).v
 }
 if (($running.code -eq 200 -and $running.body.app -eq "audios") -or $running.code -eq 401 -or $running.code -eq 403 -or $ocupada) {
     $st = Invoke-Api "/api/rec/status" $false 2
@@ -839,30 +968,38 @@ if (($running.code -eq 200 -and $running.body.app -eq "audios") -or $running.cod
     if ($ap.code -eq 409) { Fail "$AppName está grabando ahora mismo. Para la grabación y vuelve a abrir INSTALAR.bat." }
     if ($ap.code -eq 200) {
         for ($k = 0; $k -lt 24 -and -not $apagado; $k++) {
-            Start-Sleep -Milliseconds 250
+            Wait-Ui 250
             if ((Invoke-Api "/api/ping" $false 1).code -eq 0) { $apagado = $true }
         }
     }
-    $owner = $null
-    if ($apagado) { $owner = -1 }
-    try { $owner = (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop | Select-Object -First 1).OwningProcess } catch {}
-    if (-not $owner) {
-        $m = netstat -ano -p tcp | Select-String ":$Port\s+\S+\s+LISTENING\s+(\d+)" | Select-Object -First 1
-        if ($m) { $owner = [int]$m.Matches[0].Groups[1].Value }
-    }
+    $owner = (Invoke-Fondo @'
+$owner = $null
+if ($apagado) { $owner = -1 }
+try { $owner = (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop | Select-Object -First 1).OwningProcess } catch {}
+if (-not $owner) {
+    $m = netstat -ano -p tcp | Select-String ":$Port\s+\S+\s+LISTENING\s+(\d+)" | Select-Object -First 1
+    if ($m) { $owner = [int]$m.Matches[0].Groups[1].Value }
+}
+[pscustomobject]@{ v = $owner }
+'@ @{ Port = $Port; apagado = $apagado }).v
     if (-not $owner) { Fail "$AppName está abierta y no he podido cerrarla: ciérrala (Ajustes > Apagar, o su ventana de consola) y vuelve a abrir INSTALAR.bat." }
     if ($owner -gt 0) {
         # sin la API (version antigua, sin token valido o sin respuesta) se cierra su proceso; nunca con la grabadora
         # abierta, que puede estar grabando una reunion
-        if (Test-Grabadora) { Fail "$AppName no se ha podido apagar y su grabadora sigue abierta (puede estar grabando): apágala desde Ajustes > Apagar $AppName y vuelve a abrir INSTALAR.bat." }
-        $ids = @($owner)
-        $p = Get-CimInstance Win32_Process -Filter "ProcessId=$owner"
-        for ($k = 0; $k -lt 2 -and $p; $k++) {  # tambien el "py" y la ventana de consola que lo lanzaron (instalaciones antiguas)
-            $p = Get-CimInstance Win32_Process -Filter "ProcessId=$($p.ParentProcessId)"
-            if ($p -and ($p.Name -eq "py.exe" -or ($p.Name -eq "cmd.exe" -and @(@("Tenca") + $LegacyNames | Where-Object { "$($p.CommandLine)" -like "*$_.bat*" }).Count -gt 0))) { $ids += $p.ProcessId }
-        }
+        if ((Invoke-Fondo "[pscustomobject]@{ v = [bool](Test-Grabadora) }" @{} @("Test-Grabadora")).v) { Fail "$AppName no se ha podido apagar y su grabadora sigue abierta (puede estar grabando): apágala desde Ajustes > Apagar $AppName y vuelve a abrir INSTALAR.bat." }
+        # tambien el "py" y la ventana de consola que lo lanzaron (instalaciones antiguas)
+        $ids = @((Invoke-Fondo @'
+$ids = @($owner)
+$p = Get-CimInstance Win32_Process -Filter "ProcessId=$owner"
+for ($k = 0; $k -lt 2 -and $p; $k++) {
+    $p = Get-CimInstance Win32_Process -Filter "ProcessId=$($p.ParentProcessId)"
+    if ($p -and ($p.Name -eq "py.exe" -or ($p.Name -eq "cmd.exe" -and @(@("Tenca") + $LegacyNames | Where-Object { "$($p.CommandLine)" -like "*$_.bat*" }).Count -gt 0))) { $ids += $p.ProcessId }
+}
+[pscustomobject]@{ v = $ids }
+'@ @{ owner = $owner; LegacyNames = $LegacyNames }).v | Where-Object { $_ })
+        if (-not $ids.Count) { $ids = @($owner) }
         $ids | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
-        Start-Sleep -Seconds 1
+        Wait-Ui 1000
     }
     Say "    Cerrada la versión que estaba abierta (al terminar se abre la nueva)" Green
 } else {
@@ -923,13 +1060,12 @@ if ($yaInstalada) {
 Remove-LanzadoresAntiguos $root
 
 Step "Buscando Python (de 3.10 a 3.13)..."
-$py = Find-Python
+$py = Find-PythonFondo
 if (-not $py) {
     if (Get-Command winget -ErrorAction SilentlyContinue) {
         Say "    No hay Python: lo instalo con winget (solo para tu usuario, unos 2 minutos)..."
-        & winget install -e --id Python.Python.3.13 --scope user --silent --accept-package-agreements --accept-source-agreements 2>&1 |
-            ForEach-Object { Say "    $_" }
-        $py = Find-Python
+        $null = Invoke-Fondo $CodigoExe @{ exe = "winget"; argv = $WingetPython }
+        $py = Find-PythonFondo
     }
     if (-not $py) {
         # con -NoLaunch (en silencio: Setup.exe /VERYSILENT, CI) no se abre el navegador: se dice la direccion
@@ -945,8 +1081,8 @@ if (-not $py) {
 Say "    $py" Green
 
 Step "Instalando librerías (la primera vez tarda unos minutos)..."
-& $py -m pip --version *> $null
-if ($LASTEXITCODE -ne 0) { & $py -m ensurepip --upgrade 2>&1 | ForEach-Object { Say "    $_" } }
+$r = Invoke-Fondo $CodigoSalida @{ exe = $py; argv = @("-m", "pip", "--version"); conErr = $false }
+if (-not $r -or $r.rc -ne 0) { $null = Invoke-Fondo $CodigoExe @{ exe = $py; argv = @("-m", "ensurepip", "--upgrade") } }
 function Pip-Install($extra, $list) {
     # pip escribe los errores por stderr: se ensenan y se guardan para distinguir despues que ha fallado
     $script:pipOut = @()
@@ -957,9 +1093,10 @@ function Pip-Install($extra, $list) {
     }
     if (-not $extra) { $extra = @() }
     if (-not $list) { $list = $packages }
-    & $py -m pip install @extra --disable-pip-version-check --no-warn-script-location @list 2>&1 |
-        ForEach-Object { $s = "$_"; Say "    $s"; $script:pipOut += $s }
-    return $LASTEXITCODE
+    # en segundo plano: pip pasa ratos largos sin escribir (resolver, descomprimir) y la ventana no debe congelarse
+    $r = Invoke-Fondo $CodigoExe @{ exe = $py; argv = (@("-m", "pip", "install") + @($extra) + @("--disable-pip-version-check", "--no-warn-script-location") + @($list)) }
+    $script:pipOut = @($script:fondoLineas)
+    return $(if ($r) { $r.rc } else { 1 })
 }
 $userMode = $null
 $rc = Pip-Install
@@ -968,8 +1105,9 @@ if ($rc -ne 0) {
     $userMode = "--user"
     $rc = Pip-Install $userMode
 }
-$v = & $py -c "import faster_whisper, soundcard, requests, av, numpy; print('    faster-whisper', faster_whisper.__version__, '| PyAV', av.__version__)" 2>&1
-$coreOk = ($LASTEXITCODE -eq 0)
+$r = Invoke-Fondo $CodigoSalida @{ exe = $py; argv = @("-c", "import faster_whisper, soundcard, requests, av, numpy; print('    faster-whisper', faster_whisper.__version__, '| PyAV', av.__version__)"); conErr = $true }
+$v = $(if ($r) { $r.out } else { @() })
+$coreOk = [bool]($r -and $r.rc -eq 0)
 if ($env:NOTAS_INSTALADOR_SIMULAR_FALLO -eq "pip") { $coreOk = $false }  # solo CI
 if ($coreOk) { Say ($v -join "`n") Green } else { Say ($v -join "`n") Yellow }
 # las opcionales (ventana propia, quien habla, calendario) se instalan aparte para que un fallo suyo no deje sin
@@ -978,18 +1116,18 @@ if ($coreOk) {
     Step "Instalando las librerías opcionales (ventana propia, quién habla, calendario de Outlook)..."
     foreach ($opt in $optional) { $null = Pip-Install $userMode @($opt) }
 }
-$v = & $py -c "import sherpa_onnx; print('    sherpa-onnx', sherpa_onnx.__version__, '(quien habla: disponible)')" 2>$null
-if ($LASTEXITCODE -eq 0) { Say ($v -join "`n") } else { Say "    sherpa-onnx no está disponible: la opción Voces (quién habla) no se podrá activar en este PC" Yellow }
-$v = & $py -c "import win32com.client; print('    pywin32 (calendario de Outlook: disponible)')" 2>$null
-if ($LASTEXITCODE -eq 0) { Say ($v -join "`n") } else { Say "    pywin32 no está disponible: no se podrá leer el calendario de Outlook (el resto funciona)" Yellow }
+$r = Invoke-Fondo $CodigoSalida @{ exe = $py; argv = @("-c", "import sherpa_onnx; print('    sherpa-onnx', sherpa_onnx.__version__, '(quien habla: disponible)')"); conErr = $false }
+if ($r -and $r.rc -eq 0) { Say ($r.out -join "`n") } else { Say "    sherpa-onnx no está disponible: la opción Voces (quién habla) no se podrá activar en este PC" Yellow }
+$r = Invoke-Fondo $CodigoSalida @{ exe = $py; argv = @("-c", "import win32com.client; print('    pywin32 (calendario de Outlook: disponible)')"); conErr = $false }
+if ($r -and $r.rc -eq 0) { Say ($r.out -join "`n") } else { Say "    pywin32 no está disponible: no se podrá leer el calendario de Outlook (el resto funciona)" Yellow }
 # la ventana propia tampoco bloquea: sin pywebview (o sin WebView2) la app se abre en Edge como siempre
-$v = & $py -c "import webview; from importlib.metadata import version; print('    pywebview', version('pywebview'), '(ventana propia: disponible)')" 2>$null
-if ($LASTEXITCODE -eq 0) { Say ($v -join "`n") } else { Say "    pywebview no está disponible: la app se abrirá en una ventana de Edge" Yellow }
+$r = Invoke-Fondo $CodigoSalida @{ exe = $py; argv = @("-c", "import webview; from importlib.metadata import version; print('    pywebview', version('pywebview'), '(ventana propia: disponible)')"); conErr = $false }
+if ($r -and $r.rc -eq 0) { Say ($r.out -join "`n") } else { Say "    pywebview no está disponible: la app se abrirá en una ventana de Edge" Yellow }
 if (-not $coreOk) {
     $log = ($script:pipOut -join "`n")
-    $pyVer = & $py -c "import sys; print('%d.%d' % sys.version_info[:2])"
+    $pyVer = "$((Invoke-Fondo $CodigoSalida @{ exe = $py; argv = @("-c", "import sys; print('%d.%d' % sys.version_info[:2])"); conErr = $false }).out)"
     # la configuracion de pip (only-binary, repositorio propio) explica muchos "no encuentra": solo se mira, no se ensena
-    $pipCfg = ((& $py -m pip config list 2>$null) -join "`n")
+    $pipCfg = (@((Invoke-Fondo $CodigoSalida @{ exe = $py; argv = @("-m", "pip", "config", "list"); conErr = $false }).out) -join "`n")
     if ($env:PIP_ONLY_BINARY) { $pipCfg += "`nenv.only-binary='$env:PIP_ONLY_BINARY'" }
     if ($env:PIP_INDEX_URL) { $pipCfg += "`nenv.index-url='$env:PIP_INDEX_URL'" }
     Fail (Describe-PipFailure $log $pyVer $pipCfg)
@@ -1003,6 +1141,7 @@ if (-not $sinConsola) { Say "    No hay pythonw.exe junto a $py : el acceso dire
 
 if (-not $NoShortcut) {
     Step "Creando el acceso directo '$AppName'..."
+    $null = Invoke-Fondo "Add-TipoLnk" @{} @("Add-TipoLnk")  # compila C# (segundos): fuera del hilo de la ventana
     $places = if ($Desktop) { @($Desktop) } else { @([Environment]::GetFolderPath("Desktop"), [Environment]::GetFolderPath("Programs")) }  # escritorio y menu Inicio
     foreach ($dir in $places) { Set-AccesoDirecto $dir $app $pyw $sinConsola }
     if (-not $Desktop) {

@@ -56,9 +56,9 @@ def vec(seed):
 
 # ----------------------------------------------------------------------------- 36: rehacer las huellas al arrancar
 
-class RehacerAlArrancarTests(TempTree):
+class RehacerBase(TempTree):
     """Una instalacion de antes del cambio de modelo: su voces.json (4 personas, 4 huellas de TitaNet) y las
-    reuniones donde se pulso «Recordar», con su sidecar. Lo que hace el hilo que arranca main()."""
+    reuniones donde se pulso «Recordar», con su sidecar (sin tests: la usan tambien los de test_arranque_suave)."""
 
     def setUp(self):
         super().setUp()
@@ -81,7 +81,8 @@ class RehacerAlArrancarTests(TempTree):
         p1 = mock.patch.object(voices, "available", return_value=(True, None))
         p2 = mock.patch.object(voices, "models_ready", return_value=True)
         p3 = mock.patch.object(app_voces, "REHACER_PASO_S", 0.05)
-        for p in (p1, p2, p3):
+        p4 = mock.patch.object(app_voces, "REHACER_PAUSA_S", 0.0)  # la pausa entre huellas: test_arranque_suave
+        for p in (p1, p2, p3, p4):
             p.start()
             self.addCleanup(p.stop)
 
@@ -104,12 +105,16 @@ class RehacerAlArrancarTests(TempTree):
         a.jobs, a.voices_dl, a.rec, a.meeting = jobs, None, None, None
         return a
 
-    def speaker_vector(self, rel, h, cancel=None):
+    def speaker_vector(self, rel, h, cancel=None, **kw):
         self.calculadas.append((rel, h))
         return vec(len(self.calculadas)), 33.0
 
     def persona(self, nombre):
         return next(p for p in leer_voces(self.voces)["personas"] if p["nombre"] == nombre)
+
+
+class RehacerAlArrancarTests(RehacerBase):
+    """Lo que hace el hilo que arranca main() con la instalacion de RehacerBase."""
 
     def test_se_rehacen_sin_perder_nombres_soy_yo_ni_consentimiento(self):
         res = self.app.rehacer_huellas()
@@ -226,7 +231,7 @@ class RehacerAlArrancarTests(TempTree):
         puede ser otra voz. Se deja para la próxima vez."""
         side = voices.sidecar_path(os.path.join(self.root, "2026-11-01 Semanal.wav"))
 
-        def lento(rel, h, cancel=None):
+        def lento(rel, h, cancel=None, **kw):
             if rel == "2026-11-01 Semanal.wav":
                 data = voices.read_sidecar(side)
                 data["creado"] = "2026-11-15T22:00:00"
@@ -271,7 +276,7 @@ class RehacerAlArrancarTests(TempTree):
         """El subproceso tarda unos segundos: si entretanto se corrige, lo calculado no se guarda."""
         side = voices.sidecar_path(os.path.join(self.root, "2026-11-01 Semanal.wav"))
 
-        def lento(rel, h, cancel=None):
+        def lento(rel, h, cancel=None, **kw):
             if rel == "2026-11-01 Semanal.wav":
                 d = voices.read_sidecar(side)
                 voices.assign(d, "h1", self.ids["Persona Gamma"], self.ids["Yo"])
@@ -287,7 +292,7 @@ class RehacerAlArrancarTests(TempTree):
         terminar, en la misma pasada."""
         grabando, cortes = [False], []
 
-        def lento(rel, h, cancel=None):
+        def lento(rel, h, cancel=None, **kw):
             if not cortes:  # el primero: empieza una grabación mientras calcula
                 grabando[0] = True
                 fin = time.time() + 5
@@ -341,7 +346,7 @@ class RehacerAlArrancarTests(TempTree):
             f.write(voices.protect(json.dumps(d).encode("utf-8")))
         n = [0]
 
-        def corta_la_primera(rel, h, cancel=None):
+        def corta_la_primera(rel, h, cancel=None, **kw):
             n[0] += 1
             if n[0] == 1:
                 raise engines.Cancelled()
@@ -360,7 +365,7 @@ class RehacerAlArrancarTests(TempTree):
         side = voices.sidecar_path(os.path.join(self.root, "2026-11-01 Semanal.wav"))
         for cambio in ({"provisional": True}, {"origen": "huella"}):
             with self.subTest(cambio):
-                def lento(rel, h, cancel=None, cambio=cambio):
+                def lento(rel, h, cancel=None, cambio=cambio, **kw):
                     if rel == "2026-11-01 Semanal.wav":
                         d = voices.read_sidecar(side)
                         d["hablantes"]["h1"].update(cambio)
@@ -383,7 +388,7 @@ class RehacerAlArrancarTests(TempTree):
                                                         {"hablantes": {"h1": {}}}))
 
     def test_un_fallo_al_calcular_se_queda_para_la_proxima(self):
-        def falla(rel, h, cancel=None):
+        def falla(rel, h, cancel=None, **kw):
             raise server.ApiError("No se pudo calcular la huella de ese hablante.")
         self.app.jobs.speaker_vector = falla
         res = self.app.rehacer_huellas()
@@ -501,7 +506,7 @@ class SubprocesoCancelableTests(TempTree):
         self.assertLess(time.time() - t0, 15)
         vistos = []
         jobs.voice_vectors = {}
-        jobs._voices_subprocess = lambda job, args, idle_timeout=1800, cancel=None: vistos.append(cancel) or {
+        jobs._voices_subprocess = lambda job, args, idle_timeout=1800, cancel=None, **kw: vistos.append(cancel) or {
             "huellas": {"h1": [0.1] * voices.DIM}, "segundos": 30.0}
         self.wav("r.wav")
         corta = lambda: False  # noqa: E731

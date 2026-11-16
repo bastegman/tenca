@@ -66,6 +66,7 @@ DIAG_LINES = (
     "   en lo que faltaba no hay voz: se da por completa",
     "   se mantiene el texto del directo",
     "   no se pudo escribir la transcripción todavía ({c})",
+    "   voces: el PC tiene poca memoria libre; se espera (como mucho {n} min)",  # antes de la de {e}, que se la comeria
     "   voces: {e}",
     "   {t}: documento escrito en {n} destino(s)⟦ · sin tocar: {t}⟧",
     # repaso final pendiente al apagar (fix-directo) y destinos de salida al apagar o borrar (fix-perfil)
@@ -156,6 +157,8 @@ DIAG_LINES = (
     "   huellas rehechas con el modelo nuevo: {'rehechas': {n}, 'sin_audio': {n}, 'fallidas': {n}}",
     "🗣 {n} huella⟦s⟧ de voz por rehacer con el modelo nuevo: se rehacen en segundo plano",
     "   huellas por rehacer: se espera a que termine lo que está en marcha ({k})",
+    "   huellas por rehacer: el PC va justo ({k}); se espera",
+    "   huellas por rehacer: el PC lleva 1 h sin memoria libre; se deja para el próximo arranque",
     "   huellas por rehacer: faltan los modelos de voces; se descargan primero",
     "   huellas por rehacer: sin los modelos de voces ({e}); se intentará la próxima vez",
     "   huellas por rehacer: la librería de voces no carga en este PC ({e})",
@@ -170,6 +173,7 @@ DIAG_LINES = (
     "modelo {m} precargado para el directo en {n} s",
     "modelo {m} precargado para la cola en {n} s",
     "no se pudo precargar {m}: {e}",
+    "no se precarga {m}: el PC tiene {n} GB de memoria libre (se carga al empezar la reunión)",
     "   borrados los trozos de audio temporales que dejó la sesión anterior",
     "   no se pudo descifrar {k} de settings.json ({e}): vuelve a pegarla en Ajustes",
     # ajustes a prueba de valores raros (ajustes.normalizar_ajustes, punto 5 del review del 14/11/2026)

@@ -17,6 +17,7 @@ import threading
 import time
 import uuid
 
+import carga
 import conservar
 import engines
 import explicar
@@ -175,6 +176,16 @@ def preload_model(st, cached=None):
     return None
 
 
+# precargar el modelo de Whisper al arrancar ocupa 0,5-1,6 GB: con menos libre que esto (el modelo y 1 GB de margen) no
+# se precarga y el modelo se carga al empezar la reunion (2-6 s). En un portatil de 8 GB con Teams y Outlook abiertos,
+# sumarlo al arranque lo llevaba a tirar del disco (incidencia del 16/11/2026)
+PRECARGA_MIN_LIBRE = int(2.5 * carga.GB)
+# «Quién habla» al terminar una reunion ocupa 0,3-0,8 GB (2 h 13: 0,83): con menos de 1 GB libre espera un poco (al
+# colgar una llamada el PC suele liberar memoria) y luego sigue igual, en reposo
+VOCES_MIN_LIBRE = 1 * carga.GB
+VOCES_ESPERA_MAX_S = 300.0
+
+
 def live_cloud_cfg(st):
     """Ajustes de la nube para el directo: los de cloud y el modelo del resumen (la traduccion lo usa con una
     pasarela propia). _run_live los vuelve a leer en cada trozo, no una copia del arranque."""
@@ -311,6 +322,11 @@ class Jobs:
         if not pick:
             return None
         which, model = pick
+        mem = carga.memoria()
+        if mem and mem[1] < PRECARGA_MIN_LIBRE:
+            log(f"no se precarga {model}: el PC tiene {mem[1] / carga.GB:.1f} GB de memoria libre (se carga al "
+                "empezar la reunión)")
+            return None
         w = self.live_worker if which == "live" else self.local.worker
         t0 = time.time()
         try:
@@ -1154,6 +1170,7 @@ class Jobs:
                 raise ApiError("Ya se están identificando las voces de esta reunión.")
             job = Job(rel, os.path.basename(rel), "voces", None)
             job.stage, job.then_summary = "En cola para identificar voces", then_summary
+            job.auto = auto  # la de al terminar una reunion; la pulsada a mano no espera a la memoria
             self.list.append(job)
         self.queues["voces"].put(job)
         log(f"🗣 {job.name}  voces{' (automático)' if auto else ''} en cola")
@@ -1225,9 +1242,10 @@ class Jobs:
                 pass
             borrar_pcm_voces(p.pid)
 
-    def speaker_vector(self, rel, h, cancel=None):
+    def speaker_vector(self, rel, h, cancel=None, reposo=False, hilos=None):
         """Huella de un hablante de una reunion: de la memoria del servidor o recalculada en un subproceso (cancel():
-        cortarlo, engines.Cancelled)."""
+        cortarlo, engines.Cancelled). Para «Recordar», con el usuario esperando: por debajo de lo normal y con
+        voices.hilos(); para el trabajo de fondo (rehacer las huellas al actualizar), reposo=True y pocos hilos."""
         vec = (self.voice_vectors.get(rel) or {}).get(h)
         if vec:
             return vec, None
@@ -1237,12 +1255,31 @@ class Jobs:
             raise ApiError("Las voces de esta reunión están identificadas solo en parte: ponle nombre sin "
                            "«Recordar» y guarda su huella cuando estén enteras.", 409)
         args = ["--fingerprint", h, "--diarize", abs_path, "--out", voices.sidecar_path(abs_path)]
-        m = self._voices_subprocess(None, args, idle_timeout=600, cancel=cancel)
+        m = self._voices_subprocess(None, args, idle_timeout=600, cancel=cancel, reposo=reposo, hilos=hilos)
         vec = (m.get("huellas") or {}).get(h)
         if not vec:
             raise ApiError("No se pudo calcular la huella de ese hablante.")
         self.voice_vectors.setdefault(rel, {})[h] = vec
         return vec, m.get("segundos")
+
+    def _esperar_memoria(self, job, min_libre=None, tope=None, paso=2.0):
+        """Antes de identificar las voces de una reunion: con poca memoria libre en el PC, espera (como mucho `tope`,
+        o hasta que se cancele el trabajo) y lo dice en la cola y en el log. Fuera de Windows no se sabe: no espera."""
+        min_libre = VOCES_MIN_LIBRE if min_libre is None else min_libre
+        tope = VOCES_ESPERA_MAX_S if tope is None else tope
+        if not carga.poca_memoria(min_libre):
+            return False
+        antes, fin = job.stage, time.monotonic() + tope
+        job.stage = "Esperando a que el PC tenga memoria libre…"
+        log(f"   voces: el PC tiene poca memoria libre; se espera (como mucho {int(tope // 60)} min)")
+        try:
+            while time.monotonic() < fin and carga.poca_memoria(min_libre):
+                if job.cancel:
+                    raise engines.Cancelled()
+                time.sleep(paso)
+        finally:
+            job.stage = antes
+        return True
 
     def speakers_for(self, abs_path, data=None):
         """Sidecar con las frases casadas con el .srt ACTUAL (barato) y los nombres resueltos; None si no hay."""
@@ -1346,6 +1383,8 @@ class Jobs:
             # identificacion anterior ya no son de esos hablantes y «Recordar» guardaria la voz de otro
             self.voice_vectors.pop(job.path, None)
             n = self._participant_hint(abs_path, old)
+            if getattr(job, "auto", False):  # la automatica, al terminar una reunion (la de a mano, enseguida)
+                self._esperar_memoria(job)
             res = self._voices_subprocess(job, ["--diarize", abs_path, "--out", side,
                                                 *(["--participantes", str(n)] if n else []), *rejilla])
             huellas = res.get("huellas") or {}
