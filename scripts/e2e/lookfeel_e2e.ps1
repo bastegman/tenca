@@ -534,10 +534,14 @@ $perdedoras = @($copias | Where-Object { $_.Id -ne $appPid })
 $detalle = @(foreach ($q in $perdedoras) {
     $fin = $q.WaitForExit(30000)
     $quien = $(if ($doble -and $q.Id -eq $doble.Id) { "acceso directo" } else { "instalador" })
-    [pscustomobject]@{ ok = ($fin -and $q.ExitCode -eq 0); txt = "pid $($q.Id) ($quien) exit=$(if ($fin) { $q.ExitCode } else { 'sigue viva' })" }
+    # que termino SOLA: su propia linea («ya estaba abierta» u «otra copia tiene la marca», con su pid), no porque
+    # alguien la apagara (eso tambien sale con 0)
+    $sola = @((Tail-Log "server.log" 300) -split "`n" | Where-Object { $_ -match "(ya estaba abierta|otra copia tiene la marca).*pid $($q.Id)(\D|$)" }).Count -gt 0
+    [pscustomobject]@{ ok = ($fin -and $q.ExitCode -eq 0 -and $sola); txt = "pid $($q.Id) ($quien) exit=$(if ($fin) { $q.ExitCode } else { 'sigue viva' }) sola=$sola" }
 })
+$apagadasAntes = @((Tail-Log "server.log" 300) -split "`n" | Where-Object { $_ -match "apagando \(" }).Count
 $quienGana = $(if ($doble -and $appPid -eq $doble.Id) { "acceso directo" } else { "instalador" })
-Check "e.doble_apertura_segunda_termina" ($doble -and $ganadoras.Count -eq 1 -and $perdedoras.Count -ge 1 -and @($detalle | Where-Object { -not $_.ok }).Count -eq 0) $(if ($doble) { "se queda pid $appPid ($quienGana, copias vistas: $($copias.Count)); termina: " + (($detalle | ForEach-Object { $_.txt }) -join ", ") } else { "sin acceso directo" })
+Check "e.doble_apertura_segunda_termina" ($doble -and $ganadoras.Count -eq 1 -and $perdedoras.Count -ge 1 -and @($detalle | Where-Object { -not $_.ok }).Count -eq 0 -and $apagadasAntes -eq 0) $(if ($doble) { "se queda pid $appPid ($quienGana, copias vistas: $($copias.Count)); termina: " + (($detalle | ForEach-Object { $_.txt }) -join ", ") + "; apagados en el log: $apagadasAntes" } else { "sin acceso directo" })
 $edgeApp = @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { "$($_.CommandLine)" -like "*--app=http://127.0.0.1:$Port*" })
 Check "e.doble_apertura_sin_edge" ($edgeApp.Count -eq 0) ("msedge --app: " + $edgeApp.Count)
 $slogDoble = Tail-Log "server.log" 200

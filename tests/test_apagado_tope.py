@@ -43,11 +43,17 @@ class TopeTests(unittest.TestCase):
     def test_una_ventana_que_no_se_cierra_no_impide_salir(self):
         win = mock.Mock()
         win.destroy = Colgado()
-        ok, dura, exit_fn = self.apagar(win=win, srv=mock.Mock())
+        with mock.patch.object(apagado, "log") as log:
+            ok, dura, exit_fn = self.apagar(win=win, srv=mock.Mock())
         self.assertTrue(ok, "no ha llegado a os._exit")
         self.assertTrue(win.destroy.llamado.is_set())
         self.assertLess(dura, apagado.SALIDA_TOPE_S + 1.5)
         exit_fn.assert_called_once_with(0)
+        lineas = [c.args[0] for c in log.call_args_list]
+        # el paso colgado, en el log; y «apagado» al final, justo antes de terminar (revision: si el proceso
+        # sigue vivo con esa linea, lo lento es la salida misma)
+        self.assertIn("   apagar: cerrar la ventana no ha terminado en 1.5 s; se sigue", lineas)
+        self.assertEqual(lineas[-1], "apagado")
 
     def test_un_servidor_que_no_para_no_impide_salir(self):
         srv = mock.Mock()
