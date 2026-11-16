@@ -18,14 +18,16 @@ Punto 50 del review del 14/11/2026. No cambia nada en la app instalada.
   a mensajes, quién pidió qué, nombres de personas o empresas reales en los datos de prueba (ahora inventados) ni
   rutas a notas que no están en el repo. Cada cambio conserva su porqué técnico. La historia de git no se reescribe:
   los commits anteriores siguen teniendo esas notas.
-- **Nuevo test, sin secreto**: `NotasInternasTests` falla si vuelve a aparecer una (referencias a mensajes, el
-  nombre del autor fuera de `LICENSE`, del AppUserModelID y del editor del instalador, el del asistente que
-  coordinaba el trabajo, rutas personales de macOS). Corre en la suite y en su propio paso del job `agnosticismo`.
+- **Nuevo test, sin secreto**: `NotasInternasTests` falla si vuelve a aparecer una (referencias a mensajes, también
+  partidas por el ajuste de línea; el nombre del autor fuera de `LICENSE`, del AppUserModelID y del editor del
+  instalador; el del asistente que coordinaba el trabajo, el del sistema de agentes o el del modelo que hizo una
+  revisión; rutas personales de macOS y rutas a notas que no están en el repo). Corre en la suite y en su propio paso
+  del job `agnosticismo`.
   `_app/static/` queda fuera hasta que llegue su propia limpieza.
 - `scripts/publicar_release.py` compara el CHANGELOG con el del Release anterior sin esas referencias: un apartado
   que solo las ha perdido no sale como nuevo ni como cambiado, y los «()» de código ya no se pierden al quitarlas. Los
-  apartados cuya entradilla se ha reescrito aquí (23) saldrán una vez en «También cambian» del próximo Release: en la
-  app no cambia nada.
+  apartados con texto reescrito aquí saldrán una vez en «También cambian» del próximo Release: en la app no cambia
+  nada.
 
 ### El audio de cada reunión, «Mis pendientes» en Hoy y «Quién habla» mientras se graba (16/11/2026)
 
@@ -251,7 +253,7 @@ Puntos 12 y 37 del review del 14/11/2026. Rama `ajustes-uno`.
 El calendario conectaba, pero no se veían las siguientes reuniones; hacían falta las de un mes, al menos. Rama `hoy`
 (rediseño B7).
 
-- **Causa del «no veo las siguientes reuniones»**: la lectura de Outlook estaba bien (su «Probar» daba la agenda, las
+- **Por qué no se veían las siguientes reuniones**: la lectura de Outlook estaba bien (su «Probar» daba la agenda, las
   horas y los asistentes bien), pero solo pedía las citas de hoy y de ellas solo enseñaba una frase («próxima reunión
   12:00»). Ninguna pantalla listaba las citas: «Calendario» es el de las reuniones grabadas.
 - **Nuevo: Inicio pasa a ser «Hoy»**. Arriba, la reunión de ahora (la de Teams o la cita de Outlook en curso o a punto

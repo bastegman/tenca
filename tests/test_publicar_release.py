@@ -202,6 +202,7 @@ class NotasTests(unittest.TestCase):
         nuevos, cambiados = pr.cambios(antes.replace("`cerrar()`", "`cerrar`"), antes)
         self.assertEqual((nuevos, [t for t, _ in cambiados]), ([], ["Voces dobles en la grabación (07/11/2026)"]))
         self.assertEqual(pr.sin_ref_interna(f"Un rango (msgs {1150}-{1152}) y `f()`"), "Un rango y `f()`")
+        self.assertEqual(pr.sin_ref_interna(f"una voz (msg {1234}, msg {1240})."), "una voz.")
 
     def test_notas_primera_version(self):
         nuevos, _ = pr.cambios(CHANGELOG)

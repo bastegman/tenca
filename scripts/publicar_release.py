@@ -45,7 +45,8 @@ LIMITE_NOTAS = 60000  # GitHub admite 125.000 caracteres; con más, solo el índ
 REF_INTERNA_RE = re.compile(r",?\s*\bmsgs?\.?\s+\d+(?:\s*(?:,|y)\s*\d+)*", re.I)
 HAY_REF_INTERNA_RE = re.compile(r"\bmsgs?\.?\s+\d{3,}", re.I)
 # una referencia que es todo lo que va entre paréntesis, con el blanco de delante: «una voz (msg N).» -> «una voz.»
-REF_ENTRE_PARENTESIS_RE = re.compile(r"\s*\(\s*msgs?\.?\s+\d+(?:\s*(?:,|y|-|–)\s*\d+)*\s*\)", re.I)
+REF_ENTRE_PARENTESIS_RE = re.compile(r"\s*\(\s*msgs?\.?\s+\d+(?:\s*(?:,|y|-|–)\s*(?:msgs?\.?\s+)?\d+)*\s*\)",
+                                     re.I)  # también «(msg A, msg B)»
 
 
 class Fallo(Exception):

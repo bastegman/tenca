@@ -1621,7 +1621,7 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         self.assertEqual(red, [], red)
 
     def test_ajustes_revision_1(self):
-        """Revisión 1 de ajustes-uno (Fable 5.2): la tarjeta de Procesado se pone al día al guardar un motor (P1-1); un
+        """Revisión 1 de ajustes-uno: la tarjeta de Procesado se pone al día al guardar un motor (P1-1); un
         campo vaciado no vuelve solo mientras se escribe y, al salir vacío, vuelve y lo dice (P1-3); el valor que ajusta
         el servidor se dice (P2-5); la marca va fuera del <label> (P2-6) y al final de la fila de micro y audio (P2-10);
         un texto que no se ha podido guardar no se borra (P2-4)."""
