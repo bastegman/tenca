@@ -11,6 +11,7 @@ import ctypes
 import json
 import os
 import sys
+import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import lookfeel_spike as spike  # noqa: E402
@@ -47,12 +48,20 @@ def main(argv):
     spike.ole32.CoInitialize(None)
     cmd = argv[1] if len(argv) > 1 else "find"
     title = argv[2] if len(argv) > 2 else "Tenca"
-    info = find(title)
+    # siempre JSON: un fallo va a "error" con su traza (16-nov: una excepcion dejaba al E2E sin hwnd, sin titulo y sin
+    # saber por que)
+    try:
+        info = find(title)
+    except Exception:
+        info = {"hwnd": None, "title": None, "error": traceback.format_exc()}
     if cmd == "icons" and info.get("hwnd"):
-        out_dir, tag = argv[3], (argv[4] if len(argv) > 4 else "app")
-        os.makedirs(out_dir, exist_ok=True)
-        info["icons"] = spike.window_icons(info["hwnd"], out_dir, tag)
-        info["appusermodel"] = spike.appusermodel_props(info["hwnd"])
+        try:
+            out_dir, tag = argv[3], (argv[4] if len(argv) > 4 else "app")
+            os.makedirs(out_dir, exist_ok=True)
+            info["icons"] = spike.window_icons(info["hwnd"], out_dir, tag)
+            info["appusermodel"] = spike.appusermodel_props(info["hwnd"])
+        except Exception:
+            info["error"] = traceback.format_exc()
     print(json.dumps(info, ensure_ascii=False, default=str))
     return 0
 

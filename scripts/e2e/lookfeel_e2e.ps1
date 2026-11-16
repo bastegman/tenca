@@ -148,6 +148,10 @@ function Run-Installer($dir, $label, $timeoutMin, $sondear = $true) {
     $end = $t0.AddMinutes($timeoutMin)
     $peor, $desde, $vista, $pids, $pidsT = 0.0, $null, $false, @(), [DateTime]::MinValue
     while (-not $p.HasExited -and (Get-Date) -lt $end) {
+        # sin sondear, solo se espera: la sonda (WM_NULL cada 300 ms) sobre la ventana colgada del instalador viejo lo
+        # hacia ir de 36-46 s (3 runs sin sonda, 15/16-nov) a 182-1195 s (7 runs con ella, desde 6310c92; el ultimo,
+        # cortado a los 20 min)
+        if (-not $sondear) { Start-Sleep -Milliseconds 500; continue }
         if (((Get-Date) - $pidsT).TotalSeconds -ge 2) {
             $pids = [int[]]@(Get-Process -Name powershell -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $PID } | ForEach-Object { $_.Id })
             $pidsT = Get-Date
@@ -165,7 +169,7 @@ function Run-Installer($dir, $label, $timeoutMin, $sondear = $true) {
     }
     $txt = "lo mas largo seguido sin responder: {0:N1} s" -f $peor
     if ($sondear -and $vista) { Check "$label.ventana_responde" ($peor -lt 2.5) $txt }
-    else { Note "$label.ventana_responde" $(if ($vista) { $txt } else { "sin ventana WinForms" }) }
+    else { Note "$label.ventana_responde" $(if (-not $sondear) { "sin sondear" } elseif ($vista) { $txt } else { "sin ventana WinForms" }) }
     if ($sondear -and $vista -and $p.HasExited) {
         # y lo que dice el propio instalador (su latido: un temporizador de la ventana; mide la cola de mensajes, que
         # es lo que mira Windows para darla por colgada). La "a" con tilde de "mas" no se escribe aqui: este script
@@ -199,8 +203,18 @@ function Ventana($cmd, $tag, $title = "") {
     if (-not $title) { $title = $App }
     $argv = @((Join-Path $Repo "scripts\e2e\ventana.py"), $cmd, $title)
     if ($cmd -eq "icons") { $argv += @((Join-Path $Out "iconos"), $tag) }
-    $raw = & $python @argv 2>&1
-    try { return ($raw | Out-String | ConvertFrom-Json) } catch { return @{ hwnd = $null; error = ($raw | Out-String) } }
+    # si el ayudante falla (su salida no es JSON: una excepcion), una vez mas a los 2 s; su error va al detalle del
+    # check (16-nov, nube-trozos 43883343549: e.ventana_visible sin hwnd ni titulo, con la ventana abierta)
+    # (ventana.py pone la excepcion en "error"; si ni siquiera hay JSON, el error es su salida)
+    $res = $null
+    for ($k = 0; $k -lt 2; $k++) {
+        $raw = & $python @argv 2>&1
+        try { $res = ($raw | Out-String | ConvertFrom-Json) } catch { $res = @{ hwnd = $null; error = ($raw | Out-String).Trim() } }
+        if (-not $res.error) { return $res }
+        Write-Host "  ventana.py ($cmd, intento $($k + 1)): $($res.error)"
+        Start-Sleep -Seconds 2
+    }
+    return $res
 }
 function Tail-Log($name, $n = 40) {
     $f = Join-Path $logDir $name
@@ -525,7 +539,9 @@ $appPid = $(if ($lis.Count -ge 1) { $lis[0].OwningProcess } else { 0 })
 $proc = $(if ($appPid) { Get-Process -Id $appPid -ErrorAction SilentlyContinue } else { $null })
 Check "e.proceso_pythonw" ($proc -and $proc.Name -ieq "pythonw") $(if ($proc) { "$($proc.Name) pid $appPid" } else { "sin proceso" })
 $w = Ventana "icons" "app"
-Check "e.ventana_visible" ($w.hwnd -and $w.visible) ("hwnd=$($w.hwnd) clase=$($w.class) visible=$($w.visible) pid=$($w.pid)")
+$wErr = ("$($w.error)" -replace "\s+", " ").Trim()
+if ($wErr.Length -gt 400) { $wErr = $wErr.Substring(0, 400) }
+Check "e.ventana_visible" ($w.hwnd -and $w.visible) ("hwnd=$($w.hwnd) clase=$($w.class) visible=$($w.visible) pid=$($w.pid)" + $(if ($wErr) { " error=$wErr" } else { "" }))
 Check "e.titulo" ($w.title -eq $App) "$($w.title)"
 # de las dos copias (la que abrio el instalador y la del acceso directo pulsado durante el arranque) queda UNA, la que
 # sirve (cualquiera: gana la que coge antes la marca de instancia), y la otra termina sola, con 0, sin aviso de error y
