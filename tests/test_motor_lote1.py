@@ -181,12 +181,12 @@ class PartesPorIdiomaTests(unittest.TestCase):
                              engines.CloudEngine._cut_points(1000.0, [(290.0, 292.0), (610.0, 612.0)], 300))
             self.assertEqual({x for _, _, x in parts}, {lang})
 
-    def test_con_mezcla_partes_de_minuto_y_medio(self):
+    def test_con_mezcla_partes_de_siempre(self):
+        """nube-trozos (16/11/2026): una mezcla sin cambios apuntados va en partes de chunk_s, como un idioma fijo (en
+        partes de 90 s eran ~8 veces mas peticiones contra el cupo por minuto del proveedor)."""
         parts = self.plan(1200.0, [], 600, "es-en-pt")
-        largos = [b - a for a, b, _ in parts]
-        self.assertTrue(all(60 <= d <= 150 for d in largos), largos)
+        self.assertEqual([(a, b) for a, b, _ in parts], [(0.0, 600.0), (600.0, 1200.0)])
         self.assertEqual({x for _, _, x in parts}, {"es-en-pt"})
-        self.assertEqual((parts[0][0], parts[-1][1]), (0.0, 1200.0))
 
     def test_el_cambio_de_idioma_corta_en_el_silencio_mas_cercano(self):
         sil = [(296.0, 298.0), (610.0, 612.0)]
@@ -195,10 +195,10 @@ class PartesPorIdiomaTests(unittest.TestCase):
         for (_, b, _), (a, _, _) in zip(parts, parts[1:]):
             self.assertEqual(b, a)  # sin huecos ni solapes
 
-    def test_detectar_en_una_reunion_que_cambio_va_en_partes_cortas(self):
-        parts = self.plan(1200.0, [], 600, None, tramos=[(0.0, "en"), (600.0, None)])
-        self.assertEqual(parts[0], (0.0, 600.0, "en"))
-        self.assertTrue(all(b - a <= 150 and x is None for a, b, x in parts[1:]), parts)
+    def test_detectar_en_una_reunion_que_cambio_corta_en_el_cambio(self):
+        """El tramo detectando tambien va en partes de chunk_s; el corte, donde lo apunto el directo."""
+        parts = self.plan(1800.0, [], 600, None, tramos=[(0.0, "en"), (600.0, None)])
+        self.assertEqual(parts, [(0.0, 600.0, "en"), (600.0, 1200.0, None), (1200.0, 1800.0, None)])
 
 
 class RepasoPorIdiomaTests(unittest.TestCase):
@@ -246,9 +246,9 @@ class RepasoPorIdiomaTests(unittest.TestCase):
         pt = [a for a, _, t in segs if t.startswith("[pt]")]
         self.assertTrue(en and pt and max(en) < 400.0 <= min(pt) + 10, segs)
 
-    def test_mezcla_sin_cambios_partes_cortas_y_detectar(self):
+    def test_mezcla_sin_cambios_partes_de_siempre_y_detectar(self):
         segs, _, _ = self.run_cloud("es-en-pt", None)
-        self.assertGreaterEqual(len(self.calls), 6)  # 15 min en partes de ~1,5 min
+        self.assertEqual(len(self.calls), 2)  # 15 min en partes de 10 (con partes de 90 s eran 10 o mas)
         self.assertTrue(all(c[1] is None for c in self.calls))  # la API detecta en cada parte
         self.assertTrue(all(c[2].startswith(engines.style_for("es-en-pt")) for c in self.calls))
         starts = [a for a, _, _ in segs]

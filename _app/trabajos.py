@@ -123,6 +123,7 @@ class Job:
         self.restart = False
         self.resume_from = None  # continuar una transcripcion a medias desde este segundo
         self.final_pass = False  # repaso del archivo entero al terminar un directo en la nube
+        self.fondo = False  # repaso retomado al arrancar: cola "fondo", cede ante lo del usuario
         self.opts = None  # solo en directo: opciones que live.run va leyendo (vocabulario incluido)
         self.translate, self.translation, self.directo = False, [], None  # directo en la nube (live.py publish)
         self.translate_to = "es"  # destino de la traduccion: «es» o «en» (start_live pone el de la reunion)
@@ -261,7 +262,9 @@ class Jobs:
         self.settings, self.library = settings, library
         self.list, self.lock = [], threading.Lock()
         self.claimed = set()  # grabaciones de la propia app: el directo lo arranca quien graba, no el vigilante
-        self.queues = {"local": queue.Queue(), "cloud": queue.Queue()}
+        # "fondo": los repasos finales retomados al arrancar (_resume_final_passes), en su propio hilo para que lo que
+        # pida el usuario no espere detras de ellos; y, mientras haya algo suyo en la nube, se apartan (_nube_delante)
+        self.queues = {"local": queue.Queue(), "cloud": queue.Queue(), "fondo": queue.Queue()}
         # Whisper corre en procesos aparte (worker.py): uno para la cola y otro para el directo,
         # cada uno con su modelo en memoria; siguen cargados worker_keepalive_min tras el ultimo trabajo
         keep = lambda: keepalive_s(self.settings.get())  # noqa: E731
@@ -484,14 +487,17 @@ class Jobs:
                                idioma_repaso=idioma, tramos_idioma=getattr(job, "idiomas_tramos", None))
         return True
 
-    def _queue_final_pass(self, rel, name, language, local_part=True, idioma_repaso=None, tramos_idioma=None):
+    def _queue_final_pass(self, rel, name, language, local_part=True, idioma_repaso=None, tramos_idioma=None,
+                          fondo=False):
         """El repaso final de esa reunion a la cola: el del directo que acaba de terminar o, al arrancar, el que quedo
         apuntado (_resume_final_passes). Queda apuntado en repasos_pendientes.json hasta que termine: si se apaga
         antes, se retoma al arrancar. local_part: si su directo tuvo algun trozo en local (sin el dato, si: lo seguro).
         Va con el repaso (j.local_part) y se apunta con el. Si el repaso no acaba, el texto que queda es el del directo,
         y el resumen automatico mira CloudText (apuntado al empezar el directo): lo transcrito en local no sale del PC
-        sin permiso, tampoco con un repaso retomado tras reiniciar (tests/test_integracion.py)."""
+        sin permiso, tampoco con un repaso retomado tras reiniciar (tests/test_integracion.py). fondo: el retomado al
+        arrancar va a la cola "fondo" y deja pasar lo que pida el usuario en la nube (_nube_delante)."""
         j = Job(rel, name, "nube", language)
+        j.fondo = bool(fondo)
         j.final_pass, j.stage, j.local_part = True, "En cola: repaso final en la nube", local_part is not False
         # el idioma cambió en pleno directo (idioma_repaso, y en qué segundo: tramos_idioma): antes de entrar en la
         # cola, que el hilo lo vea. No se apunta en repasos_pendientes.json: uno retomado tras reiniciar usa el de la
@@ -500,9 +506,21 @@ class Jobs:
         self._pending().set(rel, local_part=j.local_part)
         with self.lock:
             self.list.append(j)
-        self.queues[j.engine].put(j)
+        cola = self.queues.get("fondo") if fondo else None  # (sin esa cola, la de siempre)
+        (cola or self.queues[j.engine]).put(j)
         log(f"↻ {name}  repaso final de la grabación entera en la nube")
         return j
+
+    def _nube_delante(self):
+        """Hay algo del usuario en la nube: una transcripcion en cola o en marcha (tambien el repaso de la reunion que
+        acaba de terminar) o un directo en la nube. Mientras, un repaso retomado al arrancar (fondo) no empieza ni sube
+        partes: el cupo por minuto del proveedor es el mismo para todos."""
+        with self.lock:
+            return any(j.status in ("queued", "running") and not getattr(j, "fondo", False)
+                       and j.kind not in ("summary", "voces")
+                       and (j.engine == "cloud" or (j.live and (engines.PRESETS_BY_ID.get(j.preset) or {}).get(
+                           "engine") == "cloud"))
+                       for j in self.list)
 
     def _pending(self):
         """Los repasos finales pendientes (PendingPasses), en el DATA_DIR vigente."""
@@ -552,7 +570,7 @@ class Jobs:
                 if ok:
                     log(f"   {os.path.basename(abs_path)}: el repaso final se quedó pendiente al apagar; se retoma")
                     self._queue_final_pass(rel, os.path.basename(abs_path), None,
-                                           local_part=self._pending().local_part(rel))
+                                           local_part=self._pending().local_part(rel), fondo=True)
                 else:
                     log(f"   {os.path.basename(abs_path)}: el repaso final pendiente ya no se puede hacer")
                     self._final_pass_over(rel, keep_live_text=True)
@@ -1538,7 +1556,9 @@ class Jobs:
                 segs, lang, dur = self.cloud.transcribe(abs_path, job.duration, st["cloud"], job.language,
                                                         vocab, job.id, report, lambda: job.cancel,
                                                         start=start, about=about, tramos_idioma=getattr(
-                                                            job, "idiomas_tramos", None) if job.final_pass else None)
+                                                            job, "idiomas_tramos", None) if job.final_pass else None,
+                                                        ceder=self._nube_delante if getattr(job, "fondo", False)
+                                                        else None)
             if job.cancel:
                 raise engines.Cancelled()
             if start:

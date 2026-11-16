@@ -10,6 +10,21 @@ nada de ningún proyecto concreto.
 empresa. Entre paréntesis va el número de cada hallazgo, el mismo que citan los commits; el informe de la auditoría no
 está en este repositorio. «Desarrollo y CI» es para quien mantiene el repositorio: no cambia nada en la app instalada.
 
+### La nube sin colas largas: partes de siempre, cupo respetado y lo tuyo primero (16/11/2026)
+
+- **Menos peticiones con idiomas mezclados:** una reunión en una mezcla (español + inglés…) o detectando ya no se
+  manda en partes de 90 s sino en las de siempre («Minutos por trozo» en los ajustes de la nube), cortando donde
+  cambió el idioma durante el directo. Una hora son 6 peticiones en vez de unas 40, y con un cupo de 20 por minuto el
+  texto sale en medio minuto en vez de dos. Lo que se pierde: en una reunión mezclada sin cambios de idioma marcados
+  durante el directo, lo que se diga en el otro idioma dentro de un trozo puede salir en el idioma del trozo.
+- **El cupo del proveedor:** cuando el proveedor responde que se ha pasado del límite y dice cuánto esperar, ninguna
+  petición con esa clave sale antes (tampoco las que ya esperaban su turno en paralelo); si no lo dice, unos segundos.
+- **Lo que pides va primero:** el repaso final que quedó a medias al cerrar Tenca y se retoma al abrirla va en su
+  propia cola y se aparta («En pausa: primero lo que acabas de pedir…») mientras transcribes algo en la nube o hay un
+  directo en la nube.
+- **Desarrollo y CI:** `scripts/nube_trozos_bench.py` (la app de verdad contra un proveedor simulado con límite por
+  minuto: peticiones por hora de audio, 429 y tiempo hasta el texto); `tests/test_nube_trozos.py`.
+
 ### Arranque suave: el instalador no se congela y el trabajo de fondo cede (16/11/2026)
 
 En un portátil modesto, al instalar encima de la versión anterior, la ventana del instalador salía como «no
