@@ -1,11 +1,14 @@
-'use strict';
 /* Perfil de reunión: idioma y contexto de cada reunión (página de la reunión y directo, que los relee en el siguiente
    trozo), lo de Ajustes (carpeta, contexto y destinos de salida) y la importación de listas de vocabulario de otra
    carpeta. Lo que se usa al grabar ya no se calcula aquí: lo decide el servidor (/api/grabar/plan, grabar.js), el mismo
-   cálculo que Ctrl+Alt+R (antes la regla estaba aquí y en el servidor, dos veces).
-   Se carga después de app.js y notas.js y usa sus utilidades ($, $$, api, esc, I, S, LANGS, langSelect, folderOpts,
-   liveFit, toast, loadVocab, refreshTree, linkFolder, openSettings). app.js y notas.js lo invocan con
-   `typeof x === 'function'`: sin este fichero la app funciona igual, sin perfil. */
+   cálculo que Ctrl+Alt+R (antes la regla estaba aquí y en el servidor, dos veces). */
+// orden de arranque: este fichero se evalúa justo después de hoy.js (la cadena, en main.js)
+import './hoy.js';
+import {
+  $, api, APP_NAME, esc, flatFolders, folderOpts, I, LANGS, langSelect, linkFolder, liveFit, nfc, refreshTree, S,
+  setConfig, toast,
+} from './app.js';
+import { loadVocab } from './notas.js';
 
 const PERFIL_AUTO = '__auto';  // valor del <select> para «automático» (null en el servidor)
 
@@ -64,7 +67,7 @@ function perfilImportText(r) {
   return `${n} ${n === 1 ? 'lista copiada' : 'listas copiadas'} · ${esc((r.proyectos || []).join(', '))}${o ? ` · ${o} ya existían` : ''}`;
 }
 
-/* ---------------------------------------------------------------- carpetas de listas conectadas (msg 1148) */
+/* ---------------------------------------------------------------- carpetas de listas conectadas */
 /* «Usar las listas de una carpeta…»: selector de carpetas de Windows (o pegar la ruta) → POST /api/vocab/link/add.
    Las listas se leen en vivo al grabar y al transcribir: nada se copia. after: a dónde volver (openRec, o redibujar). */
 async function vocabConectar(after) {
@@ -132,7 +135,7 @@ function perfilLiveHtml(a) {
 }
 /* Mensaje al guardar idioma o contexto desde la página (notas.js). live: hay un directo en marcha. info: lo que dice
    el servidor del idioma en ese directo (POST /api/notes → directo.idioma, live.lang_switch_info): el tiempo real en
-   que se verá (msgs 1150-1151: «funcionó, pero tardó»). Sin info (servidor anterior), la frase de siempre. */
+   que se verá (para que no parezca que no ha funcionado). Sin info (servidor anterior), la frase de siempre. */
 function perfilSavedText(prop, live, transcribed, info) {
   const que = prop === 'idioma' ? 'Idioma' : 'Contexto';
   if (live && prop === 'idioma' && info) return perfilIdiomaDirectoText(info);
@@ -242,6 +245,8 @@ function perfilSalidasHtml() {
 /* ---------------------------------------------------------------- destinos de salida (lista editable de Ajustes) */
 const PERFIL_FORMATS = [['md', 'Markdown (.md)'], ['txt', 'Texto (.txt)'], ['docx', 'Word (.docx)']];
 let perfilOuts = [];
+// app.js la vuelve a lo guardado («Deshacer» de Ajustes): un import no se puede reasignar desde otro módulo
+function perfilOutsPoner(v) { perfilOuts = v; }
 function perfilOutsHtml(outs) {
   if (!outs.length) return '<div class="help" style="margin-top:0">Ninguno · los textos se quedan junto al audio.</div>';
   return `<table class="vtable pf-outs">${outs.map((o, i) => `<tr><td><code title="${esc(o.path)}">${esc(o.path)}</code></td>
@@ -312,3 +317,10 @@ function bindPerfilSettings(d) {
     };
   }
 }
+
+export {
+  bindPerfilSettings, PERFIL_AUTO, perfilCarpetaTxt, perfilFolderOpts, perfilGroups, perfilImportar, perfilLangLabel,
+  perfilLangOf, perfilLiveHtml, perfilMotoresHtml, perfilOuts, perfilOutsHtml, perfilOutsPoner, perfilPropsHtml,
+  perfilReglasHtml, perfilResumenHtml, perfilSalidasHtml, perfilSavedText, perfilVocabEmptyHtml, perfilVocabOpts,
+  perfilVocabRedraw, VOCAB_COPIAR_TITLE, vocabCarpetasHtml, vocabConectar, vocabDesconectar,
+};

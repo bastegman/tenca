@@ -20,7 +20,7 @@ import unittest
 import wave
 from unittest import mock
 
-from support import APP, TempTree, bare_jobs, engines, server  # noqa: F401  (support prepara sys.path)
+from support import APP, TempTree, bare_jobs, engines, server, nuevo_contexto  # noqa: F401  (support prepara sys.path)
 from test_perfil import settings_store
 from test_subir_audio import Servidor
 
@@ -432,7 +432,7 @@ class GuardandoAlMomentoTests(unittest.TestCase):
         with open(base + ".hablantes.json", "w", encoding="utf-8") as f:
             json.dump(sidecar(segs), f)
         rel = "Proyecto/2026-11-10 Comité/2026-11-10 10-00-00 - Comité.wav"
-        ctx = self.browser.new_context(viewport={"width": 1280, "height": 900})
+        ctx = nuevo_contexto(self.browser, viewport={"width": 1280, "height": 900})
         self.addCleanup(ctx.close)
         pg = ctx.new_page()
         errores = []

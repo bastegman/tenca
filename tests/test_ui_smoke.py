@@ -10,6 +10,7 @@ suite entera. Se salta si Playwright no está instalado (la CI lo instala en `ui
 import importlib.util
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -20,7 +21,7 @@ import unittest
 import urllib.error
 import urllib.request
 
-from support import REPO
+from support import REPO, STATIC, modulos_de_escritorio, nuevo_contexto
 
 try:
     from playwright.sync_api import sync_playwright
@@ -116,7 +117,7 @@ class InterfazEnNavegadorTests(unittest.TestCase):
     def pagina(self):
         # cookies propias (la sesion de un test no vale para el siguiente) y sin la CSP de la pagina, que bloquea el
         # eval con el que Playwright evalua las expresiones de wait_for_function (la CSP la prueba test_seguridad)
-        ctx = self.browser.new_context(bypass_csp=True)
+        ctx = nuevo_contexto(self.browser, bypass_csp=True)
         self.addCleanup(ctx.close)
         pg = ctx.new_page()
         errores, red = [], []
@@ -177,6 +178,74 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         err, red = self.limpiar(errores, red)
         self.assertEqual(err, [], (err, red))
         self.assertEqual(red, [], red)
+
+    # el orden en que cada fichero registra su primera escucha al cargarse, antes de DOMContentLoaded: con módulos lo
+    # decide la cadena de main.js y tiene que ser el de los <script> de antes
+    ORDEN_ESCUCHAS = r"""(() => {
+      window.__orden = []; let arrancado = false;
+      addEventListener('DOMContentLoaded', () => { arrancado = true; });
+      const add = EventTarget.prototype.addEventListener;
+      EventTarget.prototype.addEventListener = function (...a) {
+        if (!arrancado) {
+          const m = /\/([\w-]+\.js):\d+:\d+/.exec(new Error().stack.split('\n').slice(2).join('\n'));
+          if (m && !window.__orden.includes(m[1])) window.__orden.push(m[1]);
+        }
+        return add.apply(this, a);
+      };
+    })();"""
+
+    def modulos_sin_globales(self, navegador):
+        """La página con sus módulos tal cual (sin el acceso de los tests, support.EXPONER_MODULOS) y con la CSP de
+        verdad: carga, en orden, sin errores, sirve los .js como JavaScript y solo deja en window lo de main.js."""
+        ctx = navegador.new_context()  # (sin nuevo_contexto: aquí se mira la página como la ve la app)
+        self.addCleanup(ctx.close)
+        ctx.add_init_script(self.ORDEN_ESCUCHAS)
+        pg = ctx.new_page()
+        errores, js = [], {}
+        pg.on("pageerror", lambda e: errores.append(f"pageerror: {e}"))
+        pg.on("console", lambda m: errores.append(f"console.{m.type}: {m.text}") if m.type == "error" else None)
+
+        def respuesta(r):
+            if r.url.endswith(".js"):
+                js[r.url.rsplit("/", 1)[-1]] = (r.headers.get("content-type", ""), r.headers.get("cache-control", ""))
+        pg.on("response", respuesta)
+        blanco = ctx.new_page()  # lo que trae el navegador en una página del mismo origen (seguro, como la app)
+        blanco.goto(f"{self.base}/no-existe")
+        de_serie = set(blanco.evaluate("Object.keys(window)"))
+        blanco.close()
+        pg.goto(f"{self.base}/?t={self.token}", wait_until="networkidle")
+        pg.wait_for_selector("#main h1:has-text('Hoy')", timeout=15000)
+        pg.click("#btnSettings")
+        pg.wait_for_selector("#modal:not(.hidden) .aj-nav [data-sec='algrabar'].on", timeout=5000)
+        pg.keyboard.press("Escape")
+        # todos los módulos de la página de escritorio, con un tipo que vale para un módulo (si no, no se ejecutan) y
+        # sin caché (tras actualizar la app, la ventana no puede mezclar un fichero viejo con uno nuevo)
+        self.assertEqual(sorted(js), sorted(["main.js"] + modulos_de_escritorio()))
+        for nombre, (tipo, cache) in js.items():
+            self.assertTrue(tipo.startswith("text/javascript"), (nombre, tipo))
+            self.assertEqual(cache, "no-store", nombre)
+        nuevos = sorted(set(pg.evaluate("Object.keys(window)")) - de_serie - {"__orden"})
+        self.assertEqual(nuevos, ["onWindowClosing"])
+        self.assertEqual(pg.evaluate("[typeof window.S, typeof window.api, typeof window.toast]"), ["undefined"] * 3)
+        self.assertEqual(pg.evaluate("typeof onWindowClosing"), "function")
+        with open(os.path.join(STATIC, "main.js"), encoding="utf-8") as f:
+            cadena = re.findall(r"[\w-]+\.js", re.search(r"((?:[\w-]+\.js\s*→\s*)+[\w-]+\.js)", f.read()).group(1))
+        orden = pg.evaluate("window.__orden")
+        self.assertGreaterEqual(len(orden), 10, orden)  # los que escuchan algo al cargarse
+        self.assertEqual(orden, [n for n in cadena if n in orden])
+        self.assertEqual(errores, [])
+
+    def test_modulos_sin_globales_y_en_su_orden(self):
+        self.modulos_sin_globales(self.browser)
+
+    def test_modulos_en_edge(self):
+        # la app abre Edge (msedge --app) si el PC no tiene WebView2; en Windows está siempre (ui-smoke en Windows)
+        try:
+            edge = self.pw.chromium.launch(channel="msedge")
+        except Exception as e:  # sin Edge instalado (Linux, el Mac de pruebas)
+            self.skipTest(f"sin Edge: {str(e).splitlines()[0]}")
+        self.addCleanup(edge.close)
+        self.modulos_sin_globales(edge)
 
     def test_asistente_configurar_tres_pasos_y_probar_sin_guardar(self):
         """«Configurar Chuleta» (07/11/2026): tres pasos, «Probar» de verdad (aquí falla en la descarga del modelo,
@@ -1133,9 +1202,11 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         pg.route("**/api/reunion/actual", lambda r: r.fulfill(json=nada))
         pg.goto(f"{self.base}/?t={self.token}", wait_until="networkidle")
         pg.wait_for_selector("#main h1:has-text('Hoy')", timeout=15000)
-        # (dentro de una función: evaluate llama a la función si la expresión acaba en una)
-        pg.evaluate("() => { window.vocabLlamadas = 0; window.vocabConectar = after => { window.vocabLlamadas++;"
-                    " setTimeout(after, 50); }; }")
+        # «Usar las listas de una carpeta…» llama a vocabConectar (perfil.js), la de verdad: el selector de carpetas
+        # de Windows (/api/link/pick) y el alta, simulados; al terminar vuelve a la tarjeta
+        conectar = []
+        pg.route("**/api/link/pick", lambda r: (conectar.append(1), r.fulfill(json={"path": "C:\\Listas"})))
+        pg.route("**/api/vocab/link/add", lambda r: r.fulfill(json={"name": "Listas", "listas": 1}))
         pg.click("#btnRec")
         pg.wait_for_selector(".dialog.gr [data-fila='carpeta'] .gr-v code", timeout=15000)
         # un nombre con signos que no admite un archivo: se dice cómo se guardará (y se graba así)
@@ -1149,7 +1220,9 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         antes = pg.input_value("#grProy")
         self.assertIn("Usar las listas de una carpeta…", pg.inner_text("#grProy"))
         pg.select_option("#grProy", "__conectar")
-        pg.wait_for_function("window.vocabLlamadas === 1", timeout=5000)
+        pg.wait_for_function("document.querySelector('#toasts').textContent.includes('Conectada «Listas»')",
+                             timeout=5000)
+        self.assertEqual(conectar, [1])
         pg.wait_for_selector(".dialog.gr [data-fila='carpeta'] .gr-v code", timeout=15000)
         self.assertEqual(pg.input_value("#grNombre"), "Mi reunión")  # se vuelve a la tarjeta con lo escrito
         self.assertEqual(pg.input_value("#grProy"), antes)  # «Usar las listas…» no es un proyecto
@@ -1318,7 +1391,7 @@ class InterfazEnNavegadorTests(unittest.TestCase):
         with open(stem + ".resumen.md", "w", encoding="utf-8") as f:
             f.write("---\nmodelo: prueba\n---\n\n## Resumen\nLa migración va **en plazo** [1:12].\n\n"
                     "## Próximos pasos\n- [ ] Luis: escalar los permisos [2:05]\n\n## Participantes\n- Ana\n- Luis\n")
-        ctx = self.browser.new_context(bypass_csp=True)
+        ctx = nuevo_contexto(self.browser, bypass_csp=True)
         self.addCleanup(ctx.close)
         ctx.grant_permissions(["clipboard-read", "clipboard-write"], origin=self.base)
         pg = ctx.new_page()

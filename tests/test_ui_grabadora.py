@@ -16,7 +16,7 @@ import shutil
 import time
 import unittest
 
-from support import REPO
+from support import REPO, nuevo_contexto
 
 try:
     from playwright.sync_api import sync_playwright
@@ -61,7 +61,7 @@ class GrabacionCortadaUI(unittest.TestCase):
             os.remove(cls.runs)
 
     def pagina(self):
-        ctx = self.browser.new_context(bypass_csp=True, viewport={"width": 1500, "height": 920})
+        ctx = nuevo_contexto(self.browser, bypass_csp=True, viewport={"width": 1500, "height": 920})
         ctx.add_init_script("localStorage.setItem('procElegido', '1'); localStorage.setItem('avisoProbar', '1')")
         self.addCleanup(ctx.close)
         pg = ctx.new_page()

@@ -17,7 +17,7 @@ import urllib.request
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from support import server  # noqa: F401  (prepara sys.path con _app)
+from support import orden_de_arranque, server  # noqa: F401  (prepara sys.path con _app)
 import aviso  # noqa: E402  (solo sus funciones puras: tkinter se importa dentro de la clase)
 import calendario  # noqa: E402
 
@@ -668,11 +668,12 @@ class AvisoTextoTests(unittest.TestCase):
 class ReunionFrontendTests(unittest.TestCase):
     def test_ganchos_en_app_js_e_index(self):
         # (B2: el bloque va en «Calendario y Teams», que pinta ajustes.js)
-        app, html = static("app.js") + static("ajustes.js"), static("index.html")
-        self.assertIn('<script src="/reunion.js"></script>', html)
+        app = static("app.js") + static("ajustes.js")
+        self.assertIn("reunion.js", orden_de_arranque())  # (main.js: antes, un <script> en index.html)
         # (07/11/2026: la sugerencia al grabar la aplica el servidor en el plan: sin reunionPrefill ni reunionExtra)
         # (14/11/2026, punto 12 del review) sin reunionCollect: «Aviso flotante» se guarda al cambiarlo (AJ_GUARDA)
-        for s in ("${window.reunionFieldsetHtml?.() || ''}", "window.bindReunionSettings?.(d)",
+        # (16/11/2026, punto 52) por import de reunion.js: con módulos, window.reunionX ya no existiría
+        for s in ("${reunionFieldsetHtml()}", "    bindReunionSettings(d);\n",
                   "rnAviso: el => ({ rec_aviso: el.checked })"):
             self.assertEqual(app.count(s), 1, s)
         js = static("reunion.js")

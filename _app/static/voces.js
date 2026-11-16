@@ -1,5 +1,12 @@
 /* Quién habla (voces): etiquetas de hablante en la transcripción, popover para nombrar / recordar / fusionar,
    barra de estado en la reunión y el apartado «Voces» de Ajustes. Todo contra /api/voces* y /api/hablantes. */
+// orden de arranque: este fichero se evalúa justo después de notas.js (la cadena, en main.js)
+import { closePop, curAudio } from './notas.js';
+import {
+  $, $$, api, APP_NAME, ask, audio, enc, esc, fold, I, isActive, isLive, jobFor, loadAudio, main, pollJobs,
+  renderTxBody, S, toast, whoFor,
+} from './app.js';
+
 S.spk = null;  // { path, mtime, exists, hablantes, tu, who[], n, known, personas, usuario, enabled, job }
 
 const spkInfo = h => (S.spk && S.spk.hablantes && S.spk.hablantes[h]) || null;
@@ -43,14 +50,14 @@ function renderVoicesBar(a) {
     const abierto = S.qhAbierto === a.path;
     // mientras se graba con el directo en la nube (punto 56): identificadas por bloques de 30 min; si la grabación ya
     // terminó y la identificación del resto no llegó a hacerse (se canceló o falló), se dice cómo terminarla
-    const grabando = (typeof isLive === 'function' && isLive(a)) || !!jobFor(a.path);  // (o el repaso final)
+    const grabando = isLive(a) || !!jobFor(a.path);  // (o el repaso final)
     const parcial = !s.parcial ? '' : grabando ? ` · hasta el min ${Math.round(s.parcial / 60)} (el resto, al terminar)`
       : ` · solo hasta el min ${Math.round(s.parcial / 60)}${on ? ': «Volver a identificar» hace el resto' : ''}`;
     html = `<span class="vz-st">${I.voice}Voces: ${s.n} ${s.n === 1 ? 'persona' : 'personas'} · ${s.known} reconocida${s.known === 1 ? '' : 's'}${Object.values(s.hablantes || {}).some(x => x.usuario && !x.provisional) ? ' · Tú' : ''}${parcial}</span>
       <button class="btn sm${sinNombre && !abierto ? ' primary' : ''}" type="button" data-act="qh-abrir" aria-expanded="${abierto}" aria-controls="qhBloque">${abierto ? 'Plegar' : sinNombre ? `Ponles nombre (${sinNombre})` : 'Quién habla'}</button>
       <span class="sp"></span>
       ${S.tx && S.tx.kind === 'srt' ? `<button class="btn ghost sm" data-act="voz-export" title="Guarda <reunión>.hablantes.txt junto al audio">${I.text}Exportar con hablantes</button>` : ''}
-      ${on && !(typeof isLive === 'function' && isLive(a)) ? `<button class="btn ghost sm" data-act="voz-identify" title="Repetir la identificación">${I.refresh}Volver a identificar</button>` : ''}
+      ${on && !isLive(a) ? `<button class="btn ghost sm" data-act="voz-identify" title="Repetir la identificación">${I.refresh}Volver a identificar</button>` : ''}
       ${abierto ? qhBloqueHtml(a, s) : ''}`;
   } else if (on && (a.txt || a.srt) && !a.recording && !jobFor(a.path)) {
     html = `${last && last.status === 'error' ? `<span class="vz-st err">No se pudieron identificar las voces: ${esc(last.aviso?.frase || last.error || '')}</span>` : '<span class="muted">' + I.voice + 'Quién habla: aún sin identificar</span>'}
@@ -146,7 +153,7 @@ function qhBloqueHtml(a, s) {
 }
 /* oír ~5 s de una voz: su frase más larga de la transcripción (who[] dice quién dice cada frase) */
 function qhMuestra(h) {
-  const tx = S.tx, who = typeof whoFor === 'function' ? whoFor(tx) : null;
+  const tx = S.tx, who = whoFor(tx);
   if (!tx || !who) return null;
   let best = null;
   tx.segs.forEach((g, k) => {
@@ -273,7 +280,7 @@ function onVoicesJobs(prev) {
 /* ---------------------------------------------------------------- popover de un hablante */
 /* Lo que se manda al servidor desde la etiqueta (funciones puras, probadas en tests/test_fix_voces.py). Escribir un
    nombre dice QUIÉN es este hablante (alguien que ya se llama así, o una persona nueva): nunca renombra a la persona
-   que tenía salvo que se marque «solo corrijo el nombre», y nunca a la tuya (msg 1170: «asume que soy yo»). */
+   que tenía salvo que se marque «solo corrijo el nombre», y nunca a la tuya (la voz «tú» es quien usa la app). */
 // `creado`: la identificación sobre la que se abrió la etiqueta (si se volvió a identificar, «h2» puede ser otra voz)
 function spkNameBody(a, h, cur, nombre, opts) {
   const own = cur && !cur.es_usuario;
@@ -289,7 +296,7 @@ function spkPickBody(a, h, i, target, creado) {
   return i.persona && !i.usuario ? ['/api/voces/fusionar', { id_a: target, id_b: i.persona }] : ['/api/voces/reasignar', { path: a.path, h, persona: target, creado }];
 }
 
-// «Es el mismo que…» (msg 1242): la app partió una voz en dos hablantes de esta reunión
+// «Es el mismo que…»: la app partió una voz en dos hablantes de esta reunión
 function spkJoinBody(a, h, con, creado) { return { path: a.path, h, con, creado }; }
 function spkJoinOptions(hablantes, h, label) {
   return Object.entries(hablantes || {}).filter(([k]) => k !== h && k !== 'varios')
@@ -338,7 +345,7 @@ function openSpeakerPop(h, anchor) {
   const refresh = async msg => { closeSpkPop(); S.spk = null; await loadSpeakers(a); if (msg) toast(msg); };
   const remember = () => $('#spRem', pop).checked;
   const consent = () => $('#spConsent', pop).checked;
-  /* «Guardando…» al momento (fix-lento, 10/11/2026, msg 1479: «tarda minutos y no aparece nada»): con «Recordar» la
+  /* «Guardando…» al momento (fix-lento, 10/11/2026: tardaba minutos sin que apareciera nada): con «Recordar» la
      huella de voz tarda unos segundos (más con el PC ocupado) y hasta que acababa no se veía nada. Mientras, nada del
      cuadro se puede volver a pulsar; si falla, vuelve como estaba y sale el motivo */
   const estado = $('.sp-estado', pop);
@@ -515,3 +522,8 @@ function bindVocesSettings(d) {
     } catch (err) { toast(esc(err.message), 'err'); }
   });
 }
+
+export {
+  bindVocesSettings, loadSpeakers, onVoicesJobs, qhMuestra, qhOyendo, renderVoicesBar, spkChip, spkLabel,
+  spkPopCerrar, vocesFieldsetHtml,
+};

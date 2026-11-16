@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 from unittest import mock
 
 from support import REPO, TempTree, bare_jobs, server, codigo_del_servidor  # noqa: F401  (support prepara sys.path)
+from support import importa, js_sin_modulo, orden_de_arranque  # noqa: E402
 import calendario  # noqa: E402
 import plan  # noqa: E402
 from test_calendario import Base, SerieItems, pywin32_fecha  # noqa: E402
@@ -938,7 +939,7 @@ class HoyJsTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, d, True)
         js = os.path.join(d, "prueba.js")
         with open(js, "w", encoding="utf-8") as f:
-            f.write(JS_STUBS + src + "\n" + code)
+            f.write(JS_STUBS + js_sin_modulo(src) + "\n" + code)
         r = subprocess.run(["node", js], capture_output=True, text=True, encoding="utf-8", timeout=30)
         self.assertEqual(r.returncode, 0, r.stderr)
         return json.loads(r.stdout)
@@ -1024,11 +1025,14 @@ class HoyJsTests(unittest.TestCase):
     def test_la_carga_y_los_ganchos(self):
         html = open(os.path.join(STATIC, "index.html"), encoding="utf-8").read()
         app = open(os.path.join(STATIC, "app.js"), encoding="utf-8").read()
-        self.assertLess(html.index('<script src="/app.js">'), html.index('<script src="/hoy.js">'))
+        orden = orden_de_arranque()  # (main.js: antes, el orden de los <script> de index.html)
+        self.assertLess(orden.index("app.js"), orden.index("hoy.js"))
         self.assertIn('<link rel="stylesheet" href="/hoy.css">', html)
-        self.assertIn("if (typeof viewHoy === 'function') return viewHoy();", app)
+        self.assertIn("  return viewHoy();", app)
+        for fn in ("viewHoy", "renderSiguiente"):  # de hoy.js, por import (antes, con typeof)
+            self.assertTrue(importa(app, fn, "./hoy.js"), fn)
         self.assertIn("</svg>Hoy</a>", html)
-        self.assertIn("if (typeof renderSiguiente === 'function') renderSiguiente();", app)
+        self.assertIn("  renderSiguiente();", app)
 
 
 if __name__ == "__main__":

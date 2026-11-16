@@ -1,10 +1,23 @@
-'use strict';
 /* Notas: funciones al estilo Notion. Usa las utilidades y el estado S de app.js.
    - Notas por reunion (editor de bloques con "/"), guardadas en <audio>.md junto al audio
    - Propiedades: titulo, icono, etiquetas, estado, participantes y proyecto/workstream (cabecera del .md)
    - Vista "Reuniones" (tabla con filtros/orden/agrupar) y calendario
    - Busqueda rapida Ctrl+P, favoritos, visto recientemente
    - Importar arrastrando archivos, eliminar a la papelera, aviso de grabacion, reunion detectada */
+// orden de arranque: este fichero se evalúa justo después de app.js (la cadena, en main.js)
+import {
+  $, $$, aDate, allAudios, api, APP_NAME, ask, audio, clockNow, closeModal, copy, copyRich, DIA, enc, errorInterno,
+  esc, estDuration, flatFolders, fmtClock, fmtDur, fmtSize, fold, folderName, fullTitle, go, href, I, isLive, liveJob,
+  loadAudio, longTitle, main, md, MES, nfc, openModal, openNewFolder, openRec, openSettings, pad, pathLabel, pollJobs,
+  provName, refreshTree, refreshView, renderAudioHead, renderLiveHero, renderTree, S, saveEdits, setConfig,
+  shortTitle, statusOf, statusPill, toast, toggleRec,
+} from './app.js';
+import { reunionParticipantesGuardados, reunionParticipantesHtml } from './reunion.js';
+import { hoyCalDia, PEND } from './hoy.js';
+import { perfilPropsHtml, perfilSavedText } from './perfil.js';
+import { abrirSubir, esAudio, sbNoSePuedeSoltar } from './grabar.js';
+import { cerrarSubirMenu, subirMenu } from './recibir.js';
+import { conservarPropHtml } from './conservar.js';
 
 /* ---------------------------------------------------------------- titulos, iconos */
 const ESTADOS = [['', 'Sin estado'], ['Por revisar', 'Por revisar'], ['Revisada', 'Revisada'], ['Enviada', 'Enviada'], ['Archivada', 'Archivada']];
@@ -70,13 +83,13 @@ function recentCards() {
 }
 
 /* primer arranque (p. ej. en el PC de otra persona): elegir dónde se procesan las reuniones y grabar la primera.
-   Por defecto, «Solo en este PC»: no se sugiere ningún proveedor de la nube (Bernardo, msg 1386) */
+   Por defecto, «Solo en este PC»: no se sugiere ningún proveedor de la nube */
 function welcomeCard(all) {
   const key = S.config.procesado === 'api' ? S.config.cloud?.has_key : true;  // sin API no hay nada que conectar
   const elegir = S.config.procesado === 'local' && !localStorage.getItem('procElegido');  // nadie ha elegido aun
   if (key && all.length && !elegir) return '';
   // con el asistente (configurar.js): una frase y un botón; sin él, la lista de antes
-  if (typeof abrirConfigurar === 'function' && (elegir || !key)) {
+  if (elegir || !key) {
     return `<div class="card welcome"><div class="wi">${I.spark}</div><div>
       <b>${elegir ? `Bienvenido a ${APP_NAME}` : 'Falta la clave de la API'}</b>
       <div style="margin:4px 0 12px">${elegir ? 'Antes de tu primera reunión, elige dónde se transcriben y se resumen. Son tres pasos y al final lo pruebas todo.'
@@ -102,8 +115,7 @@ main.addEventListener('click', async e => {
   else if (a === 'fav') toggleFav(act.dataset.kind, p);
   else if (a === 'tag-del') { const au = curAudio(); if (au) saveProps(au, { etiquetas: ((au.props || {}).etiquetas || []).filter(t => t !== act.dataset.tag) }).then(() => renderAudioHead(au, true)); }
   else if (a === 'delete') deleteItem(p);
-  else if (a === 'subir' && typeof subirMenu === 'function') { if (S.sbMenu) cerrarSubirMenu(); else subirMenu(act, { carpeta: p || null }); }
-  else if (a === 'subir' && typeof elegirAudios === 'function') elegirAudios({ carpeta: p || null });
+  else if (a === 'subir') { if (S.sbMenu) cerrarSubirMenu(); else subirMenu(act, { carpeta: p || null }); }
   else if (a === 'consent') copy(CONSENT_TEXT, 'Aviso copiado: pégalo en el chat de la reunión');
   else if (a === 'palette') { e.preventDefault(); openPalette(); }
   else if (a === 'seg-to-notes') addSegToNotes();
@@ -274,12 +286,12 @@ function propsHtml(a) {
     <div class="prow"><span class="pk">${I.folder}Carpeta</span><span class="pv"><a href="${a.folder ? href('f', a.folder) : '#/r/'}">${esc(a.folder ? pathLabel(a.folder) : 'Sin clasificar')}</a>
       <button class="btn ghost sm" data-act="move" data-path="${esc(a.path)}">cambiar</button></span></div>
     <div class="prow"><span class="pk">${I.topic}Proyecto</span><span class="pv">${wsSelect(a)}</span></div>
-    ${typeof perfilPropsHtml === 'function' ? perfilPropsHtml(a) : ''}
+    ${perfilPropsHtml(a)}
     <div class="prow"><span class="pk">${I.state}Estado</span><span class="pv"><select class="pstate ${ESTADO_CLS[st] || ''}" data-prop="estado">${ESTADOS.map(([v, l]) => `<option value="${esc(v)}"${v === st ? ' selected' : ''}>${l}</option>`).join('')}</select></span></div>
     <div class="prow"><span class="pk">${I.tag}Etiquetas</span><span class="pv tags">${tags}<input class="tag-add" data-tag-add list="tagList" placeholder="+ añadir" autocomplete="off" spellcheck="false"></span></div>
     <div class="prow"><span class="pk">${I.users}Participantes</span><span class="pv"><input class="pinput" data-prop="participantes" value="${esc(p.participantes || '')}" placeholder="Vacío" autocomplete="off"></span></div>
-    ${window.reunionParticipantesHtml?.(a) || ''}
-    ${typeof conservarPropHtml === 'function' ? conservarPropHtml(a) : ''}
+    ${reunionParticipantesHtml(a)}
+    ${conservarPropHtml(a)}
     <div class="prow"><span class="pk">${I.chat}Transcripción</span><span class="pv">${statusPill(a)}${a.cloud ? ` <span class="pill cloud">${I.cloud}Solo en OneDrive</span>` : ''}</span></div>
   </div><datalist id="tagList"></datalist>`;
 }
@@ -294,7 +306,7 @@ main.addEventListener('change', e => {
     const v = e.target.value;
     // corrigiendo: antes, lo corregido (el directo no rehace una frase corregida, y así no se pierde nada)
     const antes = S.editing && S.tx && S.tx.path === a.path ? saveEdits(true) : Promise.resolve();
-    antes.then(() => saveProps(a, { idioma: v })).then(r => { if (r && typeof perfilSavedText === 'function') toast(perfilSavedText('idioma', !!liveJob(a), !!(a.txt || a.srt), r.directo?.idioma)); });
+    antes.then(() => saveProps(a, { idioma: v })).then(r => { if (r) toast(perfilSavedText('idioma', !!liveJob(a), !!(a.txt || a.srt), r.directo?.idioma)); });
   }
 });
 main.addEventListener('keydown', e => {
@@ -326,10 +338,10 @@ main.addEventListener('focusout', e => {
     if (t !== titleOf(a)) saveProps(a, { titulo: t });
   } else if (e.target.dataset && e.target.dataset.prop === 'participantes') {
     const v = e.target.value.trim();
-    if (v !== ((a.props || {}).participantes || '')) saveProps(a, { participantes: v }).then(() => window.reunionParticipantesGuardados?.(a));
+    if (v !== ((a.props || {}).participantes || '')) saveProps(a, { participantes: v }).then(() => reunionParticipantesGuardados(a));
   } else if (e.target.dataset && e.target.dataset.prop === 'contexto') {  // perfil.js: Whisper y el resumen lo usan
     const v = e.target.value.trim();
-    if (v !== ((a.props || {}).contexto || '')) saveProps(a, { contexto: v }).then(r => { if (r && typeof perfilSavedText === 'function') toast(perfilSavedText('contexto', !!liveJob(a), !!(a.txt || a.srt))); });
+    if (v !== ((a.props || {}).contexto || '')) saveProps(a, { contexto: v }).then(r => { if (r) toast(perfilSavedText('contexto', !!liveJob(a), !!(a.txt || a.srt))); });
   }
 });
 
@@ -560,7 +572,7 @@ main.addEventListener('click', async e => {
     act.disabled = true;
     try {
       await api('/api/pendientes/hecha', { path: a.path, i: k + (S.sum.desde || 0), texto: m[3], hecha });
-      if (typeof PEND !== 'undefined') PEND.at = 0;  // Hoy › Mis pendientes, al volver, lo relee
+      PEND.at = 0;  // Hoy › Mis pendientes, al volver, lo relee
       S.sum = null;
       await loadSummary(a);
       toast(hecha ? '☑ Tarea hecha' : '☐ Tarea sin hacer');
@@ -1007,7 +1019,7 @@ function viewCalendar(ym) {
       + list.slice(0, 4).map(a => { const dd = aDate(a); return `<div class="cev st-${statusOf(a)}" data-go="a" data-path="${esc(a.path)}" title="${esc(fullTitle(a))}">`
         + `<span class="ct">${dd ? `${pad(dd.getHours())}:${pad(dd.getMinutes())}` : ''}</span>${iconOf(a) ? iconOf(a) + ' ' : ''}${esc(titleOf(a) || nfc(a.label || '') || fmtDur(estDuration(a)))}</div>`; }).join('')
       + (list.length > 4 ? `<div class="cmore" data-act="cal-day" data-day="${key}">+${list.length - 4} más</div>` : '')
-      + (typeof hoyCalDia === 'function' ? hoyCalDia(key) : '') + '</div>';  // las citas de Outlook que vienen (hoy.js)
+      + hoyCalDia(key) + '</div>';  // las citas de Outlook que vienen (hoy.js)
   }
   main.innerHTML = `<div class="page wide">
     <div class="db-head"><h1>${I.calendar}${MESES[m - 1][0].toUpperCase() + MESES[m - 1].slice(1)} ${y}</h1>${dbTabs('c')}
@@ -1112,11 +1124,11 @@ addEventListener('drop', e => {
   if (!e.dataTransfer || !e.dataTransfer.files.length) return;
   e.preventDefault(); showDrop(false);
   const fs = [...e.dataTransfer.files];
-  const audios = typeof esAudio === 'function' && typeof abrirSubir === 'function' ? fs.filter(esAudio) : [];
+  const audios = fs.filter(esAudio);
   const resto = fs.filter(f => !audios.includes(f));
   if (resto.length) importFiles(resto, dropFolder());
   if (!audios.length) return;
-  const motivo = typeof sbNoSePuedeSoltar === 'function' ? sbNoSePuedeSoltar() : '';
+  const motivo = sbNoSePuedeSoltar();
   if (motivo) return toast(motivo, 'err');
   abrirSubir(audios, { carpeta: S.route.kind === 'f' ? S.route.path : null, anadir: true });
 });
@@ -1159,3 +1171,10 @@ function renderSideNav() {
   $$('#sideNav a').forEach(a => a.classList.toggle('on', a.dataset.nav === (k === 'home' ? 'home' : k)));
 }
 $('#sideNav').addEventListener('click', e => { const a = e.target.closest('[data-nav="find"]'); if (a) { e.preventDefault(); openPalette(); } });
+
+export {
+  applyTab, closePop, closeSlash, CONSENT_TEXT, curAudio, favHtml, fIcon, fillTagList, flushNotes, iconOf,
+  importFiles, isFav, loadVocab, onSummaryJobs, openPalette, openVocabEditor, pageTitle, propsHtml, pushRecent,
+  renderMeetChip, renderSideNav, saveProps, tabsHtml, tblProyTxt, titleOf, titleRowHtml, viewCalendar, viewTable,
+  vocabFit, vocabOf, vocabOptions, welcomeCard, wsPatch, wsSelect,
+};

@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import unittest
 
+from support import importa, orden_de_arranque
 from test_frontend import js_defs, read
 
 HOOKS = ("onDirectoJobs(prev)", "directoAfterRender(tx, lj)", 'id="directoBar"', "renderDirectoBar(a, j)",
@@ -13,20 +14,19 @@ HOOKS = ("onDirectoJobs(prev)", "directoAfterRender(tx, lj)", 'id="directoBar"',
 
 
 class DirectoCargaTests(unittest.TestCase):
-    def test_index_carga_directo_tras_voces(self):
-        html = read("index.html")
-        self.assertIn('<script src="/directo.js"></script>', html)
-        self.assertLess(html.index('<script src="/voces.js">'), html.index('<script src="/directo.js">'))
-        self.assertLess(html.index('<script src="/app.js">'), html.index('<script src="/directo.js">'))
+    def test_directo_se_evalua_tras_voces(self):
+        orden = orden_de_arranque()  # (main.js: antes, el orden de los <script> de index.html)
+        self.assertLess(orden.index("voces.js"), orden.index("directo.js"))
+        self.assertLess(orden.index("app.js"), orden.index("directo.js"))
 
-    def test_app_js_tiene_los_hooks_guardados_con_typeof(self):
+    def test_app_js_importa_los_hooks(self):
         app = read("app.js")
         for h in HOOKS:
             self.assertIn(h, app, h)
-        # cada hook de funcion va protegido: app.js sigue funcionando aunque directo.js no cargue
+        # cada hook de función llega por import de directo.js (antes, con typeof por si no cargaba)
         for fn in ("onDirectoJobs", "directoAfterRender", "renderDirectoBar", "directoSettingsHtml",
                    "bindDirectoSettings", "collectDirectoSettings"):
-            self.assertRegex(app, rf"typeof {fn} === 'function'", fn)
+            self.assertTrue(importa(app, fn, "./directo.js"), fn)
         # y una sola vez cada uno (no se duplicaron al fusionar)
         for h in HOOKS:
             self.assertEqual(app.count(h), 1, h)
@@ -106,9 +106,11 @@ class AvisosFranjaTests(unittest.TestCase):
     def test_ganchos_en_app_js(self):
         app = read("app.js")
         self.assertEqual(app.count('<div class="lh-avisos" data-lh-avisos></div>'), 1)
-        # tras los medidores (cada 300 ms con la grabación) y al pintar la cabecera; protegidos con typeof
-        self.assertEqual(app.count("if (typeof renderDirectoAvisos === 'function') renderDirectoAvisos();"), 2)
-        self.assertIn("(typeof directoParadaTexto === 'function' && directoParadaTexto(S.rec))", app)
+        # tras los medidores (cada 300 ms con la grabación) y al pintar la cabecera; de directo.js, por import
+        self.assertEqual(len(re.findall(r"^  renderDirectoAvisos\(\);", app, re.M)), 2)
+        self.assertIn("toast(directoParadaTexto(S.rec) || ", app)
+        for fn in ("renderDirectoAvisos", "directoParadaTexto"):
+            self.assertTrue(importa(app, fn, "./directo.js"), fn)
         poll = app[app.index("async function pollRec()"):app.index("function onRecChange()")]
         self.assertLess(poll.index("updateMeters()"), poll.index("renderDirectoAvisos()"))
 

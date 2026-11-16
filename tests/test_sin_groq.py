@@ -8,7 +8,7 @@ import os
 import time
 import unittest
 
-from support import TempTree, server  # noqa: F401  (support prepara sys.path)
+from support import TempTree, server, nuevo_contexto  # noqa: F401  (support prepara sys.path)
 from common import unprotect
 from test_subir_audio import Servidor
 
@@ -111,7 +111,7 @@ class InstalacionNuevaTests(unittest.TestCase):
             cls.groq.cerrar()
 
     def pagina(self, s):
-        ctx = self.browser.new_context(bypass_csp=True, viewport={"width": 1280, "height": 900})
+        ctx = nuevo_contexto(self.browser, bypass_csp=True, viewport={"width": 1280, "height": 900})
         self.addCleanup(ctx.close)
         pg = ctx.new_page()
         self.errores = []
@@ -277,7 +277,7 @@ class ActualizarConGroqTests(unittest.TestCase):
         self.assertEqual((cfg["procesado"], cfg["cloud"]["provider"]), ("api", "groq"))
         # al arrancar no se migra nada (el fichero puede no haberse reescrito: entonces es el mismo)
         self.assertEqual(self.lo_suyo(self.leer()), esperado)
-        ctx = self.browser.new_context(bypass_csp=True, viewport={"width": 1280, "height": 900})
+        ctx = nuevo_contexto(self.browser, bypass_csp=True, viewport={"width": 1280, "height": 900})
         self.addCleanup(ctx.close)
         pg = ctx.new_page()
         errores = []

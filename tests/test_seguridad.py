@@ -458,7 +458,7 @@ class CspTests(ServidorBase):
         self.assertEqual(code, 200)
         self.assertEqual(headers["Content-Security-Policy"], CSP)
         self.assertEqual(server.CSP, CSP)
-        self.assertIn(b"<script src=", body)
+        self.assertIn(b'<script type="module" src="/main.js">', body)
 
     def test_la_interfaz_cumple_la_csp(self):
         """Lo que haría saltar la CSP: <script> en línea, manejadores on…= en el HTML o en las plantillas, javascript:,

@@ -2,7 +2,9 @@
 """Utilidades comunes de los tests. `_app/` no es un paquete: se añade a sys.path y se importan los módulos
 tal como los importa el servidor."""
 import contextlib
+import json
 import os
+import re
 import struct
 import sys
 import tempfile
@@ -153,5 +155,70 @@ def bare_jobs(jobs):
     return j
 
 
+# ----------------------------------------------------------------------------- la interfaz son módulos ES (punto 52)
+STATIC = os.path.join(APP, "static")
+# los que no son de la página de escritorio: el punto de entrada (no exporta nada), la página del móvil y el
+# AudioWorklet (importarlos desde la página de escritorio los ejecutaría ahí)
+NO_ESCRITORIO = ("main.js", "movil.js", "pistas-worklet.js")
+
+
+def modulos_de_escritorio():
+    return sorted(n for n in os.listdir(STATIC) if n.endswith(".js") and n not in NO_ESCRITORIO)
+
+
+# Los tests de navegador miran y llaman cosas de la interfaz con page.evaluate («S.config», «api(…)», «toast(…)»).
+# Con módulos nada de eso es global. Este guion, en cada página de escritorio (la que carga /main.js), vuelve a
+# importar los módulos ya cargados (import() de la misma URL da el mismo módulo, no otra copia) y deja en window un
+# acceso de solo lectura a lo que exportan, con su valor vivo (un `let` que cambia se ve cambiado). Es solo de los
+# tests: la app no lo lleva (test_modulos.py comprueba que en window no hay nada más que la lista de main.js).
+# Reasignar uno desde fuera (window.api = …) no cambiaría el del módulo: lanza un error, para que un test no crea que
+# lo ha sustituido. window.__modulos es la promesa: un test que mira algo justo al cargar la página la espera.
+EXPONER_MODULOS = r"""(() => {
+  if (window.top !== window) return;
+  addEventListener('DOMContentLoaded', () => {
+    if (!document.querySelector('script[type="module"][src="/main.js"]')) return;
+    window.__modulos = Promise.all(%s.map(m => import('/' + m))).then(mods => {
+      for (const m of mods) for (const k of Object.keys(m)) {
+        if (k in window) continue;
+        Object.defineProperty(window, k, { configurable: true, get: () => m[k], set: () => {
+          throw new Error(`«${k}» es de un módulo de la interfaz: no se cambia desde window (tests/support.py)`); } });
+      }
+      return true;
+    });
+  });
+})();"""
+
+
+def nuevo_contexto(navegador, **kw):
+    """browser.new_context(**kw) con el guion de arriba en todas sus páginas."""
+    ctx = navegador.new_context(**kw)
+    ctx.add_init_script(EXPONER_MODULOS % json.dumps(modulos_de_escritorio()))
+    return ctx
+
+
+def orden_de_arranque():
+    """La cadena de main.js («app.js → notas.js → …»): el orden en que se evalúan los módulos de escritorio, el de los
+    <script> de antes."""
+    with open(os.path.join(STATIC, "main.js"), encoding="utf-8") as f:
+        m = re.search(r"((?:[\w-]+\.js\s*→\s*)+[\w-]+\.js)", f.read())
+    return re.findall(r"[\w-]+\.js", m.group(1)) if m else []
+
+
+def importa(src, nombre, desde):
+    """¿El módulo (su texto) importa `nombre` de `desde` (p. ej. './directo.js')?"""
+    for m in re.finditer(r"^import\s+\{([^}]*)\}\s+from\s+'([^']+)';", src, re.M):
+        if m.group(2) == desde and nombre in [x.strip() for x in m.group(1).split(",")]:
+            return True
+    return False
+
+
+def js_sin_modulo(src):
+    """El código de un módulo de static/ sin sus import ni su export, para ejecutarlo con node como un script, con
+    dobles de lo que importa (las funciones puras se prueban así)."""
+    src = re.sub(r"^import\b[^;]*;[^\n]*\n", "", src, flags=re.M)
+    return re.sub(r"^export \{[^}]*\};\n?", "", src, flags=re.M)
+
+
 __all__ = ["server", "engines", "live", "TempTree", "patched_paths", "wav_bytes", "srt_text", "FakeJob",
-           "bare_jobs", "REPO", "APP", "PARTES_DEL_SERVIDOR", "codigo_del_servidor"]
+           "bare_jobs", "REPO", "APP", "PARTES_DEL_SERVIDOR", "codigo_del_servidor", "STATIC", "nuevo_contexto",
+           "js_sin_modulo", "modulos_de_escritorio", "orden_de_arranque", "importa"]

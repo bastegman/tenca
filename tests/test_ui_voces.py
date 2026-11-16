@@ -12,7 +12,7 @@ import time
 import unittest
 import urllib.request
 
-from support import REPO, srt_text, wav_bytes
+from support import REPO, srt_text, wav_bytes, nuevo_contexto
 from test_ui_smoke import PERMITIDAS, puerto_libre
 
 import voices  # noqa: E402
@@ -106,7 +106,7 @@ class VocesEnNavegadorTests(unittest.TestCase):
         return json.load(urllib.request.urlopen(req, timeout=10))
 
     def abrir(self, rel):
-        ctx = self.browser.new_context(bypass_csp=True)
+        ctx = nuevo_contexto(self.browser, bypass_csp=True)
         self.addCleanup(ctx.close)
         pg = ctx.new_page()
         errores, red = [], []
@@ -241,7 +241,7 @@ class VocesEnNavegadorTests(unittest.TestCase):
         cierra el globo de una etiqueta."""
         rel = self.nueva("R quien", {"h1": 8.0, "h2": 30.0, "h3": 12.0, "h4": 5.0},
                          md={"participantes": "Ana Prueba, Luis Prueba", "participantes_origen": "outlook"})
-        ctx = self.browser.new_context(bypass_csp=True, viewport={"width": 1280, "height": 800})
+        ctx = nuevo_contexto(self.browser, bypass_csp=True, viewport={"width": 1280, "height": 800})
         self.addCleanup(ctx.close)
         pg = ctx.new_page()
         errores, red, personas = [], [], []
@@ -313,7 +313,7 @@ class VocesEnNavegadorTests(unittest.TestCase):
 
     def bloque(self, rel, w=1280, h=800, antes=None):
         """El bloque «Quién habla» de `rel`, abierto como desde «Ponles nombre» en Hoy."""
-        ctx = self.browser.new_context(bypass_csp=True, viewport={"width": w, "height": h})
+        ctx = nuevo_contexto(self.browser, bypass_csp=True, viewport={"width": w, "height": h})
         self.addCleanup(ctx.close)
         pg = ctx.new_page()
         errores, red = [], []
@@ -420,7 +420,8 @@ class VocesEnNavegadorTests(unittest.TestCase):
         # con el servidor: su muestra (10,0-14,8, de los tramos), aunque la transcripción no haya llegado
         pg.click("#qhBloque .qh-fila[data-h='h2'] [data-qh-oir]")
         pg.wait_for_function("qhOyendo && qhOyendo.t === 10 && Math.abs(qhOyendo.fin - 14.8) < 1e-6", timeout=5000)
-        pg.evaluate("() => { audio.pause(); qhOyendo = null; }")
+        pg.evaluate("() => { audio.pause(); audio.currentTime = 0; }")  # un salto lejos: la app la olvida
+        pg.wait_for_function("qhOyendo === null", timeout=5000)
         # sin él (la muestra no contesta: un servidor de antes, o colgado), la transcripción, que aún no ha llegado
         pg.route("**/api/hablantes/muestra*", lambda route: route.abort())
         pg.click("#qhBloque .qh-fila[data-h='h2'] [data-qh-oir]")
@@ -450,7 +451,7 @@ class VocesEnNavegadorTests(unittest.TestCase):
 
     def pagina(self, rel, w, h, ctx=None):
         if ctx is None:
-            ctx = self.browser.new_context(bypass_csp=True, viewport={"width": w, "height": h})
+            ctx = nuevo_contexto(self.browser, bypass_csp=True, viewport={"width": w, "height": h})
             self.addCleanup(ctx.close)
         pg = ctx.new_page()
         errores = []
@@ -551,7 +552,7 @@ class VocesEnNavegadorTests(unittest.TestCase):
                    "resumen de prueba.\n\n## Decisiones\n- Una decisión\n")
         rel = self.nueva("R b5", {"h1": 10.0, "h2": 9.0}, md={"participantes": "Ana Prueba"}, resumen=resumen)
         for w, h in ((1500, 920), (900, 600)):
-            ctx = self.browser.new_context(bypass_csp=True, viewport={"width": w, "height": h})
+            ctx = nuevo_contexto(self.browser, bypass_csp=True, viewport={"width": w, "height": h})
             self.addCleanup(ctx.close)
             pg = ctx.new_page()
             errores = []

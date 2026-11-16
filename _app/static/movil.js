@@ -1,8 +1,9 @@
-'use strict';
 /* La página del móvil de «Subir audio › Desde el móvil» (movil.py la sirve por la wifi, solo mientras el código está
    abierto en el PC). Eliges grabaciones y van al PC una a una, con su progreso; cada una con el nombre y la fecha que
-   propone su archivo (nombres-audio.js), como al subirla desde el PC. Lo demás (carpeta, proyecto, idioma) lo eligió
-   el PC antes de enseñar el código. Sin dependencias y sin nada de fuera. */
+   propone su archivo (nombres-audio.js), como al subirla desde el PC. Lo demás (carpeta, proyecto, idioma) se elige
+   en el PC antes de enseñar el código. Sin dependencias y sin nada de fuera. */
+import { sbDesdeArchivo } from './nombres-audio.js';
+
 (function () {
   const $ = (s, el = document) => el.querySelector(s);
   const b = document.body, base = b.dataset.base, app = b.dataset.app || 'Tenca';
@@ -55,7 +56,7 @@
   function enviar(f, li) {
     return new Promise(listo => {
       if (caducado) { pintar(li, 'mal', 'No se ha enviado: el código ya no vale.'); return listo(); }
-      const d = typeof sbDesdeArchivo === 'function' ? sbDesdeArchivo(f) : { nombre: '', fecha: f.lastModified || Date.now() };
+      const d = sbDesdeArchivo(f);
       const q = new URLSearchParams({ archivo: f.name, nombre: d.nombre || '', fecha: String(d.fecha) });
       const x = new XMLHttpRequest();
       x.open('POST', `${base}subir?${q}`);

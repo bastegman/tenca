@@ -1,10 +1,16 @@
-/* Configurar la app (07/11/2026, propuesta de Steve sobre la queja de Bernardo, msg 1169: «Lo de config es un
-   desastre»). Aquí vive lo que dice dónde se procesan las reuniones, con las mismas palabras en todas partes:
+/* Configurar la app (07/11/2026: la configuración se entendía mal). Aquí vive lo que dice dónde se procesan las reuniones, con las mismas palabras en todas partes:
    - la línea del modo («Se transcribe en este PC (Normal) y al terminar la resume Claude con tu cuenta»), que usan el
      diálogo Grabar, la cabecera del directo, la Cola y el chip «EN VIVO»;
    - «Preparando la transcripción» con % mientras se descarga o se carga el modelo (antes: «Escuchando…» y «al día»);
    - el asistente de tres pasos y «Probar» (más abajo).
    Lo de arriba del marcador es puro (se prueba con node: tests/test_ux_configurar.py); lo de abajo toca el DOM. */
+// orden de arranque: este fichero se evalúa justo después de modelos.js (la cadena, en main.js)
+import { bindModelos, modelosHtml, motorDe } from './modelos.js';
+import {
+  $, allAudios, api, APP_NAME, ask, closeModal, copy, esc, I, isActive, openModal, openRec, openSettings, provName,
+  provOrden, refreshView, renderJobsPanel, S, setConfig, toast, updateLiveHero,
+} from './app.js';
+import { curAudio } from './notas.js';
 
 const MODELO_NOMBRE = { small: 'Rápido', medium: 'Normal', 'large-v3-turbo': 'Preciso', 'large-v3': 'Máxima' };
 const MODO_NOMBRE = { local: 'Solo en este PC', agente: 'Con tu cuenta de Claude', api: 'Con una API externa' };
@@ -69,8 +75,8 @@ function prepTexto(e, segs) {
 }
 
 /* Los modelos de Whisper que necesita «En este PC» o «Con tu cuenta de Claude»: el del directo y el de la cola, si son
-   locales; si no (la configuración de ahora es la API), los de siempre (Normal y Rápido). Decisión de Claudia
-   (07/11/2026): se descargan los dos juntos, con una sola barra, para que no haya una segunda descarga por sorpresa. */
+   locales; si no (la configuración de ahora es la API), los de siempre (Normal y Rápido). Desde el
+   07/11/2026 se descargan los dos juntos, con una sola barra, para que no haya una segunda descarga por sorpresa. */
 function cfgModelosNecesarios(cfg) {
   const c = cfg || S.config || {};
   const pick = (k, def) => { const p = S.presetsById?.[c[k]]; return p && p.engine === 'local' ? p.model : (S.presetsById?.[def]?.model || (def === 'medium' ? 'medium' : 'small')); };
@@ -126,7 +132,7 @@ function prepSegs(j) {
 function modoLineaHtml(presetId, opts = {}) {
   const p = S.presetsById?.[presetId] || {};
   const icon = p.engine === 'cloud' ? I.nube : I.monitor;
-  const tec = typeof motorDe === 'function' ? motorDe(S.presetsById?.[presetId], S.config)?.texto : '';  // «en este PC · Whisper medium»
+  const tec = motorDe(S.presetsById?.[presetId], S.config)?.texto;  // «en este PC · Whisper medium»
   return `<div class="modo-linea" data-modo-linea${tec ? ` title="${esc(tec)}"` : ''}>${icon}<span>${esc(modoLinea(presetId))}</span>`
     + `${opts.cambiar ? `<a href="#" data-act="${opts.cambiar}">${opts.abierto ? 'Ocultar' : 'Cambiar'}</a>` : ''}</div>`
     + (opts.falta ? faltaModeloHtml(presetId) : '');
@@ -182,11 +188,11 @@ function prepHueco(j) {
 
 /* llega el % de una descarga: se repinta lo que lo enseña (cabecera del directo, diálogo Grabar, Cola) */
 document.addEventListener('modelos', () => {
-  const au = typeof curAudio === 'function' ? curAudio() : null;
-  if (au && $('#lHero') && typeof updateLiveHero === 'function') updateLiveHero(au);
+  const au = curAudio();
+  if (au && $('#lHero')) updateLiveHero(au);
   const m = $('#modal .dialog');
   if (m && typeof m.pintaMotor === 'function') m.pintaMotor();
-  if (!$('#jobsPanel').classList.contains('hidden') && typeof renderJobsPanel === 'function') renderJobsPanel();
+  if (!$('#jobsPanel').classList.contains('hidden')) renderJobsPanel();
 });
 
 /* ================================================================ asistente «Configurar» de la app (3 pasos)
@@ -203,7 +209,7 @@ function abrirConfigurar(opts = {}) {
   if (!S.config) return toast('La app aún está arrancando: espera unos segundos y vuelve a probar.', 'err');
   const c = S.config.cloud || {};
   Object.assign(W, { paso: opts.paso || 1, modo: opts.modo || S.config.procesado || 'local', prueba: null, volver: opts.volver || null, empezar: !!opts.empezar,
-    // en una instalación nueva no hay proveedor elegido: ninguno se preselecciona (msg 1386)
+    // en una instalación nueva no hay proveedor elegido: ninguno se preselecciona
     cloud: { provider: c.elegido === false ? '' : c.provider || '', api_key: '', base_url: c.base_url || '', azure_endpoint: c.azure_endpoint || '',
       azure_deployment: c.azure_deployment || '', azure_api_version: c.azure_api_version || '' } });
   W.guardado = false;
@@ -266,7 +272,7 @@ function wzPaso2() {
       <p class="wz-lead">${esc(APP_NAME)} transcribe con ${dos ? 'dos modelos que se quedan' : 'un modelo que se queda'} en tu PC: ${dos ? 'uno para el directo y otro para transcribir después' : 'se descarga una sola vez'}. ${dos ? 'Se descargan una sola vez.' : ''}</p>
       ${wzDescargaHtml(false)}
       <p class="help">Puedes pasar al paso siguiente mientras se descarga.</p>
-      ${typeof modelosHtml === 'function' ? `<details class="wz-mas"><summary>Ver los modelos de este PC</summary>${modelosHtml()}</details>` : ''}`;
+      <details class="wz-mas"><summary>Ver los modelos de este PC</summary>${modelosHtml()}</details>`;
   }
   if (W.modo === 'agente') {
     const ag = S.config.agente || {};
@@ -363,7 +369,7 @@ function wzPintar() {
   $('.wz-body h2', d)?.focus();
   if (W.paso === 2 && W.modo !== 'api') {
     const pm = $('#procModelos', d);
-    if (pm) { pm.hidden = false; if (typeof bindModelos === 'function') bindModelos(d); }
+    if (pm) { pm.hidden = false; bindModelos(d); }
     modelosRefrescar(3000);
   }
   if (W.paso === 2 && W.modo === 'agente') wzMirarClaude();
@@ -566,12 +572,12 @@ document.addEventListener('modelos', () => {
   if (box) box.outerHTML = wzDescargaHtml(W.modo === 'agente');
 });
 
-/* Inicio: tras actualizar, una vez, si la configuración nunca se ha probado (decisión de Claudia, 07/11/2026) */
+/* Inicio: tras actualizar, una vez, si la configuración nunca se ha probado (07/11/2026) */
 function avisoProbarHtml() {
   if (!S.config || S.config.ultima_prueba?.ok || localStorage.getItem('avisoProbar')) return '';
   // tras actualizar, no en una instalación nueva (ahí está la tarjeta de bienvenida): ya se eligió o ya hay reuniones
   const nueva = S.config.procesado === 'local' && !localStorage.getItem('procElegido');
-  if (nueva || !(typeof allAudios === 'function' && allAudios().length || S.config.procesado !== 'local' || localStorage.getItem('procElegido'))) return '';
+  if (nueva || !(allAudios().length || S.config.procesado !== 'local' || localStorage.getItem('procElegido'))) return '';
   return `<div class="notice info aviso-probar" id="avisoProbar" style="margin:0 0 14px">${I.info}<span>${esc(APP_NAME)} puede probar ahora tu configuración de punta a punta: graba 3 s de tu voz, los transcribe y, si toca, los resume.</span>
     <button class="btn sm primary" type="button" data-act="cfg-probar">Probar ahora</button><button class="btn sm ghost" type="button" data-act="cfg-aviso-no">Ahora no</button></div>`;
 }
@@ -622,3 +628,9 @@ document.addEventListener('click', async e => {
     try { const r = await api('/api/diagnostico'); await copy(r.texto, 'Diagnóstico copiado: revísalo antes de pegarlo donde pidas ayuda'); } catch (err) { toast(esc(err.message), 'err'); }
   }
 });
+
+export {
+  abrirConfigurar, avisoProbarHtml, cfgAccionHtml, cfgDescargaTotal, cfgEstadoHtml, cfgModelosNecesarios,
+  faltaModeloHtml, modeloBajar, modeloNombre, modoLinea, modoLineaHtml, prepCola, prepEstado, prepHtml, prepHueco,
+  prepVigilar, W, wzAccion, wzCandidata, wzProv,
+};

@@ -1,9 +1,12 @@
-/* Dónde se transcribe, a la vista (07/11/2026). Bernardo eligió «Con tu cuenta de Claude» y no transcribía, al grabar
-   «parecía que seguía usando Groq» y veía «Descargando modelo medium» sin más (msgs 1169-1170). Aquí:
+/* Dónde se transcribe, a la vista (07/11/2026). Con «Con tu cuenta de Claude» elegido no se transcribía, al grabar
+   parecía que seguía usando Groq y solo se veía «Descargando modelo medium». Aquí:
    - el motor de cada transcripción con su sitio: «en este PC · Whisper medium» o «en la nube · Groq»;
    - en Ajustes, los modelos de Whisper de este PC con su descarga (MB y %, o el error con lo que hacer);
    - con «Solo en este PC» y «Con tu cuenta de Claude» transcribe Whisper en el PC; Claude solo resume.
    Sobre /api/modelos y /api/config. Sin dependencias: su CSS va aquí para no tocar app.css. */
+// orden de arranque: este fichero se evalúa justo después de perfil.js (la cadena, en main.js)
+import './perfil.js';
+import { $, api, esc, I, S, toast } from './app.js';
 
 (function modelosCss() {
   const css = `
@@ -122,3 +125,5 @@ function bindModelos(d) {
   });
   poll();
 }
+
+export { bindModelos, modelosHtml, motorDe, motorHtml };

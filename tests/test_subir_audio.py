@@ -28,7 +28,7 @@ import urllib.parse
 import urllib.request
 import wave
 
-from support import REPO, engines, patched_paths, server
+from support import REPO, engines, patched_paths, server, nuevo_contexto
 
 import plan as grabar_plan
 
@@ -728,7 +728,7 @@ class SubirEnLaInterfazTests(unittest.TestCase):
             cls.s.cerrar()
 
     def pagina(self, ancho=1400):
-        ctx = self.browser.new_context(bypass_csp=True, viewport={"width": ancho, "height": 900})
+        ctx = nuevo_contexto(self.browser, bypass_csp=True, viewport={"width": ancho, "height": 900})
         self.addCleanup(ctx.close)
         pg = ctx.new_page()
         self.errores = []

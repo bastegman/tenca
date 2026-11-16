@@ -12,7 +12,7 @@ import types
 import unittest
 from unittest import mock
 
-from support import APP, REPO, bare_jobs, engines, server  # noqa: F401  (support prepara sys.path)
+from support import APP, REPO, bare_jobs, engines, js_sin_modulo, server  # noqa: F401  (prepara sys.path)
 from test_perfil import settings_store  # noqa: E402  (ayudante, no tests)
 
 import explicar  # noqa: E402
@@ -196,7 +196,7 @@ class ConfigurarJsTests(unittest.TestCase):
         with open(os.path.join(APP, "static", "configurar.js"), encoding="utf-8") as f:
             src = f.read()
         # solo la parte pura: hasta el marcador (lo de debajo toca el DOM)
-        src = src.split("/* ---8<--- DOM")[0]
+        src = js_sin_modulo(src.split("/* ---8<--- DOM")[0])  # (sin sus import: los dobles de abajo)
         code = ("const S = { config: null, presetsById: {}, modelos: {} };\n"
                 "const esc = s => String(s ?? '');\n" + src + "\n" + body)
         r = subprocess.run([NODE, "-e", code], capture_output=True, text=True, encoding="utf-8", timeout=30)

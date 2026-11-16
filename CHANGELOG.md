@@ -10,6 +10,23 @@ nada de ningún proyecto concreto.
 empresa. Entre paréntesis va el número de cada hallazgo, el mismo que citan los commits; el informe de la auditoría no
 está en este repositorio. «Desarrollo y CI» es para quien mantiene el repositorio: no cambia nada en la app instalada.
 
+### La interfaz, en módulos (16/11/2026)
+
+Rama `frontend-modulos` (punto 52 de la revisión del 14/11/2026 y la parte de `_app/static/` del 50). No cambia nada de
+lo que se ve: es para quien mantiene el repositorio.
+
+- Los 16 `<script>` de `index.html` son ahora uno, `<script type="module" src="/main.js">`. Cada fichero de
+  `_app/static/` importa lo que usa de los demás y exporta lo que usan ellos. Fuera las guardas
+  `typeof x === 'function'` y `window.x?.()`: si faltaba un fichero, la interfaz quedaba a medias sin ningún error.
+- El orden de arranque de siempre es una cadena escrita en `main.js`: cada fichero importa primero el anterior. En
+  `window` solo queda `onWindowClosing`, que la ventana propia llama por su nombre. La página del móvil también carga
+  `movil.js` como módulo.
+- Los comentarios de `_app/static/` ya no llevan notas de trabajo (referencias a mensajes y a personas).
+- Tests: `test_modulos.py` (un solo punto de entrada, la cadena, lo de otro fichero por import, nada más en `window` y
+  sin notas internas), dos de `test_ui_smoke` con la página tal cual (en Chromium y, en Windows, en Edge: el orden de
+  arranque, el tipo de los `.js` y `window`) y `test_modulos_webview2.py` en la ventana de verdad (windows-real). Los
+  tests de navegador ven lo que exportan los módulos con `support.nuevo_contexto`.
+
 ### El audio de cada reunión, «Mis pendientes» en Hoy y «Quién habla» mientras se graba (16/11/2026)
 
 Rama `motor-lote2b` (puntos 17, 28 y 56 de la revisión del 14/11/2026).

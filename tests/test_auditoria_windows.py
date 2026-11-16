@@ -772,6 +772,7 @@ const $ = () => null, $$ = sel => (dom && sel === '#txBody .s[data-i]' ? dom : [
 const esc = s => String(s), fullTitle = a => a.title, renderTxSection = () => { };
 const toast = (html, kind, fn) => out.toasts.push({ html, kind: kind || '', fn });
 const ask = async () => true, loadTranscript = a => out.loads.push(a.path);  // «Restaurar original»: se acepta
+const aprCargar = () => { };  // aprender.js (antes iba con typeof y aquí no existía)
 async function api(path, body) {
   const sg = body.segments || [];
   const call = { path, n: sg.length, first: sg[0] && sg[0].text, t0: Date.now() };

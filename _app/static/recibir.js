@@ -1,10 +1,12 @@
-'use strict';
-/* «Subir audio › Desde el móvil» en el PC (09/11/2026; la lámina que validó Bernardo, msg 1390). «Subir audio» abre un
+/* «Subir audio › Desde el móvil» en el PC (09/11/2026). «Subir audio» abre un
    menú con «Desde este PC» y «Desde el móvil». Con el móvil, la tarjeta de subir (grabar.js) sin archivos: eliges
    carpeta, proyecto e idioma y «Mostrar el código» enseña un QR. El móvil lo escanea, abre una página de Tenca por la
    wifi (movil.py) y manda las grabaciones, que entran como las subidas desde el PC y se transcriben. El código vale
    10 minutos, para un solo móvil, y solo en una red que Windows tiene como privada. Al cerrar la tarjeta, deja de
    valer. */
+// orden de arranque: este fichero se evalúa justo después de grabar.js (la cadena, en main.js)
+import { abrirSubir, elegirAudios, G, grMontar, grPedir, grSoltar, sbTam, voc0 } from './grabar.js';
+import { $, $$, api, APP_NAME, closeModal, esc, I, nfc, openModal, pollJobs, refreshTree, S, toast } from './app.js';
 
 const MV_I = {
   movil: '<svg viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg>',
@@ -79,7 +81,7 @@ function abrirMovilCard(g) {
   // cerrarla (Listo, Esc, un clic fuera): el código deja de valer; lo que esté llegando termina y se guarda
   S.modalCleanup = () => {
     const sub = g.subir;
-    if (G === g) G = null;
+    grSoltar(g);
     clearTimeout(sub.sondeo);
     sub.cerrada = true;
     if (!sub.sesion) return;
@@ -279,3 +281,5 @@ document.addEventListener('click', async e => {
     return mvMostrar();
   }
 });
+
+export { abrirMovilCard, cerrarSubirMenu, mvMontar, mvMostrar, subirMenu };
