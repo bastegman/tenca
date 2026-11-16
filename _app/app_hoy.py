@@ -1,14 +1,17 @@
 # -*- coding: utf-8 -*-
 """App, la parte de la reunion en curso y la agenda: la llamada que empieza o acaba (Teams, Outlook), la siguiente
-reunion, la pantalla Hoy y sus reuniones preparadas.
+reunion, la pantalla Hoy y sus reuniones preparadas, y «Mis pendientes» (punto 28: las tareas sin hacer de todas las
+reuniones, con pendientes.py).
 
 Salio tal cual de server.py al partirlo (15/11/2026): App hereda de esta clase y server.py la reexporta."""
+import os
 import time
 from datetime import datetime, timedelta
 
 import calendario
 import directo_avisos
 import engines
+import pendientes
 import plan as grabar_plan
 from api import PORT
 from app_grabar import teams_estado
@@ -16,7 +19,7 @@ from biblioteca import IDIOMA_RE
 from common import APP_NAME, ApiError, log, log_exc, read_text
 from listas import find_vocab, list_vocab, read_vocab
 from recording import cue, mic_meeting_app, notify
-from rutas import APP_DIR, rel_of
+from rutas import APP_DIR, AUDIO_EXT, alias_of, rel_of, safe
 
 
 class Hoy:
@@ -357,6 +360,110 @@ class Hoy:
                 tareas = None
         return {"path": best["path"], "fecha": best["date"], "fecha_txt": grabar_plan.fecha_corta(best["date"]),
                 "resumen": bool(best.get("_sum")), "tareas": tareas}
+
+    # --- «Mis pendientes» (review del 14/11/2026, punto 28): las tareas sin hacer de todas las reuniones
+    def _nombre_usuario(self):
+        """El nombre de la persona «Soy yo» de las voces (si están activas), para saber qué tareas son tuyas; si no se
+        puede saber, None (quedan las de «Yo» y «Tú»)."""
+        try:
+            jobs = getattr(self, "jobs", None)
+            if jobs is None or not jobs.voices_on():
+                return None
+            return (jobs.voices.user() or {}).get("nombre") or None
+        except Exception:
+            log_exc()
+            return None
+
+    def pendientes_lista(self, q):
+        """GET /api/pendientes: las tareas abiertas («- [ ] …») de los resúmenes de todas las reuniones, de la más
+        reciente a la más antigua (y en su orden dentro de cada una): {tareas: [{path, titulo, fecha, fecha_txt, i,
+        texto, responsable, tarea, segundo, tuya, sin_audio}], total, tuyas}. Sin la que se está grabando ni los
+        resúmenes que OneDrive tiene «solo en línea» (pendientes.Cache no los abre). `i` y `texto` son lo que pide
+        POST /api/pendientes/hecha."""
+        grabando = rel_of(self.rec.path) if getattr(self, "rec", None) and self.rec.alive() and self.rec.path else None
+        yo = self._nombre_usuario()
+        lib = getattr(self, "library", None)
+        if hasattr(lib, "refresh"):
+            lib.refresh(max_age=5)
+        out, vivos = [], set()
+        for a in list(getattr(lib, "flat", None) or []):
+            p = a.get("_sum")
+            if not p or a.get("recording") or a.get("path") == grabando:
+                continue
+            vivos.add(p)
+            tareas = pendientes.CACHE.tareas(p)
+            if not tareas:
+                continue
+            fecha = a.get("date") or ""
+            if not fecha and a.get("mtime"):
+                fecha = datetime.fromtimestamp(a["mtime"]).isoformat(timespec="seconds")
+            titulo = (a.get("props") or {}).get("titulo") or a.get("label") or ""
+            for t in tareas:
+                if t["hecha"]:
+                    continue
+                out.append({"path": a["path"], "titulo": titulo, "fecha": fecha,
+                            "fecha_txt": grabar_plan.fecha_corta(fecha), "i": t["i"], "texto": t["texto"],
+                            "responsable": t["responsable"], "tarea": t["tarea"], "segundo": t["segundo"],
+                            "tuya": pendientes.es_tuya(t["responsable"], yo), "sin_audio": bool(a.get("sin_audio"))})
+        pendientes.CACHE.podar(vivos)
+        out.sort(key=lambda x: x["fecha"], reverse=True)  # estable: cada reunión, en el orden de su resumen
+        return {"tareas": out, "total": len(out), "tuyas": sum(1 for x in out if x["tuya"])}
+
+    PENDIENTE_MOVER_S = 5  # segundos que «marcar» espera a que acabe de moverse una reunión
+
+    def _resumen_de(self, rel):
+        """(ruta interna, .resumen.md) de la reunión `rel`, con su ruta nueva si se movió en esta sesión. El de la
+        biblioteca si la reunión está en ella (también la que ya no tiene audio, con otra ruta); si no, el que va junto
+        a su audio, y solo para una ruta de audio (no «.», una carpeta ni otro fichero: revisión 1)."""
+        abs_path = safe(alias_of(rel))
+        rel = rel_of(abs_path)
+        a = next((x for x in list(getattr(getattr(self, "library", None), "flat", None) or [])
+                  if x.get("path") == rel and x.get("_sum")), None)
+        if a:
+            return rel, a["_sum"]
+        if not rel or os.path.splitext(abs_path)[1].lower() not in AUDIO_EXT:
+            raise ApiError("Solo se marcan las tareas del resumen de una reunión.")
+        return rel, os.path.splitext(abs_path)[0] + ".resumen.md"
+
+    def pendiente_hecha(self, b):
+        """POST /api/pendientes/hecha {path, i, texto, hecha}: la tarea hecha (o sin hacer) en el .resumen.md de esa
+        reunión, que es lo que manda (pendientes.marcar_fichero: en la línea i si su texto sigue siendo ese, o donde
+        esté ahora; si ya no está, un error que lo dice; solo cambia el carácter de la casilla). Los destinos de salida,
+        que llevan el resumen, se reescriben.
+        Candados: primero el de los resúmenes (pendientes.LOCK: mientras se escribe uno regenerado, el clic espera sin
+        coger el de mover, que frenaría mover, borrar o el directo) y, dentro, el de mover (no escribir en la ruta
+        vieja de una reunión que se está moviendo). Nadie coge los dos al revés: _run_summary solo coge el primero."""
+        rel, i, texto, hecha = b.get("path"), b.get("i"), b.get("texto"), b.get("hecha")
+        if (not isinstance(rel, str) or not rel or type(i) is not int or not isinstance(texto, str)
+                or not texto.strip() or not isinstance(hecha, bool)):
+            raise ApiError("Petición no válida: faltan path, i, texto o hecha.")
+        with pendientes.LOCK:
+            # el de mover, con tope: un movimiento largo (una copia a otra unidad) no deja parada aquí, con LOCK cogido,
+            # la escritura de los resúmenes de las demás reuniones (revisión 2)
+            mover = self._move_lock()
+            if not mover.acquire(timeout=self.PENDIENTE_MOVER_S):
+                raise ApiError("Se están moviendo reuniones: vuelve a marcarla en un momento.", 409)
+            try:
+                rel, p = self._resumen_de(rel)
+                if not os.path.isfile(p):
+                    raise ApiError("Esa reunión ya no tiene resumen.", 404)
+                try:
+                    linea, cambiado = pendientes.marcar_fichero(p, i, texto, hecha)
+                except (pendientes.NoEsta, pendientes.NoSeToca) as e:
+                    raise ApiError(str(e), 409)
+            finally:
+                mover.release()
+        pendientes.CACHE.olvidar(p)
+        if cambiado:
+            log(f"   pendientes: tarea {'hecha' if hecha else 'sin hacer'} en {os.path.basename(rel)}")
+            lib = getattr(self, "library", None)
+            if lib is not None:
+                lib.at = 0
+            try:
+                self.jobs.schedule_outputs(rel)  # el documento de los destinos de salida lleva el resumen
+            except Exception:
+                log_exc()
+        return {"ok": True, "path": rel, "i": linea, "hecha": hecha, "cambiado": cambiado}
 
     PREPARADA_ANTES, PREPARADA_DESPUES = 10, 5  # minutos: lo preparado vale de 10 min antes a 5 min después
 

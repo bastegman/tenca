@@ -40,6 +40,7 @@ on:
       - "_app/rutas.py"
       - "_app/trabajos.py"
       - "_app/voces_directo.py"
+      - "_app/pendientes.py"
       - "scripts/e2e/claude_windows.py"
       - ".github/workflows/claude-windows.yml"
 

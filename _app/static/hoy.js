@@ -7,6 +7,9 @@
      quedó abierto la última vez.
    - «Para revisar»: las reuniones de los últimos 30 días que piden algo (error, sin transcribir, voces sin nombre,
      sin proyecto), cada una con su botón. «Esta semana», por día.
+   - «Mis pendientes» (review del 14/11/2026, punto 28): las tareas sin hacer de los resúmenes de todas las reuniones
+     (/api/pendientes), primero las tuyas, con su casilla (marca la línea del .resumen.md, con «Deshacer» un momento),
+     la reunión y el minuto.
    - La agenda de Outlook del próximo mes (msg 1390: «un mes al menos»), que el servidor lee en segundo plano y guarda
      en memoria: Hoy no espera a Outlook. Sin Outlook, la pantalla es la misma sin agenda, con una línea que dice por qué.
    - Sin reuniones: «Graba tu primera reunión», con las tres formas de grabar y la de subir un audio.
@@ -31,6 +34,12 @@ const HOY_MESES_L = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'jul
 // lo que se ha pedido al servidor y lo que has cambiado en la tarjeta de ahora (pedido: {vocab?, cambios: {idioma?}})
 const HOY = { datos: null, at: 0, cargando: null, pedido: null, plan: null, seq: 0, pendiente: null, todo: false,
   leyendo: 0, error: null };
+// «Mis pendientes»: lo último de /api/pendientes; filtro ('tuyas'/'todas', null = tuyas si hay alguna); hechas: las que
+// se acaban de marcar (clave -> temporizador), que siguen a la vista con «Deshacer»; enviando: las que van al servidor
+const HOY_PEND_MAX = 12;
+const HOY_PEND_DESHACER_MS = 6000;
+const PEND = { datos: null, at: 0, cargando: null, filtro: null, todo: false, hechas: new Map(), enviando: new Set(),
+  error: null, seq: 0 };
 
 /* ---------------------------------------------------------------- fechas */
 const hoyIniDia = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -200,7 +209,10 @@ function hoyPintarVivo(forzar) {
   if (ag) hoyRepintar(ag, hoyAgendaHtml());
 }
 setInterval(() => {
-  if (S.route?.kind === 'home' && !document.hidden && !S.off && $('#modal')?.classList.contains('hidden')) hoyCargar();
+  if (S.route?.kind === 'home' && !document.hidden && !S.off && $('#modal')?.classList.contains('hidden')) {
+    hoyCargar();
+    if (Date.now() - PEND.at > HOY_CADA_MS) hoyPendCargar();
+  }
 }, HOY_CADA_MS);
 
 /* ---------------------------------------------------------------- la reunión de ahora */
@@ -416,6 +428,97 @@ function hoyVacioHtml() {
     <div class="hv-subir">${I.upload}<span>o arrastra aquí un audio que ya tengas, o <a href="#" data-act="hoy-subir">súbelo</a></span></div></section>`;
 }
 
+/* ---------------------------------------------------------------- Mis pendientes (punto 28) */
+/* Las tareas abiertas de los resúmenes («- [ ] Responsable: tarea — fecha [mm:ss]»), de la reunión más reciente a la
+   más antigua. Lo que manda es el .resumen.md: marcar una cambia su línea a «- [x]» (POST /api/pendientes/hecha), y
+   «La última vez» y la vista del resumen cuentan lo mismo. Mientras queda alguna recién marcada (con «Deshacer») no se
+   relee: la lista nueva ya no la traería y se iría sin dar tiempo a deshacerla. */
+/* _k: quién es la tarea (para no perder una recién marcada al releer); _id: un número para la fila en la página (en
+   data-k y data-hoy: la casilla y su «Deshacer» comparten data-hoy, así el foco pasa de una a otro al repintar) */
+const hoyPendClave = t => `${t.path}\u0001${t.i}\u0001${t.texto}`;
+function hoyPendCargar(forzar) {
+  if (PEND.cargando || (!forzar && PEND.hechas.size)) return PEND.cargando;
+  PEND.at = Date.now();
+  PEND.cargando = api('/api/pendientes').then(d => {
+    const nuevas = d.tareas || [], viejas = PEND.datos?.tareas || [];
+    nuevas.forEach(t => { t._k = hoyPendClave(t); t._id = ++PEND.seq; });
+    // las recién marcadas siguen en su sitio hasta que venza su «Deshacer»: tras la que iba delante (al final, una
+    // segunda marcada se salía de las 12 primeras y perdía su «Deshacer»; revisión 1)
+    viejas.forEach((t, n) => {
+      if (!PEND.hechas.has(t._k) || nuevas.some(x => x._k === t._k)) return;
+      let pos = -1;
+      for (let m = n - 1; m >= 0 && pos < 0; m--) pos = nuevas.findIndex(x => x._k === viejas[m]._k);
+      nuevas.splice(pos + 1, 0, t);
+    });
+    d.tareas = nuevas;
+    PEND.datos = d; PEND.error = null;
+  }).catch(err => { PEND.error = err.message; }).finally(() => { PEND.cargando = null; hoyPendPintar(); });
+  return PEND.cargando;
+}
+function hoyPendPintar() {
+  const el = S.route?.kind === 'home' && $('#hoyPend');
+  if (el) hoyRepintar(el, hoyPendHtml());
+}
+function hoyPendFilaHtml(t) {
+  const a = S.audios.get(t.path), titulo = a ? hoyTitulo(a) : (t.titulo || 'Reunión');
+  const k = t._id, cuando = [titulo, t.fecha_txt].filter(Boolean).join(' · ');
+  if (PEND.hechas.has(t._k)) {
+    return `<div class="mp-fila hecha" data-k="${k}"><span class="mp-box on" aria-hidden="true">${I.check}</span>
+      <div class="mp-t"><div class="mp-n">${t.responsable ? `${esc(t.responsable)}: ` : ''}${esc(t.tarea)}</div><div class="mp-sub">Hecha · se ha marcado en el resumen</div></div>
+      <button class="btn sm ghost" type="button" data-act="hoy-pend-deshacer" data-k="${k}" data-hoy="pend-${k}">Deshacer</button></div>`;
+  }
+  const minuto = t.segundo != null && !t.sin_audio
+    ? ` · <a href="#" class="mp-min" data-act="hoy-pend-min" data-k="${k}" title="Abre la reunión en ese minuto">[${fmtClock(t.segundo)}]</a>` : '';
+  return `<div class="mp-fila${t.tuya ? ' tuya' : ''}" data-k="${k}">
+    <button class="mp-box" type="button" data-act="hoy-pend-hecha" data-k="${k}" data-hoy="pend-${k}" title="Marcar como hecha" aria-label="Marcar como hecha: ${esc(t.tarea)}"></button>
+    <div class="mp-t"><div class="mp-n">${t.responsable ? `<b>${esc(t.responsable)}</b>: ` : ''}${esc(t.tarea)}</div>
+      <div class="mp-sub"><a href="#" data-act="hoy-pend-ir" data-k="${k}" title="Abre el resumen de la reunión">${esc(cuando)}</a>${minuto}</div></div></div>`;
+}
+function hoyPendHtml() {
+  const d = PEND.datos;
+  if (!d) return PEND.error ? `<div class="mp-nada">Mis pendientes: ${esc(PEND.error)}</div>` : '';
+  const todas = d.tareas || [], abiertas = todas.filter(t => !PEND.hechas.has(t._k));
+  if (!todas.length) return `<div class="mp-nada">${I.check}<span>Mis pendientes: ninguna tarea abierta en los resúmenes de tus reuniones</span></div>`;
+  // «Tuyas» si hay alguna (también recién marcada, con su «Deshacer»); si no, todas y sin los dos botones
+  const tuyas = abiertas.filter(t => t.tuya).length, hayTuyas = todas.some(t => t.tuya);
+  const filtro = hayTuyas ? (PEND.filtro || 'tuyas') : 'todas';
+  const lista = filtro === 'tuyas' ? todas.filter(t => t.tuya) : todas;
+  const vista = PEND.todo ? lista : lista.slice(0, HOY_PEND_MAX);
+  const fil = hayTuyas ? `<div class="mp-filtro" role="group" aria-label="Qué tareas">
+      <button type="button" class="btn sm${filtro === 'tuyas' ? ' on' : ' ghost'}" data-act="hoy-pend-filtro" data-f="tuyas" aria-pressed="${filtro === 'tuyas'}">Tuyas (${tuyas})</button>
+      <button type="button" class="btn sm${filtro === 'todas' ? ' on' : ' ghost'}" data-act="hoy-pend-filtro" data-f="todas" aria-pressed="${filtro === 'todas'}">Todas (${abiertas.length})</button></div>` : '';
+  const filas = vista.map(hoyPendFilaHtml).join('');
+  const mas = lista.length - vista.length;
+  return `<section class="hoy-pendientes"><div class="mp-h"><h2>Mis pendientes <span class="count">${abiertas.length}</span></h2>${fil}</div>
+    <div class="card hr-lista mp-lista">${filas}</div>
+    ${mas > 0 ? `<button class="btn ghost sm mp-mas" type="button" data-act="hoy-pend-todas">Ver todas (${lista.length})</button>` : ''}</section>`;
+}
+const hoyPendDe = k => (PEND.datos?.tareas || []).find(t => String(t._id) === k);
+async function hoyPendMarcar(t, hecha) {
+  if (!t || PEND.enviando.has(t._k)) return;
+  PEND.enviando.add(t._k);
+  try {
+    const r = await api('/api/pendientes/hecha', { path: t.path, i: t.i, texto: t.texto, hecha });
+    clearTimeout(PEND.hechas.get(t._k));
+    PEND.hechas.delete(t._k);
+    t.i = r.i ?? t.i;  // donde estaba de verdad (si el resumen se había editado); _k no cambia: es la de esta fila
+    if (hecha) {
+      PEND.hechas.set(t._k, setTimeout(() => {
+        PEND.hechas.delete(t._k);
+        if (PEND.datos) PEND.datos.tareas = PEND.datos.tareas.filter(x => x !== t);
+        hoyPendPintar();
+        hoyPendCargar(true);
+      }, HOY_PEND_DESHACER_MS));
+    }
+    if (S.sum && S.sum.path === t.path) S.sum = null;  // la vista del resumen lo vuelve a leer
+    if (HOY.datos?.ultima?.path === t.path) hoyCargar(false, true);  // «La última vez: N tareas abiertas», al momento
+    hoyPendPintar();
+  } catch (err) {
+    toast(esc(err.message), 'err');
+    hoyPendCargar(true);
+  } finally { PEND.enviando.delete(t._k); }
+}
+
 /* ---------------------------------------------------------------- la agenda de Outlook */
 function hoyAgendaHtml() {
   const d = HOY.datos, g = d?.agenda;
@@ -462,6 +565,7 @@ function hoyCalDia(key) {
 function viewHoy() {
   const all = allAudios(), now = new Date();
   if (!HOY.abierta) { HOY.abierta = true; hoyCargar(false, true, true); } else if (!HOY.datos || hoyViejo()) hoyCargar();
+  if (all.length && (!PEND.datos || Date.now() - PEND.at > HOY_CADA_MS)) hoyPendCargar();
   hoyMigrarSinProy(all);
   const revisar = all.length ? hoyRevisar(all, now) : [];
   const fuera = new Set(revisar.slice(0, HOY_REVISAR_MAX).map(r => r.a.path));
@@ -476,6 +580,7 @@ function viewHoy() {
       <div class="hoy-ahora-box" id="hoyAhora">${hoyAhoraHtml()}</div>
       <section class="hoy-agenda" id="hoyAgenda">${hoyAgendaHtml()}</section>
       <div class="hoy-rev">${all.length ? hoyRevisarHtml(revisar, now) : hoyVacioHtml()}</div>
+      <div class="hoy-pend" id="hoyPend">${all.length ? hoyPendHtml() : ''}</div>
       <div class="hoy-sem">${all.length ? hoySemanaHtml(hoySemana(all, now, fuera)) : ''}</div>
     </div></div>`;
   renderSiguiente();  // «Ya ha empezado «X»» encima de la tarjeta, sin esperar al siguiente sondeo
@@ -590,6 +695,15 @@ main.addEventListener('click', e => {
   else if (act === 'hoy-preparar') {
     const c = (HOY.datos?.agenda?.citas || []).find(x => x.start === b.dataset.inicio && x.subject === b.dataset.asunto);
     if (c) hoyPreparar(c);
+  }
+  else if (act === 'hoy-pend-hecha' || act === 'hoy-pend-deshacer') hoyPendMarcar(hoyPendDe(b.dataset.k), act === 'hoy-pend-hecha');
+  else if (act === 'hoy-pend-filtro') { PEND.filtro = b.dataset.f; PEND.todo = false; hoyPendPintar(); }
+  else if (act === 'hoy-pend-todas') { PEND.todo = true; hoyPendPintar(); }
+  else if (act === 'hoy-pend-ir' || act === 'hoy-pend-min') {
+    const t = hoyPendDe(b.dataset.k);
+    if (!t) return;
+    if (act === 'hoy-pend-min') { S.tab = 'tx'; go('a', t.path, { t: String(t.segundo) }); }  // al minuto, en la transcripción
+    else { S.tab = 'sum'; go('a', t.path); }
   }
 }, true);
 main.addEventListener('change', e => { if (e.target.dataset?.hoy) hoyCambio(e.target); });

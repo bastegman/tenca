@@ -159,7 +159,9 @@ SERVER, WINDOW = None, None  # los pone main(): el servidor HTTP y la ventana pr
 PARTES = ("ajustes", "apagado", "api", "app_ajustes", "app_carpetas", "app_conservar", "app_directo",
           "app_grabar", "app_hoy", "app_listas", "app_reuniones", "app_textos", "app_voces",
           "aprendido", "biblioteca", "carpetas", "conservar", "diagnostico", "inicio_windows", "instancia",
-          "listas", "paquete", "rutas", "trabajos", "voces_directo")
+          "listas", "paquete", "rutas", "trabajos", "voces_directo",
+          # nuevo, no salió de server.py: «Mis pendientes» (punto 28 del review, 15/11/2026)
+          "pendientes")
 COMPARTIDAS = ("PORT", "URL", "DATA_DIR", "SERVER", "WINDOW", "COMPLETE")  # COMPLETE: lo crea App()
 
 

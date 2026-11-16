@@ -10,9 +10,15 @@ nada de ningún proyecto concreto.
 empresa. Entre paréntesis va el número de cada hallazgo, el mismo que citan los commits; el informe de la auditoría no
 está en este repositorio. «Desarrollo y CI» es para quien mantiene el repositorio: no cambia nada en la app instalada.
 
-### El audio de cada reunión: guardarlo, 15 días o borrarlo al terminar; y «Quién habla» mientras se graba (16/11/2026)
+### El audio de cada reunión, «Mis pendientes» en Hoy y «Quién habla» mientras se graba (16/11/2026)
 
-Rama `motor-lote2b` (puntos 17 y 56 de la revisión del 14/11/2026).
+Rama `motor-lote2b` (puntos 17, 28 y 56 de la revisión del 14/11/2026).
+
+- **«Mis pendientes» en Hoy:** las tareas sin hacer de los resúmenes de todas las reuniones («Próximos pasos»), primero
+  las tuyas («Yo», «Tú» o tu persona de «Soy yo»), con la reunión y el minuto. La casilla la marca como hecha en el
+  propio resumen (`- [x]`), con «Deshacer»; también se marcan desde la vista del resumen. Al regenerar un resumen, lo
+  hecho sigue hecho (las mismas tareas salen marcadas y las que ya no trae se añaden como hechas). Sin llamadas nuevas
+  a la IA y sin abrir los resúmenes que OneDrive tiene solo en línea.
 
 - **Qué pasa con el audio, por reunión** (no es un ajuste fijo): «Guardar» (como siempre), «Guardar 15 días» o «Borrar
   al terminar». Se elige en la tarjeta de grabar («El audio» › «Cambiar», también al subir un audio) y se cambia en la
