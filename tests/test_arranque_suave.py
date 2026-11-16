@@ -4,8 +4,9 @@ version anterior, «Windows PowerShell is not responding» y el portatil «no re
 
 - carga.py: lo ocupado que va el PC (CPU de todo el PC y memoria libre; solo se mide en Windows).
 - Rehacer las huellas de voz: cada huella en un proceso en reposo y con 1 hilo, una a una y con pausa; al arrancar,
-  tras un rato y con el PC tranquilo un tiempo seguido; si el PC va justo, espera (con la CPU, como mucho 20 min; con
-  poca memoria, lo que haga falta) y, si se acaba la memoria mientras calcula, se corta.
+  tras un rato y con el PC tranquilo un tiempo seguido; si el PC va justo, espera (con la CPU, como mucho 20 min
+  sumados; con poca memoria, 1 GB, 0,8 GB tras 10 min y, tras 1 h sin ni eso, se deja para el proximo arranque) y, si
+  se acaba la memoria mientras calcula, se corta.
 - La precarga del modelo de Whisper no se hace con poca memoria libre.
 - La precarga de las transcripciones no abre las «solo en linea» de OneDrive.
 - El diagnostico dice la memoria del PC; las lineas nuevas del log tienen plantilla.
@@ -134,35 +135,91 @@ class RehacerSuaveTests(RehacerBase):
         with mock.patch.object(carga, "poca_memoria", lambda *a: next(lecturas)):
             self.assertEqual([corta() for _ in range(6)], [False] * 6)
 
+    def con_memoria(self, base_gb, limite_s=10 * 3600):
+        """rehacer_huellas con el reloj falso y carga.ocupado/poca_memoria de verdad sobre una memoria libre fija de
+        base_gb, de la que cada proceso de huella vivo resta ~0,26 GB (lo medido). El speaker_vector falso consulta
+        cancel() como _voices_subprocess (cada 0,25 s: aqui, 8 veces) y se corta si dice que si. Devuelve (res,
+        lanzados, cortados, lineas del log, segundos de reloj)."""
+        reloj, vivos, lanzados, cortados = [0.0], [0], [], []
+
+        def dormir(seg):
+            reloj[0] += seg
+            if reloj[0] > limite_s:
+                raise AssertionError("la espera no acaba")
+
+        def memoria():
+            return 8 * carga.GB, int((base_gb - 0.26 * vivos[0]) * carga.GB)
+
+        def sv(rel, h, cancel=None, **kw):
+            lanzados.append(rel)
+            vivos[0] += 1
+            try:
+                for _ in range(8):
+                    if cancel and cancel():
+                        cortados.append(rel)
+                        raise app_voces.engines.Cancelled()
+                return self.speaker_vector(rel, h)
+            finally:
+                vivos[0] -= 1
+        self.app.jobs.speaker_vector = sv
+        ocupado, poca = self._carga[0], self._carga[1]  # los de verdad (TempTree los cambia por neutros)
+        with mock.patch.object(carga, "ocupado", ocupado), mock.patch.object(carga, "poca_memoria", poca), \
+                mock.patch.object(carga, "memoria", memoria), mock.patch.object(carga, "cpu", lambda *a, **k: None), \
+                mock.patch.object(app_voces, "_ahora", lambda: reloj[0]), \
+                mock.patch.object(app_voces, "_dormir", dormir), \
+                mock.patch.object(app_voces, "REHACER_PASO_S", 15.0), mock.patch.object(app_voces, "log") as log:
+            res = self.app.rehacer_huellas()
+        return res, lanzados, cortados, [c.args[0] for c in log.call_args_list], reloj[0]
+
     def test_un_pc_que_vive_con_poca_memoria_acaba_rehaciendo(self):
-        """Tras REHACER_MEMORIA_MAX_S esperando memoria en la tanda, basta con REHACER_MIN_LIBRE_TRAS (revision 1,
-        P1-1: antes la espera por memoria no tenia tope y esas personas no se reconocian nunca)."""
-        pedidas = []
+        """Con 0,85 GB libres fijos: espera 10 min (REHACER_MEMORIA_MAX_S), empieza con 0,8 GB y no se corta a si mismo
+        (revisiones 1, 2 y 3)."""
+        res, lanzados, cortados, lineas, t = self.con_memoria(0.85)
+        self.assertEqual(res["rehechas"], 2)
+        self.assertEqual(len(lanzados), 2)
+        self.assertEqual(cortados, [])
+        self.assertGreaterEqual(t, app_voces.REHACER_MEMORIA_MAX_S)
+        self.assertIn("   huellas por rehacer: el PC va justo (memoria); se espera", lineas)
 
-        def ocupado(min_libre=carga.MIN_LIBRE, **k):
-            pedidas.append(min_libre)
-            return "memoria" if min_libre > app_voces.REHACER_MIN_LIBRE_TRAS else None
-        with mock.patch.object(carga, "ocupado", ocupado), mock.patch.object(app_voces, "REHACER_MEMORIA_MAX_S", 0.2), \
+    def test_con_1_gb_libre_empieza_enseguida(self):
+        res, lanzados, cortados, _, t = self.con_memoria(1.2)
+        self.assertEqual((res["rehechas"], len(lanzados), cortados), (2, 2, []))
+        self.assertLess(t, 60)
+
+    def test_con_muy_poca_memoria_se_deja_para_el_proximo_arranque(self):
+        """Por debajo de 0,8 GB durante 1 h sumada: no se lanza ningun proceso (con 0,6, 0,45 o 0,3 GB libres, el de
+        la revision 2 se lanzaba y se cortaba a si mismo 3 veces por huella; revision 3, P1-1)."""
+        for base in (0.6, 0.45, 0.3):
+            with self.subTest(base=base):
+                self.app._rehacer_tanda = None
+                res, lanzados, cortados, lineas, t = self.con_memoria(base)
+                self.assertEqual(lanzados, [])
+                self.assertEqual(res["rehechas"], 0)
+                self.assertIn("   huellas por rehacer: el PC lleva 1 h sin memoria libre; se deja para el próximo "
+                              "arranque", lineas)
+                self.assertLess(t, app_voces.REHACER_MEMORIA_TOPE_S + 120)
+        linea = "   huellas por rehacer: el PC lleva 1 h sin memoria libre; se deja para el próximo arranque"
+        self.assertEqual(diagnostico.diag_line(linea), linea)
+
+    def test_una_suspension_no_vence_los_topes(self):
+        """Un salto del reloj (el portatil suspendido) no cuenta como espera (revision 3, P2-1)."""
+        reloj, n = [0.0], [0]
+
+        def ocupado(*a, **k):
+            n[0] += 1
+            if n[0] == 2:
+                reloj[0] += 7200.0  # dos horas suspendido entre dos lecturas
+            return "cpu" if n[0] <= 4 else None
+
+        def dormir(seg):
+            reloj[0] += seg
+        self.app._rehacer_tanda = self.app._tanda_nueva()
+        with mock.patch.object(carga, "ocupado", ocupado), mock.patch.object(app_voces, "_ahora", lambda: reloj[0]), \
+                mock.patch.object(app_voces, "_dormir", dormir), mock.patch.object(app_voces, "REHACER_PASO_S", 15.0), \
                 mock.patch.object(app_voces, "log"):
-            res = self.app.rehacer_huellas()
-        self.assertEqual(res["rehechas"], 2)
-        self.assertEqual(pedidas[0], app_voces.REHACER_MIN_LIBRE)
-        self.assertEqual(pedidas[-1], app_voces.REHACER_MIN_LIBRE_TRAS)
-
-    def test_con_una_hora_esperando_memoria_se_intenta_igual(self):
-        """Tope de verdad (revision 2, P1-A): tras REHACER_MEMORIA_TOPE_S esperando memoria en la tanda, ya no se
-        espera y decide el corte."""
-        pedidas = []
-
-        def ocupado(min_libre=carga.MIN_LIBRE, **k):
-            pedidas.append(min_libre)
-            return "memoria" if min_libre > 0 else None
-        with mock.patch.object(carga, "ocupado", ocupado), mock.patch.object(app_voces, "REHACER_MEMORIA_MAX_S", 0.1), \
-                mock.patch.object(app_voces, "REHACER_MEMORIA_TOPE_S", 0.3), mock.patch.object(app_voces, "log"):
-            res = self.app.rehacer_huellas()
-        self.assertEqual(res["rehechas"], 2)
-        self.assertEqual(pedidas[-1], 0)
-        self.assertIn(app_voces.REHACER_MIN_LIBRE_TRAS, pedidas)
+            self.app._rehacer_esperar(lambda: False)
+        self.assertFalse(self.app._rehacer_tanda["cpu_vencida"])
+        self.assertLess(self.app._rehacer_tanda["cpu"], 100)
 
     def test_con_el_pc_ocupado_espera_y_lo_dice(self):
         estados = iter(["cpu", "memoria", None, None, None, None, None, None, None, None])
@@ -256,6 +313,8 @@ class RehacerAlArrancarSuaveTests(RehacerBase):
 
         def dormir(s):
             reloj[0] += 1.0
+            if reloj[0] > 10000:  # con el tope por espera seguida no acababa nunca: que falle, no que se cuelgue
+                raise AssertionError("la calma no acaba")
         self.app._rehacer_tanda = self.app._tanda_nueva()
         with mock.patch.object(carga, "ocupado", ocupado), mock.patch.object(app_voces, "_ahora", lambda: reloj[0]), \
                 mock.patch.object(app_voces, "_dormir", dormir), mock.patch.object(app_voces, "REHACER_PASO_S", 1.0), \
@@ -581,12 +640,15 @@ class InvokeFondoWindowsTests(unittest.TestCase):
     def test_find_python_con_el_de_antes(self):
         from test_desinstalar import run_ps_functions
         py = sys.executable.replace("'", "''")
+        t0 = time.monotonic()
         out = run_ps_functions(os.path.join(APP, "instalar.ps1"), ["Find-Python"],
                                f"function Say($t, $c) {{ }}; $MaxPy = 399; $Previo = '{py}'; "
                                "Write-Output ('P=' + (Find-Python))")
         m = re.search(r"P=(.*)", out)
         self.assertTrue(m, out)
         self.assertEqual(os.path.normcase(m.group(1).strip()), os.path.normcase(sys.executable))
+        # con el de antes delante, segundos (con el recorrido de Program Files, mas de 120 s en la CI)
+        self.assertLess(time.monotonic() - t0, 20)
 
     def test_find_python_tarda_poco(self):
         """Sin el recorrido de Program Files: en un runner de la CI, segundos (antes, mas de 120 s)."""
@@ -595,7 +657,8 @@ class InvokeFondoWindowsTests(unittest.TestCase):
         out = run_ps_functions(os.path.join(APP, "instalar.ps1"), ["Find-Python"],
                                "function Say($t, $c) { }; $MaxPy = 399; $Previo = ''; "
                                "Write-Output ('P=' + (Find-Python))")
-        self.assertIn("P=", out)
+        m = re.search(r"P=(.*)", out)
+        self.assertTrue(m and m.group(1).strip().lower().endswith("python.exe"), out)  # encuentra uno (el del PATH)
         self.assertLess(time.monotonic() - t0, 60)
 
     def test_una_funcion_enviada_y_un_fallo(self):

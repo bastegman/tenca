@@ -32,8 +32,10 @@ REHACER_HILOS = 1  # hilos de onnxruntime para cada huella (voices.hilos() da 2-
 REHACER_CPU_MAX_S = 1200.0  # 20 min esperando a la CPU en la tanda (sumados, aunque vaya y venga): el resto de la
 # tanda ya no la mira (en reposo y con 1 hilo cede sola)
 # memoria libre para empezar una huella: 1 GB; con 10 min esperando memoria en la tanda (sumados: un PC que vive con
-# poca), 0,8 GB; con 1 h, ya no se espera y decide el corte. Mientras calcula, se corta si quedan menos de 0,4 GB en 3
-# lecturas seguidas (~0,75 s): el proceso ocupa ~0,26 GB, asi que no se corta a si mismo (revisiones 1 y 2)
+# poca), 0,8 GB; con 1 h sin llegar ni a eso, la tanda se deja para el proximo arranque (sin lanzar nada: con menos,
+# el propio proceso, ~0,26 GB, bajaria la memoria por debajo del corte y se cortaria a si mismo; revision 3). Mientras
+# calcula, se corta si quedan menos de 0,4 GB en 3 lecturas seguidas (una cada 0,25 s): con 0,8 GB al empezar, el
+# proceso deja 0,54 (revisiones 1, 2 y 3)
 REHACER_MIN_LIBRE = 1 * carga.GB
 REHACER_MIN_LIBRE_TRAS = int(0.8 * carga.GB)
 REHACER_MEMORIA_MAX_S = 600.0
@@ -41,6 +43,9 @@ REHACER_MEMORIA_TOPE_S = 3600.0
 REHACER_CORTE_LIBRE = int(0.4 * carga.GB)
 REHACER_CORTE_LECTURAS = 3
 _ahora, _dormir = time.monotonic, time.sleep  # (los tests de la espera los cambian por un reloj falso)
+# entre dos lecturas de la espera nunca se cuentan mas de esto (una suspension del portatil no vence los topes de
+# golpe ni da la calma por cumplida; revision 3)
+REHACER_DT_MAX_S = 30.0
 REHACER_PASO_S = 15.0  # mientras se graba (o hay un directo, una llamada o se identifican voces): se mira cada tanto
 REHACER_DESCARGA_S = 1800.0  # lo que se espera a la descarga de los modelos de voces antes de dejarlo para otra vez
 
@@ -210,7 +215,8 @@ class Voces:
             return None
         log(f"🗣 {len(pend)} huella{'s' if len(pend) != 1 else ''} de voz por rehacer con el modelo nuevo: se rehacen "
             "en segundo plano")
-        cancelled = lambda: bool(getattr(self.jobs, "closing", False))  # noqa: E731 (apagando)
+        # apagando, o la tanda que se deja para el proximo arranque (una hora sin memoria libre)
+        cancelled = lambda: bool(getattr(self.jobs, "closing", False) or self._tanda().get("rendida"))  # noqa: E731
         if not voices.models_ready(DATA_DIR):
             log("   huellas por rehacer: faltan los modelos de voces; se descargan primero")
             self._download_models()  # el de Ajustes › Voces, con su progreso (si ya se estaban bajando, ese)
@@ -339,12 +345,18 @@ class Voces:
             pc = None if motivo else self._rehacer_pc()
             ahora = _ahora()
             dt, antes = (ahora - antes if antes is not None else 0.0), ahora
+            if dt > REHACER_DT_MAX_S:  # se ha suspendido el PC: ese rato no cuenta, y la calma vuelve a empezar
+                dt, desde = 0.0, None
             if pc == "cpu":  # una CPU que no baja nunca, o que va y viene, no deja la tanda para siempre
                 t["cpu"] += dt
                 if t["cpu"] >= REHACER_CPU_MAX_S:
                     t["cpu_vencida"], pc = True, None
             elif pc == "memoria":
                 t["mem"] += dt
+                if t["mem"] >= REHACER_MEMORIA_TOPE_S and not t.get("rendida"):
+                    t["rendida"] = True
+                    log("   huellas por rehacer: el PC lleva 1 h sin memoria libre; se deja para el próximo arranque")
+                    return
             if not motivo and not pc:
                 desde = ahora if desde is None else desde
                 if ahora - desde >= segundos:
@@ -365,11 +377,9 @@ class Voces:
         Con la CPU ya vencida en la tanda, solo la memoria."""
         t = self._tanda()
         libre = REHACER_MIN_LIBRE_TRAS if t["mem"] >= REHACER_MEMORIA_MAX_S else REHACER_MIN_LIBRE
-        if t["mem"] >= REHACER_MEMORIA_TOPE_S:  # una hora esperando memoria: se intenta igual y decide el corte
-            libre = 0
         try:
             if t["cpu_vencida"]:
-                return "memoria" if libre and carga.poca_memoria(libre) else None
+                return "memoria" if carga.poca_memoria(libre) else None
             return carga.ocupado(min_libre=libre)
         except Exception:
             return None

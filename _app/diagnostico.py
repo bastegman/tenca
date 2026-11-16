@@ -158,6 +158,7 @@ DIAG_LINES = (
     "🗣 {n} huella⟦s⟧ de voz por rehacer con el modelo nuevo: se rehacen en segundo plano",
     "   huellas por rehacer: se espera a que termine lo que está en marcha ({k})",
     "   huellas por rehacer: el PC va justo ({k}); se espera",
+    "   huellas por rehacer: el PC lleva 1 h sin memoria libre; se deja para el próximo arranque",
     "   huellas por rehacer: faltan los modelos de voces; se descargan primero",
     "   huellas por rehacer: sin los modelos de voces ({e}); se intentará la próxima vez",
     "   huellas por rehacer: la librería de voces no carga en este PC ({e})",
