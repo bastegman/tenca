@@ -172,13 +172,53 @@ class FondoTests(LiveJobs):
         directo = self.live_job()
         directo.status = "running"
         jobs.list.append(directo)
-        self.assertTrue(jobs._nube_delante())  # un directo en la nube: tambien gasta el cupo por minuto
-        directo.status = "done"
+        self.assertEqual(jobs._nube_delante(), "directo")  # un directo en la nube
         nube = server.Job("d.wav", "d.wav", "nube", None)
         jobs.list.append(nube)
-        self.assertTrue(jobs._nube_delante())
-        nube.status = "done"
-        self.assertFalse(jobs._nube_delante())
+        self.assertEqual(jobs._nube_delante(), "usuario")  # una transcripcion en la nube manda
+        directo.status = nube.status = "done"
+        self.assertIsNone(jobs._nube_delante())
+
+    def test_ante_un_directo_cede_como_mucho_un_rato(self):
+        """Revision 1, P1-3: un directo en la nube podia dejar el repaso de la reunion anterior parado toda la reunion
+        (bloqueada, sin destinos ni resumen). Ante un directo, como mucho CEDER_DIRECTO_S; ante lo del usuario, todo."""
+        jobs = self.jobs()
+        fondo = server.Job("a.wav", "a.wav", "nube", None)
+        fondo.fondo = True
+        directo = self.live_job()
+        directo.status = "running"
+        jobs.list += [fondo, directo]
+        with mock.patch.object(trabajos, "CEDER_DIRECTO_S", 0.3):
+            self.assertEqual(jobs._ceder_fondo(fondo), "directo")
+            time.sleep(0.35)
+            self.assertIsNone(jobs._ceder_fondo(fondo))
+            nube = server.Job("d.wav", "d.wav", "nube", None)
+            jobs.list.append(nube)
+            self.assertEqual(jobs._ceder_fondo(fondo), "usuario")  # lo del usuario, sin tope
+
+    def test_sin_cola_fondo_no_cede(self):
+        """Revision 1, P3-1: un Jobs sin la cola «fondo» lo pone en la de siempre y entonces no debe ceder (lo que pide
+        el usuario iria detras de el en la misma cola: bloqueo mutuo)."""
+        self.pendiente()
+        jobs = super().jobs()  # sin "fondo"
+        jobs._resume_final_passes(delay=0)
+        fp = [j for j in jobs.list if j.final_pass]
+        self.assertEqual(len(fp), 1)
+        self.assertFalse(fp[0].fondo)
+        self.assertEqual(jobs.queues["cloud"].qsize(), 1)
+
+    def test_apagar_la_nube_cancela_el_repaso_retomado_en_marcha(self):
+        """Revision 1, P1-2: en pausa el repaso esta «running»; antes nube_apagada solo cancelaba lo que estaba en cola
+        y, al soltarse la pausa, subia la reunion entera con la nube ya apagada."""
+        jobs = self.jobs()
+        fondo = server.Job("a.wav", "a.wav", "nube", None)
+        fondo.fondo, fondo.final_pass, fondo.status = True, True, "running"
+        otro = server.Job("b.wav", "b.wav", "nube", None)
+        otro.status = "running"
+        jobs.list += [fondo, otro]
+        jobs.nube_apagada()
+        self.assertTrue(fondo.cancel)
+        self.assertFalse(otro.cancel)  # lo que el usuario puso en marcha, como antes
 
     def test_lo_que_pide_el_usuario_no_espera_al_repaso_retomado(self):
         """De punta a punta con los hilos de las colas: el repaso retomado (A, 6 partes de 0,3 s) ya va por la
@@ -189,7 +229,7 @@ class FondoTests(LiveJobs):
         orden, lock = [], threading.Lock()
 
         def transcribe(path, duration, cfg, language, prompt, job_id, report, cancelled, start=0.0, about=None,
-                       tramos_idioma=None, ceder=None):
+                       tramos_idioma=None, ceder=None, **kw):
             nombre = os.path.basename(path)
             for k in range(6 if nombre == "r.wav" else 2):
                 while ceder is not None and ceder():
@@ -223,6 +263,41 @@ class FondoTests(LiveJobs):
         self.assertIn(("r.wav", "pausa"), orden)
 
 
+class RafagaTrasUn429Tests(CupoTests):
+    def test_las_que_esperaban_no_salen_todas_a_la_vez(self):
+        """Revision 1, P1-1: al vencer el Retry-After, las que esperaban (y el reintento de la del 429) salen con el
+        ritmo de siempre, no todas en el mismo instante (otra vez 429 cada una)."""
+        cloud = engines.CloudEngine(os.path.join(self.data_dir, "tmp"))
+        envios, lock = [], threading.Lock()
+        el_429 = []
+
+        def post(url, timeout, headers=None, data=None, files=None):
+            with lock:
+                envios.append(time.time())
+                primera = len(envios) == 1
+            if primera:
+                time.sleep(0.1)  # las otras ya han reservado su hueco
+                el_429.append(time.time())
+                return Resp(429, {"retry-after": "1"})
+            return Resp(200)
+        hilos = []
+        with mock.patch.object(engines.HTTP, "post", post), \
+                mock.patch.dict(engines.RATE_SPACING, {"whisper": 0.3}):
+            for k in range(3):
+                h = threading.Thread(target=cloud._post, args=(self.CFG, self.parte, "es", "", lambda **k: None,
+                                                               lambda: False))
+                h.start()
+                hilos.append(h)
+                time.sleep(0.03)
+            for h in hilos:
+                h.join(15)
+        tras = sorted(t for t in envios[1:])
+        self.assertEqual(len(tras), 3)  # las dos que esperaban y el reintento
+        self.assertTrue(all(t >= el_429[0] + 0.95 for t in tras), [t - el_429[0] for t in tras])
+        huecos = [b - a for a, b in zip(tras, tras[1:])]
+        self.assertTrue(all(g >= 0.25 for g in huecos), huecos)  # con el ritmo de siempre (0,3 s), no en rafaga
+
+
 class CederEnCloudEngineTests(TempTree):
     def test_ninguna_parte_sale_mientras_hay_que_ceder(self):
         cloud = engines.CloudEngine(os.path.join(self.data_dir, "tmp"))
@@ -246,6 +321,40 @@ class CederEnCloudEngineTests(TempTree):
         self.assertEqual(len(enviadas), 2)
         self.assertTrue(all(t - t0 >= 0.45 for t in enviadas), [t - t0 for t in enviadas])
         self.assertIn("En pausa: primero lo que acabas de pedir…", etapas)
+
+    def test_en_pausa_no_codifica_y_al_volver_relee_los_ajustes(self):
+        """Revision 1, P1-2 y P2-2: la parte no se codifica (ni queda en disco) mientras se cede; al volver se usan los
+        ajustes de ahora (cfg_fn) y se dice cuanto se ha esperado (report pausa=…)."""
+        cloud = engines.CloudEngine(os.path.join(self.data_dir, "tmp"))
+        cede, flacs, cfgs, pausas = [True], [], [], []
+
+        def post(cfg, chunk, lang, prompt, report, stop, about=None):
+            cfgs.append(cfg.get("api_key"))
+            return {"text": "hola", "segments": [{"start": 0.0, "end": 1.0, "text": "hola"}]}
+
+        def write_flac(path, data, sr=16000):
+            flacs.append(time.time())
+            open(path, "wb").close()
+
+        def report(**k):
+            if k.get("pausa"):
+                pausas.append(k["pausa"])
+
+        def soltar():
+            time.sleep(0.5)
+            cede[0] = False
+        y = np.zeros(16000 * 1200, np.int16)
+        with mock.patch.object(cloud, "_post", post), mock.patch.object(cloud, "endpoint", lambda *a, **k: None), \
+                mock.patch.object(engines, "decode_16k", lambda *a, **k: y.copy()), \
+                mock.patch.object(engines, "write_flac", write_flac):
+            threading.Thread(target=soltar, daemon=True).start()
+            t0 = time.time()
+            cloud.transcribe("x.wav", 1200.0, {"chunk_minutes": 10, "parallel": 2, "api_key": "vieja"}, "es", "",
+                             "j3", report, lambda: False, ceder=lambda: "usuario" if cede[0] else None,
+                             cfg_fn=lambda: {"chunk_minutes": 10, "parallel": 2, "api_key": "nueva"})
+        self.assertTrue(flacs and all(t - t0 >= 0.45 for t in flacs), [t - t0 for t in flacs])
+        self.assertEqual(cfgs, ["nueva", "nueva"])
+        self.assertTrue(pausas and max(pausas) >= 0.4, pausas)
 
     def test_cancelar_mientras_cede(self):
         cloud = engines.CloudEngine(os.path.join(self.data_dir, "tmp"))

@@ -14,8 +14,8 @@ Escenarios:
   solo       una reunión con «Transcribir» en la nube
   retomado   al arrancar se retoma el repaso final pendiente de A (repasos_pendientes.json) y a los pocos segundos
              el usuario pide transcribir B: cuánto tarda el texto de B
-  compartido como «solo», con otro consumidor de la misma clave gastando --otro peticiones/min (otro PC, el directo):
-             cuántos 429 y cuántas peticiones a destiempo
+  compartido como «solo», con otro consumidor de la misma clave gastando --otro peticiones/min (otro PC, el directo)
+             y partes de 2 min (--trozo), para que haya 429: cuántos y cuántas peticiones a destiempo
 
 Uso: python scripts/nube_trozos_bench.py --app RUTA/_app --escenario solo [--minutos 60] [--rpm 20] [--out f.json]
 Necesita numpy y PyAV en el Python que lo ejecuta (es el que arranca la app). Sin red: todo es local.
@@ -230,14 +230,17 @@ def main(argv=None):
     ap.add_argument("--minutos", type=float, default=60.0)
     ap.add_argument("--rpm", type=int, default=20)
     ap.add_argument("--latencia", type=float, default=0.5)
-    ap.add_argument("--otro", type=float, default=8.0, help="peticiones/min del otro consumidor (compartido)")
+    ap.add_argument("--otro", type=float, default=14.0, help="peticiones/min del otro consumidor (compartido)")
     ap.add_argument("--tope", type=float, default=1800.0)
     ap.add_argument("--idioma", default="es-en", help="el de la reunion (su .md)")
-    ap.add_argument("--trozo", type=int, default=10, help="cloud.chunk_minutes (2-20)")
+    ap.add_argument("--trozo", type=int, default=None,
+                    help="cloud.chunk_minutes (2-20); por defecto 10, y 2 en «compartido» (para que haya 429)")
     ap.add_argument("--out")
     a = ap.parse_args(argv)
     prov = Proveedor(a.rpm, a.latencia, a.otro if a.escenario == "compartido" else 0.0)
     nombres = ["A", "B"] if a.escenario == "retomado" else ["B"]
+    if a.trozo is None:
+        a.trozo = 2 if a.escenario == "compartido" else 10
     app = App(os.path.abspath(a.app), a.minutos, nombres, pendiente="A" if a.escenario == "retomado" else None,
               idioma=a.idioma, trozo=a.trozo)
     res = {"escenario": a.escenario, "minutos": a.minutos, "rpm": a.rpm, "app": a.app, "idioma": a.idioma,

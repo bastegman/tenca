@@ -1642,10 +1642,12 @@ class KeyPool:
 # principio de cada peticion, asi que una parte de 10 min que empieza en ingles y pasa al portugues puede salir entera
 # en ingles. Por eso se corta en los cambios de idioma que apunto el directo (cada tramo con el suyo). Dentro de un
 # tramo las partes son las de siempre (cloud.chunk_minutes), tambien con una mezcla o detectando: hasta el 16/11/2026,
-# con una mezcla, eran de 90 s, ~8 veces mas peticiones (48 por hora de audio en vez de 6) contra el cupo por minuto del
+# con una mezcla, eran de 90 s: unas 40 peticiones por hora de audio en vez de 6 contra el cupo por minuto del
 # proveedor, y una transcripcion de 1 h tardaba minutos solo en esperas. Lo que se pierde: en una reunion mezclada sin
 # cambios apuntados, lo que se diga en el otro idioma dentro de una parte de 10 min puede salir en el de la parte
-# (medido con faster-whisper en la nota de la rama nube-trozos).
+# (medido con faster-whisper small, que tambien fija el idioma por peticion: 20 min con bloques alternos de 2-4 min en
+# ingles y en espanol, 63 % de los segmentos en su idioma con partes de 10 min, 87 % con las de 90 s y 99 % cortando en
+# los cambios).
 TRAMO_MIN_S = 10.0   # un tramo de idioma mas corto (dos cambios seguidos) se une al anterior
 TRAMO_AJUSTE_S = 8.0  # el corte entre dos idiomas se lleva al silencio mas cercano a esta distancia como mucho
 
@@ -1842,11 +1844,16 @@ class CloudEngine:
             tm["wait"] += pause
             self._wait(pause, cancelled)
             # un 429 de otra peticion mientras esta esperaba su hueco: tampoco sale antes de lo que pidio el proveedor
-            # (con varias partes en paralelo, salian y se llevaban otro 429 cada una)
-            extra = self.keys.wait_left(key, family, qm)
-            if 0 < extra <= max_wait:
-                tm["wait"] += extra
-                self._wait(extra, cancelled)
+            # (con varias partes en paralelo, salian y se llevaban otro 429 cada una). Se vuelve a pedir hueco, que ya
+            # queda detras del plazo y con el ritmo de siempre: si no, al vencer salian todas a la vez
+            for _ in range(10):
+                if self.keys.wait_left(key, family, qm) <= 0:
+                    break
+                otra = self.keys.reserve(key, family, qm, per_minute=not daily_quota(cfg))
+                if otra > max_wait:
+                    break
+                tm["wait"] += otra
+                self._wait(otra, cancelled)
             try:
                 with open(chunk, "rb") as fh:
                     mime = "audio/wav" if chunk.lower().endswith(".wav") else "audio/flac"
@@ -1887,16 +1894,20 @@ class CloudEngine:
         raise EngineError(last or "la API no respondió")
 
     def transcribe(self, path, duration, cfg, language, prompt, job_id, report, cancelled, start=0.0, about=None,
-                   tramos_idioma=None, ceder=None):
+                   tramos_idioma=None, ceder=None, cfg_fn=None):
         """tramos_idioma: [(desde_s, idioma o None)] de la grabacion, los cambios de idioma que conocia el directo
-        (repaso final): cada tramo se manda con su idioma (plan_parts). ceder(): mientras diga que si, no se empieza
-        ni se sube ninguna parte (un repaso retomado al arrancar deja pasar lo que acaba de pedir el usuario; las
-        partes que ya estaban subiendo terminan)."""
+        (repaso final): cada tramo se manda con su idioma (plan_parts). ceder(): mientras diga algo (el motivo), no se
+        empieza ni se codifica ni se sube ninguna parte (un repaso retomado al arrancar deja pasar lo que acaba de pedir
+        el usuario; las partes que ya estaban subiendo terminan). cfg_fn(): los ajustes de la nube de ahora, que se
+        releen al volver de una pausa (la clave o el proveedor pudieron cambiar entretanto). Lo esperado en pausa se
+        dice con report(pausa=segundos): no cuenta como tiempo de transcripcion."""
         self.endpoint(cfg)  # valida la configuracion antes de convertir nada
         work = os.path.join(self.tmp_root, job_id)
         os.makedirs(work, exist_ok=True)
         try:
-            self._ceder(ceder, cancelled, report)
+            if self._ceder(ceder, cancelled, report) and cfg_fn is not None:
+                cfg = cfg_fn()
+                self.endpoint(cfg)
             report(stage="Preparando audio (16 kHz mono)…", frac=0.02)
             y = decode_16k(path, start, cancelled)  # PyAV, sin ffmpeg
             silences = find_silences(y)
@@ -1918,12 +1929,18 @@ class CloudEngine:
 
             buf, encoded, enc_lock = {"y": y}, [0], threading.Lock()
             del y  # buf lo suelta en cuanto este codificada la ultima parte: no se retiene durante la subida
+            ajustes = {"cfg": cfg}
 
             def do_part(i, a, b, lang):
                 # cada hilo escribe el FLAC de su parte justo antes de subirla: la primera subida empieza en cuanto
-                # esta su parte (no cuando estan las n) y las demas se codifican mientras otras ya suben
+                # esta su parte (no cuando estan las n) y las demas se codifican mientras otras ya suben. En pausa
+                # (ceder), antes de codificarla: no queda en disco una parte que espera
                 path = os.path.join(work, f"part_{i:03d}.flac")
                 try:
+                    reanudar = f"Transcribiendo en la nube ({encoded[0]}/{n} partes)…"
+                    if self._ceder(ceder, stop, report, reanudar=reanudar) and cfg_fn is not None:
+                        ajustes["cfg"] = cfg_fn()
+                        self.endpoint(ajustes["cfg"])
                     write_flac(path, buf["y"][int(a * 16000):int(b * 16000)])
                     with enc_lock:
                         encoded[0] += 1
@@ -1931,8 +1948,7 @@ class CloudEngine:
                             buf["y"] = None
                     if stop():
                         raise Cancelled()
-                    self._ceder(ceder, stop, report)
-                    res = self._post(cfg, path, lang, prompt, report, stop, about=about)
+                    res = self._post(ajustes["cfg"], path, lang, prompt, report, stop, about=about)
                 finally:  # subido, fallido o cancelado: el trozo de la reunion no se queda en disco
                     try:
                         os.remove(path)
@@ -1966,17 +1982,29 @@ class CloudEngine:
         finally:
             shutil.rmtree(work, ignore_errors=True)
 
-    @staticmethod
-    def _ceder(ceder, cancelled, report, paso=0.5):
-        """Espera mientras ceder() diga que si (o hasta cancelar). Lo dice una vez en la cola."""
-        dicho = False
-        while ceder is not None and ceder():
+    PAUSAS = {"usuario": "En pausa: primero lo que acabas de pedir…",
+              "directo": "En pausa mientras transcribes en directo en la nube…"}
+
+    @classmethod
+    def _ceder(cls, ceder, cancelled, report, paso=0.5, reanudar=None):
+        """Espera mientras ceder() diga un motivo ("usuario", "directo"; o hasta cancelar) y lo dice en la cola. Al
+        volver, la etapa de antes (reanudar) y report(pausa=segundos esperados). Devuelve los segundos esperados."""
+        dicho, t0 = None, time.monotonic()
+        while ceder is not None:
+            motivo = ceder()
+            if not motivo:
+                break
             if cancelled():
                 raise Cancelled()
-            if not dicho:
-                report(stage="En pausa: primero lo que acabas de pedir…")
-                dicho = True
+            if motivo != dicho:
+                report(stage=cls.PAUSAS.get(motivo, cls.PAUSAS["usuario"]))
+                dicho = motivo
             time.sleep(paso)
+        if dicho is None:
+            return 0.0
+        espera = time.monotonic() - t0
+        report(pausa=espera, **({"stage": reanudar} if reanudar else {}))
+        return espera
 
     def transcribe_array(self, cfg, audio, language, prompt, tmp_dir, job_id, stage, cancelled, context=None,
                          model=None, about=None, timing=None):
