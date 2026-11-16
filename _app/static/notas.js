@@ -434,12 +434,12 @@ function actaItem(s) {  // «Responsable: tarea» con el responsable en negrita 
   return head && head.length <= 40 && head.split(/\s+/).length <= 5 && !/https?$/i.test(head)
     ? `<b>${esc(head)}</b>: ${actaInline(t.slice(i + 2), true)}` : actaInline(t, true);
 }
-function actaCorreo(sum, info) {
+function actaCorreo(resumen, info) {
   info = info || {};
   const secs = [{ h: '', blocks: [] }];
   let para = null, list = null, table = null;
   const cur = () => secs[secs.length - 1];
-  for (let l of String(sum || '').replace(/\r/g, '').split('\n')) {
+  for (let l of String(resumen || '').replace(/\r/g, '').split('\n')) {
     let m;
     if (/^\s*(```|~~~)/.test(l)) continue;  // un resumen envuelto en ```markdown: fuera las vallas
     l = l.replace(/^\s*>\s?/, '');  // citas: su texto
@@ -618,8 +618,8 @@ const BLOCKS = [['p', 'Texto', 'T'], ['h1', 'Título 1', 'H1'], ['h2', 'Título 
   ['hr', 'Separador', '—'], ['time', 'Marca de tiempo (minuto actual)', '◔']];
 const LISTS = ['ul', 'ol', 'todo'];
 
-function mdToBlocks(md) {
-  const out = [], lines = (md || '').replace(/\r/g, '').split('\n');
+function mdToBlocks(texto) {
+  const out = [], lines = (texto || '').replace(/\r/g, '').split('\n');
   for (let i = 0; i < lines.length; i++) {
     let l = lines[i];
     if (!l.trim()) continue;

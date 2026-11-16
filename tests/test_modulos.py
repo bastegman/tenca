@@ -280,6 +280,12 @@ class ModulosTests(unittest.TestCase):
                     self.assertTrue(sentencias_import(src), "sin import")
                 if nombre != "movil.js":
                     self.assertTrue(exportados(src), "sin export")
+                # solo las dos formas que leen estos tests: `import { a, b } from './x.js';` e `import './x.js';`, y
+                # un único `export { … };` (otra forma no la vería ni la cadena ni la comprobación de los import)
+                lineas = re.findall(r"^import\b.*", src, re.M)
+                self.assertEqual(len(lineas), len(sentencias_import(src)), lineas)
+                self.assertEqual(re.findall(r"^export\b(?! \{)", src, re.M), [])
+                self.assertLessEqual(len(re.findall(r"^export \{", src, re.M)), 1)
 
     def test_cadena_de_arranque(self):
         orden = cadena()
@@ -323,10 +329,21 @@ class ModulosTests(unittest.TestCase):
             src = leer(nombre)
             importados = {x for _, ns, _ in sentencias_import(src) for x in ns}
             cuerpo = sin_import_export(src)
-            locales = declarados(cuerpo) | tops[nombre]
-            faltan = sorted(f"{x} ({duenos[x]})" for x in usados(cuerpo)
-                            if x in duenos and duenos[x] != nombre and x not in importados and x not in locales)
+            ajenos = {x for x, n in duenos.items() if n != nombre}
             with self.subTest(nombre):
+                if nombre in NO_ESCRITORIO:
+                    # otra página (el móvil) u otro ámbito (el worklet): sus $ y esc son suyos
+                    locales = declarados(cuerpo) | tops[nombre]
+                else:
+                    # en la página de escritorio, ningún nombre de dentro (parámetro o variable) se llama como uno
+                    # de primer nivel de otro fichero: así, todo lo que se usa con ese nombre es lo de fuera y tiene
+                    # que llegar por import (si no, una sombra local escondería un import que falta; y en los tests
+                    # de navegador support.EXPONER_MODULOS lo resolvería por window)
+                    sombras = sorted((declarados(cuerpo) - tops[nombre]) & ajenos)
+                    self.assertEqual(sombras, [], "se llaman como algo de otro fichero")
+                    locales = tops[nombre]
+                faltan = sorted(f"{x} ({duenos[x]})" for x in usados(cuerpo)
+                                if x in ajenos and x not in importados and x not in locales)
                 self.assertEqual(faltan, [])
 
     def test_nada_mas_en_window(self):

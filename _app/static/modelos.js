@@ -80,8 +80,8 @@ function motorNotaHtml(presetId, enMarcha) {
 
 /* ---------------------------------------------------------------- Ajustes: Whisper en este PC */
 function modelosHtml() {
-  const api = S.config?.procesado === 'api';
-  return `<div id="procModelos" class="modelos"${api ? ' hidden' : ''}>
+  const enApi = S.config?.procesado === 'api';
+  return `<div id="procModelos" class="modelos"${enApi ? ' hidden' : ''}>
     <div class="help" style="margin-top:0"><b>Whisper en este PC</b> · con «Solo en este PC» y «Con tu cuenta de Claude» transcribe Whisper en tu ordenador; Claude no transcribe, solo resume. Cada modelo se descarga una sola vez; el del directo empieza a bajar en cuanto eliges una de esas dos opciones.</div>
     <div id="mdLista" class="help">Cargando…</div>
   </div>`;
