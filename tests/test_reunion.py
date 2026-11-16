@@ -766,7 +766,8 @@ class ElegirAlEmpezarTests(unittest.TestCase):
         # revisión 1, P3-4: si se empieza a grabar antes de que la interfaz la abra, no reaparece al parar
         self.a.rec_elegir({})
         self.a.fin_llamada = type("Fin", (), {"quedan": lambda self, t: None})()
-        self.a.rec = type("Rec", (), {"alive": lambda self: True, "path": os.path.join(self.tmp, "x.wav"),
+        # (la ruta, dentro de la raíz: en Windows el temporal está en C: y el repo de la CI en D:, y relpath falla)
+        self.a.rec = type("Rec", (), {"alive": lambda self: True, "path": os.path.join(server.ROOT, "x.wav"),
                                       "started": 0, "status": {}, "sin_estado_s": lambda self: None})()
         self.assertNotIn("tarjeta", self.a.rec_status({}))
         self.a.rec = None
