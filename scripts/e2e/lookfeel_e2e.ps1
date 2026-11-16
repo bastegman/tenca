@@ -148,9 +148,9 @@ function Run-Installer($dir, $label, $timeoutMin, $sondear = $true) {
     $end = $t0.AddMinutes($timeoutMin)
     $peor, $desde, $vista, $pids, $pidsT = 0.0, $null, $false, @(), [DateTime]::MinValue
     while (-not $p.HasExited -and (Get-Date) -lt $end) {
-        # sin sondear, solo se espera: la sonda (WM_NULL cada 300 ms) sobre la ventana colgada del instalador viejo lo
-        # hacia ir de 36-46 s (3 runs sin sonda, 15/16-nov) a 182-1195 s (7 runs con ella, desde 6310c92; el ultimo,
-        # cortado a los 20 min)
+        # sin sondear, solo se espera (como antes de 6310c92). Ojo: no es lo que hace lento al instalador viejo (su
+        # Find-Python recorre Program Files en el hilo de la ventana): sin sonda, 293 y 335 s (a292b1a); con ella,
+        # 182-1195 s; el 15/16-nov por la noche, 36-46 s. Un run lo corto a los 20 min (43880812211)
         if (-not $sondear) { Start-Sleep -Milliseconds 500; continue }
         if (((Get-Date) - $pidsT).TotalSeconds -ge 2) {
             $pids = [int[]]@(Get-Process -Name powershell -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $PID } | ForEach-Object { $_.Id })
