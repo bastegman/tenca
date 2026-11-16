@@ -231,7 +231,7 @@ class IdiomaEnDirectoE2E(unittest.TestCase):
         tarda = t_pt - t0
         self.foto("2-portugues")
         print(f"   portugués en pantalla a los {tarda:.1f} s del cambio (sin nada en inglés)", flush=True)
-        self.assertLess(tarda, 10.0)  # «funcionó, pero tardó»: ahora en segundos
+        self.assertLess(tarda, 10.0)  # antes funcionaba, pero tardaba: ahora en segundos
         log = self.log()
         self.assertIn("idioma pt desde ya; se rehacen en él los últimos", log)
         self.assertIn("rehecho en pt lo último", log)

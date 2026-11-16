@@ -2,7 +2,7 @@ name: e2e-procesado
 
 # «Dónde se procesan tus reuniones» de punta a punta en Windows (07/11/2026; antes, con Groq
 # fallaba, con Claude no transcribía, «Modelo» parecía Groq y «Descargando modelo medium» no acababa). Elige cada modo
-# en Ajustes como él, descarga Whisper medium de verdad con su progreso en MB y %, lo carga, transcribe en directo y
+# en Ajustes como el usuario, descarga Whisper medium de verdad con su progreso en MB y %, lo carga, transcribe en directo y
 # desde la cola, y comprueba que lo que la interfaz enseña junto a «Modelo» cuadra con el modo. Groq, contra un falso en
 # 127.0.0.1 (nunca una clave real en la CI); Claude Code, un falso en el PATH. Capturas y server.log como artefacto.
 on:

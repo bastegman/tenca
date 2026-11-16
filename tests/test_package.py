@@ -304,20 +304,25 @@ class NotasInternasTests(unittest.TestCase):
                       "quién lo pidió ni dónde):\n" + "\n".join(lineas))
 
     def test_notas_internas_casa_y_respeta_las_exentas(self):
-        """Los patrones casan con cada tipo de nota (también en mayúsculas, en un fichero CRLF y en el CHANGELOG) y
-        dejan pasar lo exento: LICENSE, _app/static/ (de momento), el AppUserModelID y el editor como valor literal."""
+        """Los patrones casan con cada tipo de nota (también en mayúsculas, en un fichero CRLF, en el CHANGELOG y con la
+        referencia partida por el ajuste de línea de un comentario) y dejan pasar lo exento: LICENSE, _app/static/ (de
+        momento), el AppUserModelID y el editor como valor literal entero, no seguido de otra cosa."""
         root = tempfile.mkdtemp(prefix="tenca-notas-")
         nombre, apellido = "Ber" + "nardo", "Stegm" + "aier"  # en trozos: el propio test se revisa a sí mismo
         asistente, sistema = "Clau" + "dia", "Open" + "Claude"
         ficheros = {
             "CHANGELOG.md": f"uno\nlo pidió (ms{''}g 1479)\nms{''}gs 1150-1152 y MS{''}G 1386\n",
-            "_app/a.py": f"# en el portátil de {nombre}\nx = 1  # decisión de {asistente}\n",
-            "tests/b.py": f'ruta = "/Us{""}ers/alguien/Projects/tenca"\nusers = "/users/x"  # minúsculas: una URL\n',
+            "_app/a.py": f"# en el portátil de {nombre}\nx = 1  # decisión de {asistente}\n"
+                         f"# (fix-groq, ms{''}gs\n#   1468)\n",
+            "tests/b.py": f'ruta = "/Us{""}ers/alguien/Projects/tenca"\nusers = "/users/x"  # minúsculas: una URL\n'
+                          f'apodo = "{nombre[:-2]}"\n',
             "scripts/c.ps1": f'$AppId = "{nombre}.Chuleta"\r\n$Publisher = "{nombre} {apellido}"\r\n'
-                             f'Check "x" ($l -match "{nombre}\\.Chuleta")\r\n{nombre} {apellido} lo pidió\r\n',
+                             f'Check "x" ($l -match "{nombre}\\.Chuleta")\r\n{nombre} {apellido} lo pidió\r\n'
+                             f'x = "{nombre} {apellido} lo validó"\r\nautor={nombre} {apellido} decidió\r\n',
             "scripts/setup/d.iss": f"AppPublisher={nombre} {apellido}\n"
-                                   f"VersionInfoCopyright={nombre} {apellido} (MIT)\n",
-            "README.md": f"el daemon de {sistema}\nmsgs NNNN y una versión 2026.11 sin número de mensaje\n",
+                                   f"VersionInfoCopyright={nombre} {apellido} (licencia MIT)\n",
+            "README.md": f"el daemon de {sistema}\nmsgs NNNN y una versión 2026.11 sin número de mensaje\n"
+                         f"notas en memory/proj{''}ects/x_IMPL.md y ~/Proj{''}ects/notas\n",
             "LICENSE": f"Copyright (c) 2026 {nombre} {apellido}\n",
             "_app/static/e.js": f"// ms{''}g 1242 de {nombre}\n",
         }
@@ -326,11 +331,13 @@ class NotasInternasTests(unittest.TestCase):
             with open(os.path.join(root, rel), "w", encoding="utf-8", newline="") as f:
                 f.write(texto)
         hits = [(rel, n, tipo) for rel, n, tipo, _ in buscar_notas_internas(sorted(ficheros), root)]
+        autor = "nombre del autor"
         self.assertEqual(hits, [("CHANGELOG.md", 2, "mensaje"), ("CHANGELOG.md", 3, "mensaje"),
                                 ("CHANGELOG.md", 3, "mensaje"), ("README.md", 1, "sistema de agentes"),
-                                ("_app/a.py", 1, "nombre del autor"), ("_app/a.py", 2, "asistente"),
-                                ("scripts/c.ps1", 4, "nombre del autor"), ("scripts/c.ps1", 4, "nombre del autor"),
-                                ("tests/b.py", 1, "ruta personal")])
+                                ("README.md", 3, "ruta personal"), ("README.md", 3, "ruta personal"),
+                                ("_app/a.py", 1, autor), ("_app/a.py", 2, "asistente"), ("_app/a.py", 3, "mensaje")]
+                         + [("scripts/c.ps1", n, autor) for n in (4, 4, 5, 5, 6, 6)]
+                         + [("tests/b.py", 1, "ruta personal"), ("tests/b.py", 3, autor)])
 
 
 # Notas internas que no van en un repo público (punto 50 del review del 14/11/2026). Cada patrón lleva una letra entre
@@ -338,20 +345,25 @@ class NotasInternasTests(unittest.TestCase):
 # frontend-modulos, que al entrar en main tiene que quitar esa excepción (y si entra antes que repo-limpio, la quita
 # repo-limpio); test_notas_internas_casa_y_respeta_las_exentas también la nombra.
 NOTAS_INTERNAS = (
-    ("mensaje", re.compile(r"\bms[g]s?\.?\s*\d{3,4}\b", re.I)),
-    ("nombre del autor", re.compile(r"\bber[n]ard|\bstegm[a]ier\b", re.I)),
+    # también partida por el ajuste de línea de un comentario («msgs» y, en la línea siguiente, «# 1468»)
+    ("mensaje", re.compile(r"\bms[g]s?\.?[\s#;/*]*\d{3,4}\b", re.I)),
+    ("nombre del autor", re.compile(r"\bber[n]ard|\bber[n]ar\b|\bstegm[a]ier\b", re.I)),
     ("asistente", re.compile(r"\bclau[d]ia\b", re.I)),
     ("sistema de agentes", re.compile(r"\bopencla[u]de\b", re.I)),
-    ("ruta personal", re.compile(r"/Us[e]rs/")),  # con mayúscula, como en macOS: /users/ es parte de muchas URL
+    # la carpeta de usuarios de macOS, con su mayúscula (en minúsculas es parte de muchas URL), y las notas de trabajo
+    # que viven fuera del repo
+    ("ruta personal", re.compile(r"/Us[e]rs/|\bmemory/proj[e]cts/|~/Proj[e]cts\b")),
 )
 NOTAS_FICHEROS_EXENTOS = ("LICENSE",)
 NOTAS_CARPETAS_EXENTAS = ("_app/static/",)
 # Lo único que puede llevar el nombre del autor, porque cambiarlo cambiaría la app: el AppUserModelID de Windows
 # (common.APP_ID; los accesos directos ya creados y la barra de tareas lo llevan, ver test_tenca) y el que usó la
 # prueba de WebView2 de scripts/, también con la barra escapada de una expresión regular de PowerShell; y el editor
-# como valor literal, justo detrás de una comilla o de un «=» (Publisher del registro, con el que desinstalar.ps1
-# reconoce sus entradas, y AppPublisher/VersionInfo del Setup.exe), igual que en LICENSE.
-NOTAS_EXENTAS = re.compile(r"\bBer[n]ardo\\?\.(?:Chuleta|Notas)\b|(?<=[\"'=])Ber[n]ardo Stegm[a]ier\b")
+# como valor literal entero: justo detrás de una comilla o de un «=» y seguido de la comilla de cierre, del fin de la
+# línea o de «(licencia MIT)» (Publisher del registro, con el que desinstalar.ps1 reconoce sus entradas, y
+# AppPublisher/VersionInfo del Setup.exe), igual que en LICENSE. «x = "<nombre> lo validó"» no está exento.
+NOTAS_EXENTAS = re.compile(r"\bBer[n]ardo\\?\.(?:Chuleta|Notas)\b"
+                           r"|(?<=[\"'=])Ber[n]ardo Stegm[a]ier(?=[\"']|[ \t]*$|[ \t]+\(licencia MIT\))", re.M)
 
 
 def buscar_notas_internas(rels, root=REPO):

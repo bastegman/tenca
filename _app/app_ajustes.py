@@ -172,7 +172,7 @@ class Ajustes:
         ruta = cls.find()
         if not ruta:
             raise ApiError(f"No encuentro {cls.label} en este PC. Haz los pasos 1 y 2 y vuelve a pulsar «Comprobar».")
-        # lo que tarda cada paso, al log (07/11/2026: en un PC lento «Comprobar» tardó minutos sin decir en que)
+        # lo que tarda cada paso, al log (07/11/2026: en Windows «Comprobar» tardó minutos sin decir en que)
         origen = cls.origen(ruta)  # «Claude Code de VS Code» si es la copia de la extension (07/11/2026)
         log(f"   agente: comprobando {origen} ({modelo})…" + (f" · {ruta}" if origen != cls.label else ""))
         ag, t0 = cls(settings_dir=DATA_DIR), time.time()

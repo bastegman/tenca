@@ -16,7 +16,7 @@ ventana mas de Edge. Si pywebview no esta instalado o no puede crear la ventana,
     icono no se puede poner, todo sigue como antes (el aviso de la pagina).
   - Desde que se crea Window hasta que la ventana se ensena (evento shown) esta «en camino» (pending): en un PC lento
     son decenas de segundos y el usuario vuelve a pulsar el acceso directo. Si en ese rato otra copia pide
-    /api/mostrar, no se abre Edge (eran las «2 veces la app» del 02/11/2026): la ventana sale sola y se trae al frente.
+    /api/mostrar, no se abre Edge (la doble apertura del 02/11/2026): la ventana sale sola y se trae al frente.
   - Ocultarse al compartir pantalla (como otras apps de notas): SetWindowDisplayAffinity con WDA_EXCLUDEFROMCAPTURE en
     la ventana de nivel superior, que tapa tambien lo que pinta WebView2 dentro (comprobado con capturas en
     windows-real).

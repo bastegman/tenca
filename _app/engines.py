@@ -1723,8 +1723,8 @@ class CloudEngine:
         if p is None:
             # «Probar» del asistente con «API externa» y sin proveedor (server._candidata lo marca): a nadie. Unos
             # ajustes GUARDADOS con un proveedor vacio o desconocido (de una version anterior o escritos a mano)
-            # siguen yendo a Groq, como hasta fe29522: a quien ya transcribia con Groq no se le corta (fix-groq, msgs
-            # 1468-1470: «para mí debería seguir funcionando»)
+            # siguen yendo a Groq, como hasta fe29522: a quien ya transcribia con Groq no se le corta (fix-groq,
+            # 10/11/2026)
             if cfg.get(SIN_PROVEEDOR):
                 raise EngineError("Elige el proveedor de la API externa en Ajustes ⚙ → Procesado.")
             p = PROVIDERS["groq"]

@@ -10,8 +10,8 @@ usa esos bloques y solo diariza el último: «Quién habla» llega antes.
 
 El directo es la prioridad (no puede ir más lento por esto): con el directo en este PC no se hace
 nada (Whisper ya usa la CPU), y en la nube el subproceso va en prioridad de reposo (Windows; nice 19 fuera), con un
-solo hilo, y se corta en cuanto la grabación termina, el directo pasa a este PC o la app se cierra. Lo medido está en
-scripts/directo_bench.py (--con-voces) y en la nota de la rama."""
+solo hilo, y se corta en cuanto la grabación termina, el directo pasa a este PC o la app se cierra. Se mide con
+scripts/directo_bench.py (--con-voces)."""
 import hashlib
 import os
 import shutil

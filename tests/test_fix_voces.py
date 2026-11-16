@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""S6 (06-nov-2026): «a veces pongo un nombre de quien ha dicho qué, y asume que soy yo».
+"""S6 (06-nov-2026): al poner nombre a quien ha dicho algo, la app a veces lo tomaba por el usuario («Tú»).
 
 Poner nombre a un hablante (o fusionarlo) no puede convertirlo en «Tú» ni tocar la persona del usuario: ni
 renombrarla, ni guardarle la huella de otra voz, ni hacer «usuario» a otra persona. Y un «Tú» mal puesto por la
@@ -256,8 +256,8 @@ class NombrarOtrosHablantesTests(Reunion):
     def test_ajustes_sigue_renombrando_por_id(self):
         """Ajustes › Voces (sin reunion): el nombre de una persona, también el del usuario, se cambia por su id."""
         yo = self.usuario()
-        self.app.voices_person({"id": yo, "nombre": "Bernar"})
-        self.assertEqual(self.v.find(yo)["nombre"], "Bernar")
+        self.app.voices_person({"id": yo, "nombre": "Dieguito"})
+        self.assertEqual(self.v.find(yo)["nombre"], "Dieguito")
 
 
 class EtiquetaTests(unittest.TestCase):

@@ -4,8 +4,8 @@ propia de la app (window.Window, pywebview sobre WebView2) con una página enter
 
 1. Al enseñarse, con el ajuste encendido, GetWindowDisplayAffinity dice WDA_EXCLUDEFROMCAPTURE (0x11).
 2. Una captura de la pantalla (BitBlt del escritorio, lo mismo que usan las capturas clásicas) donde está la ventana
-   NO tiene el magenta: WebView2 pinta en una ventana hija de otro proceso y la marca va en la de nivel superior; esto
-   es lo que la research dejó «falta probarlo con WebView2».
+   NO tiene el magenta: WebView2 pinta en una ventana hija de otro proceso y la marca va en la de nivel superior;
+   sin esta prueba no se sabría si también tapa lo que pinta WebView2.
 3. Apagado desde otro hilo (como Ajustes, por Invoke en el hilo de la ventana): marca 0 y la captura SÍ tiene el
    magenta (la prueba sirve: si no se viera aquí, la captura no demostraría nada y el test falla).
 4. Encendido otra vez: 0x11 y sin magenta.

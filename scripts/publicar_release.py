@@ -44,6 +44,8 @@ LIMITE_NOTAS = 60000  # GitHub admite 125.000 caracteres; con más, solo el índ
 # CHANGELOG ya no las lleva, pero el de un Release anterior puede llevarlas: cambios() compara sin ellas
 REF_INTERNA_RE = re.compile(r",?\s*\bmsgs?\.?\s+\d+(?:\s*(?:,|y)\s*\d+)*", re.I)
 HAY_REF_INTERNA_RE = re.compile(r"\bmsgs?\.?\s+\d{3,}", re.I)
+# una referencia que es todo lo que va entre paréntesis, con el blanco de delante: «una voz (msg N).» -> «una voz.»
+REF_ENTRE_PARENTESIS_RE = re.compile(r"\s*\(\s*msgs?\.?\s+\d+(?:\s*(?:,|y|-|–)\s*\d+)*\s*\)", re.I)
 
 
 class Fallo(Exception):
@@ -201,8 +203,8 @@ def apartados(changelog):
 
 
 def sin_ref_interna(texto):
-    # con el blanco de delante: «una voz (msg N).» -> «una voz.», no «una voz .»
-    return re.sub(r"\s*\(\s*\)", "", REF_INTERNA_RE.sub("", texto)).strip()
+    # primero las que ocupan un paréntesis entero, con su blanco; los «()» de código («`cerrar()`») se quedan
+    return REF_INTERNA_RE.sub("", REF_ENTRE_PARENTESIS_RE.sub("", texto)).strip()
 
 
 def cambios(changelog, anterior=None):

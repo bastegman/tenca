@@ -197,6 +197,11 @@ class NotasTests(unittest.TestCase):
         self.assertEqual((nuevos, [t for t, _ in cambiados]), ([], ["Seguridad"]))
         nuevos, cambiados = pr.cambios(actual.replace("- Arreglado: una voz.", "- Arreglado: dos voces."), anterior)
         self.assertEqual((nuevos, [t for t, _ in cambiados]), ([], ["Voces dobles en la grabación (07/11/2026)"]))
+        # quitar los «()» de un nombre de función es un cambio de verdad: no se confunde con quitar una referencia
+        antes = actual.replace("- Arreglado: una voz.", "- Arreglado: `cerrar()` ya no cuelga.")
+        nuevos, cambiados = pr.cambios(antes.replace("`cerrar()`", "`cerrar`"), antes)
+        self.assertEqual((nuevos, [t for t, _ in cambiados]), ([], ["Voces dobles en la grabación (07/11/2026)"]))
+        self.assertEqual(pr.sin_ref_interna(f"Un rango (msgs {1150}-{1152}) y `f()`"), "Un rango y `f()`")
 
     def test_notas_primera_version(self):
         nuevos, _ = pr.cambios(CHANGELOG)

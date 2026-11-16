@@ -23,7 +23,9 @@ Punto 50 del review del 14/11/2026. No cambia nada en la app instalada.
   coordinaba el trabajo, rutas personales de macOS). Corre en la suite y en su propio paso del job `agnosticismo`.
   `_app/static/` queda fuera hasta que llegue su propia limpieza.
 - `scripts/publicar_release.py` compara el CHANGELOG con el del Release anterior sin esas referencias: un apartado
-  que solo las ha perdido no sale como nuevo.
+  que solo las ha perdido no sale como nuevo ni como cambiado, y los «()» de código ya no se pierden al quitarlas. Los
+  apartados cuya entradilla se ha reescrito aquí (23) saldrán una vez en «También cambian» del próximo Release: en la
+  app no cambia nada.
 
 ### El audio de cada reunión, «Mis pendientes» en Hoy y «Quién habla» mientras se graba (16/11/2026)
 
@@ -1195,7 +1197,7 @@ cierre de verdad desde ahí, con «Salir».
   antes de terminar. lookfeel-e2e comprueba en el log que el icono se pone y se quita.
 
 ### Doble apertura al arrancar (07/11/2026)
-Lo que se veía como «se me abrían como 2 veces la app»: al pulsar el acceso directo otra vez mientras la app
+Lo que se veía: la app se abría dos veces. Al pulsar el acceso directo otra vez mientras la app
 arrancaba (en el portátil de la prueba del 02/11/2026, 31 s entre el arranque y la ventana), salían la ventana de
 Chuleta y otra de Edge con la misma interfaz, o un aviso de «No se puede usar el puerto 8765: lo tiene otro programa».
 - **Instancia única de verdad.** Al arrancar, la app bloquea `instancia-8765.lock` en su carpeta de datos (el sistema

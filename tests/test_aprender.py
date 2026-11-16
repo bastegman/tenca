@@ -90,12 +90,12 @@ class PropuestasTests(unittest.TestCase):
         """Revisión 2: «y», «e», «and» no unen dos nombres en uno; y un nombre largo se junta entero."""
         self.assertEqual(terminos(A.propuestas(segs("con ana y pedro hoy"), segs("con Ana y Pedro hoy"))),
                          ["Ana", "Pedro"])
-        self.assertEqual(terminos(A.propuestas(segs("el banco del norte de chile"),
-                                               segs("el Banco del Norte de Chile"))), ["Banco del Norte de Chile"])
+        self.assertEqual(terminos(A.propuestas(segs("el banco del norte de orvalia"),
+                                               segs("el Banco del Norte de Orvalia"))), ["Banco del Norte de Orvalia"])
         # más largo que MAX_NUEVO: se corta en dos nombres, no se pierde (revisión 3)
-        self.assertEqual(terminos(A.propuestas(segs("la universidad de los andes de santiago de chile"),
-                                               segs("la Universidad de los Andes de Santiago de Chile"))),
-                         ["Universidad de los Andes", "Santiago de Chile"])
+        self.assertEqual(terminos(A.propuestas(segs("la universidad de los robles de villa de orvalia"),
+                                               segs("la Universidad de los Robles de Villa de Orvalia"))),
+                         ["Universidad de los Robles", "Villa de Orvalia"])
 
     def test_la_mayuscula_de_la_frase_no_es_un_nombre(self):
         """Revisión 2: «efectivamente» → «Efectivamente» al empezar frase es la mayúscula de la frase."""

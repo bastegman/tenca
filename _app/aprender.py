@@ -44,7 +44,7 @@ ENLACES = {"de", "del", "la", "las", "los", "el", "y", "e", "&", "of", "the", "a
 CONJUNCIONES = {"y", "e", "and", "&"}
 ARTICULOS = {"el", "la", "los", "las", "the", "o", "a", "os", "as", "le", "les"}  # «El Molino Verde», «The Green Room»
 
-MAX_NUEVO = 5        # palabras del término corregido («Banco del Norte de Chile»)
+MAX_NUEVO = 5        # palabras del término corregido («Banco del Norte de Orvalia»)
 MAX_ANTES = 5        # palabras de lo que escribió Whisper («te ese a» → «TSA»)
 MAX_REGLA = 3        # una regla automática: como mucho 3 palabras de origen
 PARECIDO_PROPUESTA = 0.4  # por debajo es un cambio de redacción («el cliente» → «Orvalia»), no algo mal oído
@@ -197,8 +197,8 @@ def _juntar_nombres(ops, ta, tb):
     out, juntos = [], set()
     for o in ops:
         if (len(out) >= 2 and solo_forma(o) and (out[-2] in juntos or solo_forma(out[-2]))
-                and enlaces(out[-1]) and o[4] - out[-2][3] <= MAX_NUEVO):  # y otra vez: «Banco del Norte de Chile»,
-            # sin pasar de MAX_NUEVO: «Universidad de los Andes» y «Santiago de Chile», no ninguno de los dos
+                and enlaces(out[-1]) and o[4] - out[-2][3] <= MAX_NUEVO):  # y otra vez: «Banco del Norte de Orvalia»,
+            # sin pasar de MAX_NUEVO: «Universidad de los Robles» y «Villa de Orvalia», no ninguno de los dos
             a = out[-2]
             out[-2:] = [("replace", a[1], o[2], a[3], o[4])]
             juntos.add(out[-1])

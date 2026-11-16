@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Sobresegmentación (08-nov-2026): «a una persona la cataloga como 10 personas distintas a lo largo de la reunion».
+"""Sobresegmentación (08-nov-2026): una misma persona salía como 10 personas distintas a lo largo de la reunion.
 
 sherpa-onnx parte a cada persona en varios grupos; voices.consolidate los une al terminar (huellas parecidas, breves
 al mas parecido, numero de participantes como pista). Medido en reuniones reales con scripts/eval_voces.py; aqui,
