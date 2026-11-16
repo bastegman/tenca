@@ -10,7 +10,7 @@ name: ui-smoke
 # test_sin_groq: una instalación nueva no sugiere ni preselecciona ningún proveedor en la nube, y quien ya usa uno no
 # nota nada.
 # test_fix_groq: unos ajustes con un proveedor que no existe (o el Azure sin endpoint que dejaba 0d5169b) vuelven al
-# de por defecto al arrancar, Ajustes lo enseña y «Guardar» lo deja así, con la clave cifrada como estaba.
+# de fábrica (cloud.provider) al arrancar, Ajustes lo enseña y «Guardar» lo deja así, con la clave cifrada como estaba.
 # test_fix_lento: la huella de «Recordar» decodifica solo sus tramos (también m4a y flac, con PyAV) y el cuadro del
 # hablante dice «Guardando…» al momento (antes tardaba minutos sin decir nada).
 # test_ui_movil: «Subir audio › Desde el móvil» (QR) con un iPhone emulado y un audio de WhatsApp.

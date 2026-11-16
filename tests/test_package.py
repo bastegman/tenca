@@ -357,61 +357,105 @@ class NotasInternasTests(unittest.TestCase):
                       "proveedor» o su nombre por engines.provider_name):\n" + "\n".join(lineas))
 
     def test_proveedor_fijo_casa_y_respeta_la_tabla(self):
-        """Casa con el nombre en cada sitio publicado (también en minúsculas en un documento, en un fichero CRLF y en
-        una f-string) y deja pasar la tabla de proveedores, los identificadores («groq» entre comillas, una variable de
-        entorno, el nombre de un test en un workflow, una rama en un comentario) y los tests y scripts, que no son
-        texto publicado (sus datos de prueba configuran ese proveedor)."""
+        """Casa con el nombre en cada sitio publicado, en mayúsculas o minúsculas (también en una URL, en un comentario
+        o docstring, en un fichero CRLF, en una f-string, también dentro de sus llaves, entre comillas en el JS, en
+        design/ y en los .bat de la raíz) y deja pasar la tabla de
+        proveedores, los identificadores («groq» entre comillas, una variable de entorno, el nombre de un test, también
+        dentro de una frase o de la expresión de una f-string) y los tests y scripts, que no son texto publicado (sus
+        datos de prueba configuran ese proveedor)."""
         root = tempfile.mkdtemp(prefix="tenca-proveedor-")
         p = "Gr" + "oq"  # en trozos: el propio test no lo nombra
-        ident = p.lower()
+        ident, mayus = p.lower(), p.upper()
         ficheros = {
             "README.md": f"uno\ncon {p} o con OpenAI\nmira api.{ident}.com\n",
             "LEEME.txt": f"uno\r\nlímites de {p}\r\n",
             "CHANGELOG.md": f"- `tests/test_sin_{ident}.py`\n- nada\n",
-            ".github/workflows/w.yml": f"# un {p} falso\nrun: python -m unittest test_sin_{ident} test_fix_{ident}\n",
+            ".github/workflows/w.yml": (f"# un {p} falso\nrun: python -m unittest test_sin_{ident} test_fix_{ident}\n"
+                                        f"env:\n  CHULETA_PRUEBAS_URL_{mayus}: x\n# mira console.{ident}.com\n"
+                                        f"name: tests de {ident}\n"),
+            ".github/dependabot.yml": f"# {ident}\n",
+            "INSTALAR.bat": f"echo uno\r\necho con {p}\r\n",
             "_app/static/x.js": (f"const prov = c.provider || '{ident}';\nif (p !== \"{ident}\") t = `{p} pide`;\n"
-                                 f"// el cupo de {p}\nconst u = 'https://console.{ident}.com';\n"),
+                                 f"// el cupo de {p}\nconst u = 'https://console.{ident}.com';\n"
+                                 f"const n = prov || '{p}';\n"),
             "_app/static/x.html": f"<p>{p}</p>\n",
             "_app/a.py": (f'"""Modulo: con {p} o sin el."""\nC = {{"provider": "{ident}"}}  # rama fix-{ident}\n'
-                          f'E = "CHULETA_PRUEBAS_URL_{p.upper()}"\nm = f"{p} pide esperar {{n}} s"\n'
+                          f'E = "CHULETA_PRUEBAS_URL_{mayus}"\nm = f"{p} pide esperar {{n}} s"\n'
                           f'# cupo de {p}\n\n\ndef f():\n    """cloud.provider "{ident}" por defecto."""\n'
-                          f'    return "pasa a {p}"\n'),
+                          f'    return "pasa a {p}"\n'
+                          f'log("PRUEBAS: va a una URL de pruebas (CHULETA_PRUEBAS_URL_{mayus})")\n'
+                          f'M = "{mayus}"\n'
+                          f'g = f"{{c.get(\'provider\', \'{ident}\')}}: hecho"\n'
+                          f'# ver console.{ident}.com\n'
+                          f'h = f"cupo de {ident} hoy"\n'
+                          f'k = f"{{prov or \'{p}\'}} pide"\n'),
             "_app/engines.py": (f'PROVIDERS = {{\n    "{ident}": {{"label": "{p}", "url": "https://x.{ident}.com"}},\n'
                                 f'}}\nCHAT_URLS = {{"{ident}": "https://api.{ident}.com/chat"}}\nX = "{p}"\n'),
             "tests/t.py": f'class {p}Falso:\n    """Un {p} falso."""\n',
             "scripts/s.py": f'URL = "https://api.{ident}.com"  # {p}\n',
+            "design/d.py": f"# {p}\n",
         }
         for rel, texto in ficheros.items():
             os.makedirs(os.path.dirname(os.path.join(root, rel)) or root, exist_ok=True)
             with open(os.path.join(root, rel), "w", encoding="utf-8", newline="") as f:
                 f.write(texto)
         hits = [(rel, n, tipo) for rel, n, tipo, _ in buscar_proveedor_fijo(sorted(ficheros), root)]
-        self.assertEqual(hits, [(".github/workflows/w.yml", 1, "workflow"),
-                                ("CHANGELOG.md", 1, "documento"), ("LEEME.txt", 2, "documento"),
-                                ("README.md", 2, "documento"), ("README.md", 3, "documento"),
-                                ("_app/a.py", 1, "docstring"), ("_app/a.py", 4, "texto"),
-                                ("_app/a.py", 5, "comentario"), ("_app/a.py", 10, "texto"),
-                                ("_app/engines.py", 5, "texto"),
-                                ("_app/static/x.html", 1, "texto"), ("_app/static/x.js", 2, "texto"),
-                                ("_app/static/x.js", 3, "texto"), ("_app/static/x.js", 4, "texto")])
+        w = ".github/workflows/w.yml"
+        self.assertEqual(hits, [(".github/dependabot.yml", 1, "publicado"), (w, 1, "publicado"), (w, 5, "publicado"),
+                                (w, 6, "publicado"), ("CHANGELOG.md", 1, "documento"), ("INSTALAR.bat", 2, "publicado"),
+                                ("LEEME.txt", 2, "documento"), ("README.md", 2, "documento"),
+                                ("README.md", 3, "documento")]
+                         + [("_app/a.py", n, tipo) for n, tipo in (
+                             (1, "docstring"), (2, "comentario"), (4, "texto"), (5, "comentario"), (10, "texto"),
+                             (12, "texto"), (14, "comentario"), (15, "texto"), (16, "texto"))]
+                         + [("_app/engines.py", 5, "texto"), ("_app/static/x.html", 1, "publicado")]
+                         + [("_app/static/x.js", n, "publicado") for n in (2, 3, 4, 5)]
+                         + [("design/d.py", 1, "comentario")])
 
 
 # Ningún proveedor de la nube por delante de los demás (16/11/2026). El nombre del que se quitó de la documentación y
 # de los textos de la app, con una letra entre corchetes para no casar consigo mismo en este fichero. Puede estar en la
-# tabla de proveedores (PROVEEDOR_TABLA, la única que lo nombra) y como identificador: «groq» entre comillas (el valor
-# de cloud.provider), una variable de entorno en mayúsculas, el nombre de un test o de una rama en minúsculas. Los
-# tests y los scripts no son texto publicado: sus datos de prueba configuran ese proveedor.
+# tabla de proveedores (PROVEEDOR_TABLA, la única que lo nombra) y como identificador (PROVEEDOR_IDS): «groq» entre
+# comillas (el valor de cloud.provider) o una palabra unida con «_» (una variable de entorno, el nombre de un test),
+# también dentro de una frase. En los .py de _app, una cadena que es entera un identificador en minúsculas («groq»)
+# tampoco cuenta. Los tests y los scripts de desarrollo no son texto publicado: sus datos de prueba configuran ese
+# proveedor.
 PROVEEDOR_QUITADO = re.compile(r"gr[o]q", re.I)
-PROVEEDOR_NOMBRE = re.compile(r"\bGr[o]q\b|\bGR[O]Q\b(?!_)")  # como nombre propio, no dentro de un identificador
-PROVEEDOR_ID = re.compile(r"^(?:[a-z0-9_]*gr[o]q[a-z0-9_]*|[A-Z0-9_]*GR[O]Q[A-Z0-9_]*)$")  # «groq», «URL_GROQ»…
-PROVEEDOR_ID_JS = re.compile(r"(['\"])gr[o]q\1")  # el valor de cloud.provider en el JS
+PROVEEDOR_IDS = re.compile(r"(['\"])gr[o]q\1|(?i:\b\w*_gr[o]q\w*\b|\bgr[o]q_\w*\b)")  # entre comillas, en minúsculas
+PROVEEDOR_ID_PY = re.compile(r"^[a-z0-9_]*gr[o]q[a-z0-9_]*$")  # una cadena de Python que es entera el identificador
 PROVEEDOR_DOCS = ("README.md", "LEEME.txt", "_app/export/LEEME.txt", "CHANGELOG.md")
 PROVEEDOR_TABLA = {"_app/engines.py": ("PROVIDERS", "CHAT_URLS")}
 
 
+def _proveedor_menciones(texto):
+    """Las menciones de PROVEEDOR_QUITADO en `texto` que no son un identificador (PROVEEDOR_IDS): [(posición, texto)].
+    Los identificadores se tapan con el mismo largo, así que las posiciones no cambian."""
+    texto = PROVEEDOR_IDS.sub(lambda m: "·" * len(m.group(0)), texto)
+    return [(m.start(), m.group(0)) for m in PROVEEDOR_QUITADO.finditer(texto)]
+
+
+def _cadenas_de_token(token):
+    """Las cadenas de un token STRING: su valor o, en una f-string (un solo token antes de Python 3.12), sus trozos de
+    texto juntos y, aparte, cada cadena de las expresiones de dentro de las llaves (como las ve Python 3.12)."""
+    import ast
+    try:
+        nodo = ast.parse(token.strip(), mode="eval").body
+    except SyntaxError:
+        return [token]
+    if isinstance(nodo, ast.JoinedStr):
+        texto = "".join(v.value for v in nodo.values if isinstance(v, ast.Constant) and isinstance(v.value, str))
+        dentro = [c.value for v in nodo.values if isinstance(v, ast.FormattedValue)
+                  for c in ast.walk(v) if isinstance(c, ast.Constant) and isinstance(c.value, str)]
+        return [texto] + dentro
+    if isinstance(nodo, ast.Constant):
+        return [nodo.value.decode("utf-8", "replace") if isinstance(nodo.value, bytes) else str(nodo.value)]
+    return [token]
+
+
 def _proveedor_en_python(rel, text):
-    """[(línea, tipo, texto)] de un .py de _app: en comentarios y docstrings, el nombre propio (PROVEEDOR_NOMBRE); en
-    las demás cadenas, cualquier mención que no sea un identificador entero (PROVEEDOR_ID), fuera de la tabla."""
+    """[(línea, tipo, texto)] de un .py de _app: cualquier mención que no sea un identificador en los comentarios, los
+    docstrings y las cadenas (lo literal de las f-strings), salvo una cadena que es entera el identificador y lo que
+    está dentro de la tabla de proveedores."""
     import ast
     import tokenize
     tree = ast.parse(text)
@@ -428,33 +472,35 @@ def _proveedor_en_python(rel, text):
     out = []
     for tok in tokenize.generate_tokens(io.StringIO(text).readline):
         n = tok.start[0]
-        if tok.type == tokenize.COMMENT or (tok.type == tokenize.STRING and n in docs):
-            out += [(n, "comentario" if tok.type == tokenize.COMMENT else "docstring", m.group(0))
-                    for m in PROVEEDOR_NOMBRE.finditer(tok.string)]
-        elif tok.type in (tokenize.STRING, getattr(tokenize, "FSTRING_MIDDLE", None)) and n not in tabla:
-            try:
-                valor = ast.literal_eval(tok.string) if tok.type == tokenize.STRING else tok.string
-            except (ValueError, SyntaxError):  # una f-string antes de Python 3.12: un solo token
-                valor = tok.string
-            if isinstance(valor, bytes):
-                valor = valor.decode("utf-8", "replace")
-            if not PROVEEDOR_ID.match(valor):
-                out += [(n, "texto", m.group(0)) for m in PROVEEDOR_QUITADO.finditer(valor)]
+        if n in tabla:
+            continue
+        if tok.type == tokenize.COMMENT:
+            tipo, valores = "comentario", [tok.string]
+        elif tok.type == tokenize.STRING:
+            tipo, valores = ("docstring" if n in docs else "texto"), _cadenas_de_token(tok.string)
+        elif tok.type == getattr(tokenize, "FSTRING_MIDDLE", None):  # Python 3.12 o más: el texto de una f-string
+            tipo, valores = "texto", [tok.string]
+        else:
+            continue
+        for valor in valores:
+            if not (tipo == "texto" and PROVEEDOR_ID_PY.match(valor)):
+                out += [(n, tipo, t) for _, t in _proveedor_menciones(valor)]
     return out
 
 
 def buscar_proveedor_fijo(rels, root=REPO):
     """[(fichero, línea, tipo, texto)] de cada mención de PROVEEDOR_QUITADO donde no puede estar: cualquiera en los
-    documentos publicados (PROVEEDOR_DOCS); el nombre propio en los workflows (sus comentarios); en _app/, en los .py
-    lo de _proveedor_en_python y en los demás ficheros (la interfaz de _app/static/, los scripts de instalación…)
-    cualquiera salvo el identificador entre comillas. Los tests y los scripts de desarrollo no cuentan."""
+    documentos publicados (PROVEEDOR_DOCS); en los .py, lo de _proveedor_en_python; y en todo lo demás que se publica
+    con la app o en el repo (_app/ entero, también la interfaz de _app/static/; .github/; design/; los ficheros de la
+    raíz, como los .bat), cualquiera que no sea un identificador (PROVEEDOR_IDS). Los tests y los scripts de desarrollo
+    no cuentan."""
     import bisect
     hits = []
     for rel in rels:
         path = os.path.join(root, rel)
-        en_docs, en_app = rel in PROVEEDOR_DOCS, rel.startswith("_app/")
-        en_workflow = rel.startswith(".github/workflows/")
-        if not (en_docs or en_app or en_workflow) or not os.path.isfile(path):
+        en_docs = rel in PROVEEDOR_DOCS
+        publicado = rel.startswith(("_app/", ".github/", "design/")) or "/" not in rel  # la raíz: .bat, make_icons…
+        if not (en_docs or publicado) or not os.path.isfile(path):
             continue
         with open(path, "rb") as f:
             data = f.read()
@@ -463,18 +509,15 @@ def buscar_proveedor_fijo(rels, root=REPO):
         text = data.decode("utf-8-sig", "replace").replace("\r\n", "\n")
         if not PROVEEDOR_QUITADO.search(text):
             continue
-        if en_app and rel.endswith(".py"):
+        if en_docs:
+            encontrados, tipo = [(m.start(), m.group(0)) for m in PROVEEDOR_QUITADO.finditer(text)], "documento"
+        elif rel.endswith(".py"):
             hits += [(rel, n, tipo, t) for n, tipo, t in _proveedor_en_python(rel, text)]
             continue
-        if en_docs:
-            rx, tipo = PROVEEDOR_QUITADO, "documento"
-        elif en_workflow:
-            rx, tipo = PROVEEDOR_NOMBRE, "workflow"
         else:
-            text = PROVEEDOR_ID_JS.sub(lambda m: "·" * len(m.group(0)), text)  # mismo largo: no mueve nada
-            rx, tipo = PROVEEDOR_QUITADO, "texto"
+            encontrados, tipo = _proveedor_menciones(text), "publicado"
         saltos = [m.start() for m in re.finditer("\n", text)]
-        hits += [(rel, bisect.bisect_left(saltos, m.start()) + 1, tipo, m.group(0)) for m in rx.finditer(text)]
+        hits += [(rel, bisect.bisect_left(saltos, i) + 1, tipo, t) for i, t in encontrados]
     return sorted(hits)
 
 

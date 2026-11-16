@@ -1403,10 +1403,9 @@ class LocalEngine:
 
 
 # ----------------------------------------------------------------------------- cupo y claves (nube)
-# Un proveedor con cupo por dia (DAILY_PROVIDERS) limita por organizacion (= por clave) y por modelo, p. ej. cada
-# Whisper 20 peticiones/min y 2.000/dia; chat (gpt-oss) 30/min, 1.000/dia y 8.000 tokens/min. Cada respuesta trae
-# x-ratelimit-remaining-requests (lo que queda HOY), x-ratelimit-reset-requests ("2m59.56s") y, en un 429,
-# retry-after (segundos).
+# Un proveedor con cupo por dia (DAILY_PROVIDERS) limita por clave y por modelo: peticiones por minuto y por dia y, en
+# el chat, tambien tokens por minuto. Cada respuesta trae x-ratelimit-remaining-requests (lo que queda HOY),
+# x-ratelimit-reset-requests ("2m59.56s") y, en un 429, retry-after (segundos).
 # El KeyPool guarda eso por clave, familia y modelo (el directo con -turbo y el repaso final con whisper-large-v3 no
 # se descuentan uno al otro), reparte las peticiones entre la clave principal y las adicionales y le dice al directo
 # que ventana usar segun lo que queda del dia. Nunca escribe una clave en el log.
@@ -1451,11 +1450,12 @@ def daily_quota(cfg):
 
 
 def provider_name(cfg, inicio=False):
-    """Como se llama en los textos al proveedor de la nube de cfg: su label de PROVIDERS («OpenAI»…) o, con una API
-    propia («Otra (compatible)»), «tu API». Vacio o desconocido: el que usa el motor (CloudEngine.endpoint). inicio:
-    para empezar una frase («Tu API pide esperar…»)."""
-    p = (cfg or {}).get("provider") or "groq"
-    nombre = "tu API" if p == "custom" else (PROVIDERS.get(p) or PROVIDERS["groq"])["label"]
+    """Como se llama en los textos al proveedor de la nube de cfg: su label de PROVIDERS («OpenAI»…), «tu API» con
+    una API propia («Otra (compatible)») y «tu proveedor» si no es ninguno de la tabla (vacio o de una version
+    anterior: reparar_proveedor lo arregla al arrancar). Sin la clave «provider», el de por defecto, como el resto del
+    motor. inicio: para empezar una frase («Tu API pide esperar…»)."""
+    p = (cfg or {}).get("provider", "groq")
+    nombre = "tu API" if p == "custom" else (PROVIDERS.get(p) or {}).get("label") or "tu proveedor"
     return nombre[:1].upper() + nombre[1:] if inicio else nombre
 
 
@@ -1644,9 +1644,10 @@ class KeyPool:
 # Repaso en la nube de una reunion que cambia de idioma (review del 14/11/2026, motor 12): Whisper fija el idioma al
 # principio de cada peticion, asi que una parte de 10 min que empieza en ingles y pasa al portugues puede salir entera
 # en ingles. Con una mezcla (o un tramo en que se detectaba), partes de ~1,5 min (60-135 s, cortadas en un silencio);
-# con un idioma fijo, las de siempre. El cupo del proveedor (p. ej. 20 peticiones/min, 7.200 s de audio/h) no cambia:
-# el ritmo lo marca el KeyPool y los segundos de audio son los mismos (si cobra al menos 10 s por peticion, con 60 s no
-# cambia nada). Medido sin la nube con faster-whisper (que decide el idioma igual, una vez por peticion).
+# con un idioma fijo, las de siempre. El cupo del proveedor (peticiones por minuto, segundos de audio por hora) no
+# cambia: el ritmo lo marca el KeyPool y los segundos de audio son los mismos (aunque se cobre un minimo por peticion,
+# con partes de 60 s no cambia nada). Medido sin la nube con faster-whisper (que decide el idioma igual, una vez por
+# peticion).
 MEZCLA_PARTE_S = 90
 TRAMO_MIN_S = 10.0   # un tramo de idioma mas corto (dos cambios seguidos) se une al anterior
 TRAMO_AJUSTE_S = 8.0  # el corte entre dos idiomas se lleva al silencio mas cercano a esta distancia como mucho
@@ -1873,8 +1874,8 @@ class CloudEngine:
                 wait = _duration_s(r.headers.get("retry-after", "")) or 3 * 2 ** attempt
                 if r.status_code == 429 and self.keys.blocked(key, family, qm):  # retry-after largo (cupo del dia)
                     if others and self.keys.pick(cfg, family, model=qm) != key:
-                        report(stage=f"Esa cuenta de {provider_name(cfg)} ha agotado su cupo: se sigue con la "
-                                     "siguiente clave…")
+                        report(stage=f"Una de las claves de {provider_name(cfg)} ha agotado su cupo: se sigue con "
+                                     "la siguiente…")
                         continue  # otra clave disponible: sin esperar
                     # sin alternativa: fallar ya, con el tiempo que pide (esperar aqui bloquearia el directo)
                     raise EngineError(f"{provider_name(cfg, inicio=True)} pide esperar {int(wait // 60)} min ({last})")
@@ -2060,7 +2061,7 @@ def cloud_http_error(r, cfg, model=None):
     servicio, que el diagnostico sabe leer) y que hacer. Hasta el 07/11/2026 solo salia el «HTTP NNN: …»."""
     base = api_error(r)
     p = PROVIDERS.get((cfg or {}).get("provider", "groq")) or {}
-    prov = p.get("label") or "El servicio"
+    prov = provider_name(cfg, inicio=True)
     code = r.status_code
     if code == 401:
         donde = f" desde {p['keys'].replace('https://', '')}" if p.get("keys") else ""
@@ -2072,7 +2073,8 @@ def cloud_http_error(r, cfg, model=None):
         return f"{prov} no encuentra el modelo o la dirección ({base}). Revisa el modelo en Ajustes" + (
             f" (ahora «{model}»)." if model else ".")
     if code == 413:
-        return f"El trozo de audio es demasiado grande para {prov} ({base}): baja «Minutos por trozo» en Ajustes."
+        return (f"El trozo de audio es demasiado grande para {provider_name(cfg)} ({base}): baja «Minutos por trozo» "
+                "en Ajustes.")
     if code in (500, 502, 503, 504):
         return f"{prov} está fallando ahora mismo ({base}): vuelve a probar en unos minutos."
     if code == 429:
@@ -2785,7 +2787,7 @@ AGENTES = {"claude": ClaudeCode}
 class Summarizer:
     """Resumen estilo Notion AI Meeting Notes con un modelo de chat de una API compatible con OpenAI.
 
-    Un plan gratuito puede permitir ~8K tokens por minuto y una reunion de 1 h son ~15-20K: se
+    Un plan puede limitar los tokens por minuto (CHUNK_CHARS cabe en 8K) y una reunion de 1 h son ~15-20K: se
     resume por partes (apuntes de cada trozo) y luego se juntan en el resumen final, respetando el
     ritmo que marca el proveedor en sus cabeceras de limites."""
 
@@ -2914,8 +2916,8 @@ class Summarizer:
             if r.status_code == 429:
                 wait = _duration_s(r.headers.get("retry-after", "")) or 20
                 if self.keys.blocked(key, family, model) and others and self.keys.pick(cfg, family, model=model) != key:
-                    report(stage=f"Esa cuenta de {provider_name(cfg)} ha agotado su cupo: se sigue con la "
-                                 "siguiente clave…")
+                    report(stage=f"Una de las claves de {provider_name(cfg)} ha agotado su cupo: se sigue con "
+                                 "la siguiente…")
                     continue
                 if wait > 300:  # limite diario de tokens: no tiene sentido esperar aqui
                     raise EngineError(f"Límite diario de {provider_name(cfg)} alcanzado (se libera en "

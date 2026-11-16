@@ -361,11 +361,12 @@ El detalle de cada pantalla. `LEEME.txt`, el que va en el zip, cabe en una panta
 
 ### Si tu API tiene un cupo
 
-- Si tu plan limita las peticiones o los tokens por minuto o por día, Tenca va a su ritmo: espera lo que pide el
-  proveedor y, con varias claves de cuentas suyas (Ajustes, «Claves adicionales»), pasa a la siguiente cuando una se
-  queda sin cupo.
-- Si el directo se queda sin cupo, la grabación sigue y lo que falte se transcribe al terminar. Si el resumen llega
-  al límite del día, se vuelve a pedir más tarde con «Resumir».
+- Si tu plan limita las peticiones o los tokens por minuto, Tenca va a su ritmo y, cuando el proveedor pide esperar
+  poco, espera. Con claves de otras cuentas del mismo proveedor (Ajustes › Avanzado › «La nube, en detalle», «Claves
+  adicionales»), pasa a la siguiente cuando una se queda sin cupo.
+- Si se acaba el cupo del día: en el directo, la grabación sigue y lo que falte se intenta al terminar (y el repaso
+  final, si está activado, repasa la grabación entera); una transcripción de la cola se para con «… pide esperar N
+  min» y se vuelve a lanzar después con «Reintentar»; el resumen se vuelve a pedir más tarde con «Resumir».
 
 ### Si algo falla
 

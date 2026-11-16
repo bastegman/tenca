@@ -12,17 +12,22 @@ está en este repositorio. «Desarrollo y CI» es para quien mantiene el reposit
 
 ### Ningún proveedor de la nube por delante de los demás (16/11/2026)
 
-Tenca funciona con cualquier API compatible con OpenAI, y la documentación y la app ya no dan por hecho ninguna.
+Tenca funciona con cualquier API compatible con OpenAI, y la documentación y la app ya no ponen a ninguna por delante
+de las demás.
 
 - README, LEEME y este CHANGELOG hablan de «tu API» o «el proveedor que elijas». En lugar de los límites del plan
   gratuito de un proveedor, el README explica qué hace Tenca si tu API tiene un cupo.
 - Los avisos de cupo, esperas y límites (en el directo, el repaso y el resumen) dicen el nombre del proveedor que
-  tienes elegido. Antes, el resumen nombraba siempre al mismo aunque usaras otro.
+  tienes elegido. Antes, el resumen y la transcripción en la nube nombraban siempre al mismo aunque usaras otro. Con
+  una API propia, los avisos y los errores de la nube (clave no válida, petición rechazada…) dicen «tu API».
 - La lista de «API externa» no cambia y quien ya usa un proveedor no tiene que tocar nada.
 - **Nuevo test**, en `NotasInternasTests`: falla si el nombre que se ha quitado vuelve a aparecer fuera de la tabla
-  de proveedores (`engines.PROVIDERS`) en el README, los LEEME, este CHANGELOG, los workflows o un texto de la app.
+  de proveedores (`engines.PROVIDERS` y `CHAT_URLS`) y de los identificadores: en el README, los LEEME, este
+  CHANGELOG, `.github/`, `design/`, los ficheros de la raíz o cualquiera de `_app/` (en los `.py`, en los textos, los
+  comentarios y los docstrings). Los tests y los scripts de desarrollo no cuentan: sus datos de prueba configuran ese
+  proveedor.
 - Los apartados reescritos saldrán una vez en «También cambian» del próximo Release, y los dos con el título nuevo,
-  como apartados nuevos.
+  como apartados nuevos. Los zips de los Releases anteriores llevan su README y su LEEME de entonces.
 
 ### Sin notas de trabajo en el repositorio (16/11/2026)
 
@@ -374,14 +379,14 @@ Rediseño B6, puntos 1-3. Rama `directo-avisos`. En la cabecera del directo, con
 ### La API externa vuelve a transcribir con unos ajustes de antes (10/11/2026)
 
 - Con unos ajustes en los que el proveedor de la nube no es ninguno de los que hay (vacío o de una versión anterior),
-  el cambio del 09/11 («ningún proveedor por defecto») hacía que el motor lo rechazara. El directo pasaba entonces,
-  sin decirlo, a Whisper en el PC y se quedaba descargando o cargando el modelo, y al terminar no salía nada. Hasta el
-  09/11 eso iba al proveedor por defecto de los ajustes, y vuelve a ir: al arrancar, ese proveedor pasa al de por
-  defecto (lo dice el log) y el motor también lo trata así. Solo «Probar» del asistente con «API externa» y sin
-  proveedor elegido sigue sin mandar nada a nadie.
+  el cambio del 09/11 (una instalación nueva no sugiere ningún proveedor) hacía que el motor lo rechazara. El directo
+  pasaba entonces, sin decirlo, a Whisper en el PC y se quedaba descargando o cargando el modelo, y al terminar no
+  salía nada. Hasta el 09/11 eso iba al proveedor que traen los ajustes de fábrica (`cloud.provider`), y vuelve a ir:
+  al arrancar, ese proveedor pasa al de fábrica (lo dice el log) y el motor también lo trata así. Solo «Probar» del
+  asistente con «API externa» y sin proveedor elegido sigue sin mandar nada a nadie.
 - En ese mismo caso, Ajustes › Procesado enseñaba «Azure OpenAI» (el primero de la lista) y «Guardar» lo dejaba en
-  Azure sin endpoint. Unos ajustes así (Azure sin endpoint ni deployment y con una clave «gsk_…») vuelven al de por
-  defecto al arrancar.
+  Azure sin endpoint. Unos ajustes así (Azure sin endpoint ni deployment y con una clave «gsk_…», que no es de Azure)
+  vuelven al de fábrica al arrancar.
 - Una instalación nueva sigue sin sugerir ni preseleccionar ningún proveedor.
 
 ### Memoria con audios largos (09/11/2026)
@@ -412,7 +417,7 @@ sin memoria y la app enseñó la traza de ONNX dos veces, una como «No se pudo 
   comprometida de «Quién habla» con este commit y con `fe29522`; falla si no baja o pasa de 1.200 MB
   (`scripts/e2e/voces_memoria.py`).
 
-### Ningún proveedor de la nube por defecto en una instalación nueva (09/11/2026)
+### Una instalación nueva no sugiere ningún proveedor de la nube (09/11/2026)
 
 A quien instala por primera vez no se le sugiere un servicio concreto.
 
@@ -1057,9 +1062,9 @@ Lo que se pedía: que funcione con una cuenta de Claude de empresa, con SSO, y c
 Lo que se pedía (06/11/2026): la configuración era difícil y mala de seguir.
 - **La línea del modo.** El diálogo Grabar, la cabecera del directo, la Cola y el chip «EN VIVO» dicen lo mismo y con
   las mismas palabras: «Se transcribe en este PC (Normal) y al terminar la resume Claude con tu cuenta», «Se transcribe
-  en este PC (Normal). Sin resumen con IA» o «Se transcribe con OpenAI y al terminar la resume OpenAI». Cada modelo tiene
-  un solo nombre (Rápido, Normal, Preciso, Máxima). Los modelos del directo y «Rehacer con este modelo» quedan detrás
-  de «Cambiar».
+  en este PC (Normal). Sin resumen con IA» o «Se transcribe con OpenAI y al terminar la resume OpenAI». Cada modelo
+  tiene un solo nombre (Rápido, Normal, Preciso, Máxima). Los modelos del directo y «Rehacer con este modelo» quedan
+  detrás de «Cambiar».
 - **«Preparando la transcripción».** Mientras se descarga o se carga el modelo del directo, la cabecera lo dice con
   barra, %, MB y tiempo, y que la grabación sigue sin perder nada. El hueco del texto ya no dice «Escuchando…» ni la
   Cola «al día» con 0:00 transcrito. En Grabar, si el modelo aún no está en el PC, lo avisa con su tamaño y
@@ -1079,8 +1084,8 @@ Lo que se pedía (06/11/2026): la configuración era difícil y mala de seguir.
   tarjeta dice lo que hay ahora (dónde se transcribe, quién resume y cuándo se probó por última vez) con «Probar» y
   «Cambiar…» (el asistente). Debajo sigue el cambio rápido con «Aplicar ahora». Lo técnico de la nube (modelo del
   directo, otras claves, trozos, paralelismo) pasa a Avanzado y solo sale con la API; «repasar la grabación entera» y
-  el cupo del proveedor, en Grabar, también solo con la API. Voces queda tal cual. Ajustes se abre en la última sección vista
-  (o en la que toca: falta la clave → Procesado).
+  el cupo del proveedor, en Grabar, también solo con la API. Voces queda tal cual. Ajustes se abre en la última sección
+  vista (o en la que toca: falta la clave → Procesado).
 - **Errores en una frase con qué hacer** (`explicar.py`): Claude Code sin sesión, sin instalar, sin respuesta o con el
   plan en su límite de uso; una pieza de la instalación que falta («No module named…»); un proxy que contesta en lugar
   de la API. Los de la nube y la descarga de modelos ya venían en una frase (`connection_error`, `cloud_http_error`): se
@@ -1101,9 +1106,9 @@ grabar «Modelo» parecía seguir en la API y «Descargando modelo medium» no a
 - **Ajustes › Dónde se procesan tus reuniones** dice si lo elegido está aplicado o no, con un botón «Aplicar ahora»
   junto a las opciones, y al cerrar Ajustes sin aplicarlo avisa de que sigue la opción de antes (antes había que bajar
   hasta «Guardar»: elegir la cuenta de Claude, pulsar «Comprobar» y cerrar dejaba la API externa sin decirlo, y el
-  directo seguía en la nube). Un clic de prueba no cambia nada; si hay transcripciones en la nube en marcha, lo dice antes
-  de aplicar. Con «Solo en este PC» y «Con tu cuenta de Claude» enseña los modelos de Whisper del PC con su estado y
-  «Descargar», «Cancelar» o «Reintentar», deja claro que Claude no transcribe (solo resume) y, al aplicar, empieza a
+  directo seguía en la nube). Un clic de prueba no cambia nada; si hay transcripciones en la nube en marcha, lo dice
+  antes de aplicar. Con «Solo en este PC» y «Con tu cuenta de Claude» enseña los modelos de Whisper del PC con su estado
+  y «Descargar», «Cancelar» o «Reintentar», deja claro que Claude no transcribe (solo resume) y, al aplicar, empieza a
   bajar el modelo del directo, no en mitad de la primera reunión (salvo que se haya cancelado en Ajustes).
 - **Transcribir desde la cola en este PC volvía a funcionar solo con un PyAV antiguo.** faster-whisper 1.2.1 (su
   última versión) abre el audio con `av.open(…, metadata_errors="ignore")`, y PyAV 19 (29/09/2026, lo que instala hoy
@@ -1188,8 +1193,8 @@ grabar «Modelo» parecía seguir en la API y «Descargando modelo medium» no a
   resumen automático se puede apagar también con la cuenta de Claude, y su aviso dice que es automático; la entrada
   se escribe desde un hilo propio (una transcripción larga no se pierde con Python anterior a 3.13.10); `claude` se
   lanza en una carpeta vacía y sin `ANTHROPIC_API_KEY` en el entorno (el gasto va a la cuenta, no a la API); el
-  permiso de «Resumir» es por destino (el de la API externa no vale para Anthropic); un `"agente": null` en `settings.json` no da
-  el fichero por roto; Inicio invita a elegir dónde se procesa si nadie lo ha hecho.
+  permiso de «Resumir» es por destino (el de la API externa no vale para Anthropic); un `"agente": null` en
+  `settings.json` no da el fichero por roto; Inicio invita a elegir dónde se procesa si nadie lo ha hecho.
 
 ### Invitar al autor a un café (02/11/2026)
 - En Ajustes › Acerca de, en el README y en el LEEME hay un enlace discreto de PayPal para invitar al autor a un
@@ -1380,16 +1385,16 @@ Lo que falló en la primera prueba de la versión del 01/11/2026 en un portátil
 
 ### Directo
 - **Claves adicionales por proveedor** (P1-05). Cada clave adicional es del proveedor con el que se guardó (las del
-  de por defecto siguen en `cloud.extra_keys`; las demás, en `extra_keys_openai`, `extra_keys_azure` y `extra_keys_custom`,
-  cifradas igual) y solo se usa con él: al cambiar de proveedor ya no se mandan a otro servicio. Ajustes enseña las
-  del proveedor elegido y dice de quién son las demás.
+  proveedor de fábrica siguen en `cloud.extra_keys`; las demás, en `extra_keys_openai`, `extra_keys_azure` y
+  `extra_keys_custom`, cifradas igual) y solo se usa con él: al cambiar de proveedor ya no se mandan a otro servicio.
+  Ajustes enseña las del proveedor elegido y dice de quién son las demás.
 - **«Otra (compatible)», con su modelo del directo** (P1-15): un campo libre en Ajustes; vacío, el directo usa el
   modelo de la cola. Antes pedía siempre `whisper-large-v3-turbo`, y una pasarela sin ese modelo rechazaba cada trozo.
 - **Ponerse al día sin atascarse** (P1-14). Si el directo en la nube va con retraso (más de dos ventanas pendientes),
   junta lo pendiente en una petición de hasta 10 min (un WAV de 19,2 MB) y se pone al día; al terminar, lo que quede
   sale en trozos de como mucho 10 min. Nunca se manda más de 25 MB, ni más peticiones por minuto de las que declare el
-  proveedor (`x-ratelimit-limit-requests`, en OpenAI, Azure o una pasarela; con cupo diario, el límite es por día). Antes el
-  retraso crecía sin tope y al final se subía todo de una vez (error 413).
+  proveedor (`x-ratelimit-limit-requests`, en OpenAI, Azure o una pasarela; con cupo diario, el límite es por día).
+  Antes el retraso crecía sin tope y al final se subía todo de una vez (error 413).
 - **Un trozo que falla no tumba la sesión** (P1-16). En la nube se salta y se anota, también al ponerse al día y el
   último; si el directo acaba sin texto o con un error y la grabación ya terminó, se encola igual el repaso final (y
   con él los destinos y el resumen). El directo hace 2 intentos por trozo, con esperas de como mucho 30 s.
@@ -1406,11 +1411,11 @@ Lo que falló en la primera prueba de la versión del 01/11/2026 en un portátil
 - El cupo se lleva por clave y por modelo: el directo con `whisper-large-v3-turbo` y el repaso final con
   `whisper-large-v3` no se descuentan uno al otro (P2-23).
 - **Traducción**: solo traduce lo dicho en los últimos 30 s, así que activada a mitad de reunión no empieza por el
-  minuto 0 (P2-21); enseña el modelo y el proveedor reales (`gpt-4o-mini` en OpenAI, el modelo del resumen en una
-  pasarela propia y, si no, `openai/gpt-oss-20b`) y, sin servicio de chat (Azure), sale desactivada (P2-24). Al terminar el
-  directo, la última traducción tarda como mucho 10 s en total, esperas incluidas (antes podía retener el final del
-  directo varios minutos); si tras esperar al límite por minuto no quedaría tiempo para pedirla, ya no espera en balde
-  (P2-22).
+  minuto 0 (P2-21); enseña el modelo y el proveedor reales (`gpt-4o-mini` en OpenAI; en una pasarela propia, el
+  modelo del resumen o, si no hay, `openai/gpt-oss-20b`, que es también el del proveedor de fábrica) y, sin servicio de
+  chat (Azure), sale desactivada (P2-24). Al terminar el directo, la última traducción tarda como mucho 10 s en total,
+  esperas incluidas (antes podía retener el final del directo varios minutos); si tras esperar al límite por minuto no
+  quedaría tiempo para pedirla, ya no espera en balde (P2-22).
 - Con Azure OpenAI, la pantalla del resumen dice que el resumen aún no funciona ahí (con Azure solo se transcribe), en
   vez de mandar a «Configurar la nube» (P2-25).
 
@@ -1752,12 +1757,12 @@ Lo que falló en la primera prueba de la versión del 01/11/2026 en un portátil
     todas antes de la primera subida: la primera subida empieza ~0,7 s antes en una hora de audio (el total no
     cambia: lo que manda es decodificar, 4,2 s por hora, y la API).
 - **Directo en la nube casi en streaming** (`_app/live.py`, `_app/engines.py`, `_app/static/directo.js`): el directo
-  en la nube manda trozos de 3–6 s en vez de 8–15: corta en la primera pausa de la voz a partir de 3 s y, si nadie calla,
-  a los 6 s con 0,5 s de solape que se deduplica por tiempos; solo se envía la voz (los silencios de los extremos se
-  recortan y una ventana sin voz no se manda ni cuenta). El modelo del directo es configurable (con el proveedor por
-  defecto, `cloud.live_model`, de entrada `whisper-large-v3-turbo`; con «Otra (compatible)», ver «Directo»); el repaso final
-  sigue con `cloud.model`. Se mide la latencia de cada trozo (fin del audio → texto escrito) y se enseña la mediana y
-  el p95 de la sesión. Lo local (20–45 s) y «ponerse al día» (120–300 s) no cambian.
+  en la nube manda trozos de 3–6 s en vez de 8–15: corta en la primera pausa de la voz a partir de 3 s y, si nadie
+  calla, a los 6 s con 0,5 s de solape que se deduplica por tiempos; solo se envía la voz (los silencios de los extremos
+  se recortan y una ventana sin voz no se manda ni cuenta). El modelo del directo es configurable (con el proveedor de
+  fábrica, `cloud.live_model`, de entrada `whisper-large-v3-turbo`; con «Otra (compatible)», ver «Directo»); el repaso
+  final sigue con `cloud.model`. Se mide la latencia de cada trozo (fin del audio → texto escrito) y se enseña la
+  mediana y el p95 de la sesión. Lo local (20–45 s) y «ponerse al día» (120–300 s) no cambian.
 - **Cupo y ritmo de un plan con cupo por día**: por clave se guardan `x-ratelimit-remaining-requests`,
   `x-ratelimit-reset-requests` y el último `retry-after` (la primera vez se anotan en `server.log` todas las
   cabeceras `x-ratelimit-*`), nunca más de una petición cada 3 s por clave (20/min) y la ventana del directo crece

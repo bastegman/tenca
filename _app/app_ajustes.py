@@ -130,7 +130,7 @@ class Ajustes:
                 d["cloud"]["api_key"] = c["api_key"].strip()
             if c.get("clear_key"):
                 d["cloud"]["api_key"] = ""
-            for k in ("live_model", "live_model_custom"):  # el del directo del de por defecto y el de una pasarela
+            for k in ("live_model", "live_model_custom"):  # el del directo (proveedor de fabrica) y el de una pasarela
                 if k in c:
                     d["cloud"][k] = (c[k] or "").strip()[:80]
             # claves adicionales: cada lista es de su proveedor (las del de por defecto, en extra_keys). La interfaz
@@ -383,7 +383,8 @@ class Ajustes:
                 timeout=60, attempts=2)
             return out
 
-        prov = (engines.PROVIDERS.get(st["cloud"].get("provider") or "groq") or {}).get("label") or "la API"
+        # sin proveedor elegido (la marca de _candidata, provider vacio) no se nombra a ninguno
+        prov = (engines.PROVIDERS.get(st["cloud"].get("provider")) or {}).get("label") or "la API"
         nombres = {"transcribe": f"con {prov}" if modo == "api" else "en este PC",
                    "resume": "Claude (tu cuenta)" if modo == "agente" else prov,
                    "proveedor": prov if modo == "api" else None}

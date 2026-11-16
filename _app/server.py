@@ -537,7 +537,7 @@ def main():
         base = os.environ["CHULETA_PRUEBAS_URL_GROQ"].rstrip("/")
         engines.PROVIDERS["groq"] = dict(engines.PROVIDERS["groq"], url=base + "/audio/transcriptions")
         engines.CHAT_URLS["groq"] = base + "/chat/completions"
-        log("PRUEBAS: el proveedor por defecto va a una URL de pruebas")
+        log("PRUEBAS: el proveedor de fábrica va a una URL de pruebas (CHULETA_PRUEBAS_URL_GROQ)")
     try:
         Handler.app = App()
     except Exception as e:

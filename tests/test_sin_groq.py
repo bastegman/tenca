@@ -70,6 +70,16 @@ class GuardarTests(TempTree):
         a.save_settings({"procesado": "api", "cloud": {"provider": "openai", "api_key": "sk-x"}})
         self.assertEqual((a.settings.get()["procesado"], a.settings.get()["cloud"]["provider"]), ("api", "openai"))
 
+    def test_probar_sin_proveedor_no_nombra_a_ninguno(self):
+        """«Probar» del asistente sin proveedor elegido (la marca de _candidata) no dice «Transcribir con» uno concreto;
+        con uno elegido, su nombre."""
+        a = self.app()
+        st, _ = a._candidata({"candidata": {"procesado": "api", "cloud": {"provider": "", "api_key": "k"}}})
+        self.assertEqual(a._prueba_hacer(st)[1],
+                         {"transcribe": "con la API", "resume": "la API", "proveedor": "la API"})
+        st, _ = a._candidata({"candidata": {"procesado": "api", "cloud": {"provider": "openai", "api_key": "k"}}})
+        self.assertEqual(a._prueba_hacer(st)[1]["transcribe"], "con OpenAI")
+
     def test_quien_ya_tiene_groq_puede_volver_a_la_api(self):
         """Con su clave del de por defecto guardada (y el procesado en local), «Aplicar ahora» con la API sigue como
         siempre."""
@@ -316,10 +326,12 @@ class TextosDelProveedorTests(unittest.TestCase):
         self.assertEqual(engines.provider_name({"provider": "azure"}), "Azure OpenAI")
         self.assertEqual(engines.provider_name({"provider": "custom"}), "tu API")
         self.assertEqual(engines.provider_name({"provider": "custom"}, inicio=True), "Tu API")
-        for cfg in ({}, None, {"provider": ""}, {"provider": "inventado"}):  # el que usa el motor
+        for cfg in ({"provider": ""}, {"provider": "inventado"}, {"provider": None}):  # ninguno de la tabla
             with self.subTest(cfg=cfg):
-                self.assertEqual(engines.provider_name(cfg), engines.PROVIDERS[server.DEFAULT_SETTINGS["cloud"]
-                                                                               ["provider"]]["label"])
+                self.assertEqual(engines.provider_name(cfg), "tu proveedor")
+        por_defecto = engines.PROVIDERS[server.DEFAULT_SETTINGS["cloud"]["provider"]]["label"]
+        self.assertEqual(engines.provider_name({}), por_defecto)  # sin la clave: el de por defecto, como el motor
+        self.assertEqual(engines.provider_name(None), por_defecto)
 
     def test_directo_y_cola(self):
         from support import engines
@@ -336,7 +348,7 @@ class TextosDelProveedorTests(unittest.TestCase):
                 eng.keys.clock = Clock()
                 with Net([largo]), self.assertRaises(engines.EngineError) as cm:
                     post(eng, cfg, chunk)
-                self.assertIn(f"{nombre} pide esperar 90 min", str(cm.exception))
+                self.assertIn(f"{nombre} pide esperar 90 min ({nombre} pide esperar (HTTP 429", str(cm.exception))
         tmp, chunk = chunk_file(self)
         eng = engines.CloudEngine(tmp)
         eng.keys.clock = Clock()
@@ -344,7 +356,7 @@ class TextosDelProveedorTests(unittest.TestCase):
         with Net([largo, ok]):
             eng._post({"provider": "openai", "api_key": "sk-a", "extra_keys_openai": ["sk-b"]}, chunk, None, None,
                       lambda **k: etapas.append(k.get("stage")), lambda: False)
-        self.assertIn("Esa cuenta de OpenAI ha agotado su cupo: se sigue con la siguiente clave…", etapas)
+        self.assertIn("Una de las claves de OpenAI ha agotado su cupo: se sigue con la siguiente…", etapas)
 
     def test_resumen(self):
         from support import engines

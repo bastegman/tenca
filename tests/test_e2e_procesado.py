@@ -116,8 +116,7 @@ class GrabacionEnCurso:
 
 class GroqFalso:
     """Imita /openai/v1/audio/transcriptions y /chat/completions del proveedor por defecto: verbose_json, cabeceras de
-    cupo y 401 si la
-    clave no es la de la prueba. Apunta cada petición (ruta, modelo, clave)."""
+    cupo y 401 si la clave no es la de la prueba. Apunta cada petición (ruta, modelo, clave)."""
 
     def __init__(self):
         self.peticiones = []
