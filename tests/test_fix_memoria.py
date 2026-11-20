@@ -294,7 +294,10 @@ class VocesEnDiscoTests(TempTree):
 
         out = os.path.join(self.tmp, "r.hablantes.json")
         for diarize, rc in ((falla, 1), (bien, 0)):
-            with mock.patch.object(voices, "load_audio_16k", load), \
+            # con los modelos «ya descargados»: sin esto, main() los bajaba de GitHub en cada ejecución y el test
+            # dependía de que el fichero publicado siguiera teniendo el sha256 anclado en voices.MODELS
+            with mock.patch.object(voices, "models_ready", return_value=True), \
+                    mock.patch.object(voices, "load_audio_16k", load), \
                     mock.patch.object(voices, "diarize", diarize), \
                     mock.patch.object(os, "dup2"), mock.patch.object(os, "fdopen", return_value=io.BytesIO()):
                 self.assertEqual(voices.main(["--diarize", "x.m4a", "--out", out, "--data", self.data_dir]), rc)
