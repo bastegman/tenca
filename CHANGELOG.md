@@ -10,6 +10,11 @@ nada de ningún proyecto concreto.
 empresa. Entre paréntesis va el número de cada hallazgo, el mismo que citan los commits; el informe de la auditoría no
 está en este repositorio. «Desarrollo y CI» es para quien mantiene el repositorio: no cambia nada en la app instalada.
 
+### El enlace para invitar a un café, sin correo (20/11/2026)
+
+- «Invitar al autor a un café» (en Ajustes, en el README y en el LEEME) abre ahora su página de PayPal.me en vez de
+  la de donaciones de PayPal, que llevaba su correo en la dirección.
+
 ### La nube sin colas largas: partes de siempre, cupo respetado y lo tuyo primero (16/11/2026)
 
 - **Menos peticiones con idiomas mezclados:** una reunión en una mezcla (español + inglés…) o detectando ya no se

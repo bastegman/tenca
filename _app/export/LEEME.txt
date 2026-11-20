@@ -40,4 +40,4 @@ Todo lo demás (Hoy, quién habla, vocabulario, privacidad, el cupo de tu API…
 https://github.com/bastegman/tenca#readme
 
 Tenca es gratis. Si te ayuda, puedes invitar al autor a un café:
-https://www.paypal.com/donate?business=bdo.st.f%40gmail.com&currency_code=EUR
+https://paypal.me/bernardosteg

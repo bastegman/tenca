@@ -304,14 +304,19 @@ class ServidorHttpTests(unittest.TestCase):
         self.assertEqual(self.call("/api/acerca/abrir", {"que": "datos"}, header=False)[0], 403)
 
     def test_invitar_a_un_cafe(self):
-        """Donaciones discretas: un enlace de PayPal al correo del autor en Ajustes, el README y el LEEME (y su
+        """Donaciones discretas: un enlace a la página de PayPal.me del autor en Ajustes, el README y el LEEME (y su
         plantilla), sin ventanas emergentes ni recordatorios. En Ajustes, dos sitios y ninguno más (08/11/2026:
-        algo más visible, pero discreto): al pie de la columna de secciones y en Acerca de."""
-        self.assertTrue(server.DONAR_URL.startswith("https://www.paypal.com/donate?business="), server.DONAR_URL)
+        algo más visible, pero discreto): al pie de la columna de secciones y en Acerca de. Sin correo en el enlace
+        (20/11/2026): el de donaciones de PayPal con «business=» lo llevaba a la vista de cualquiera."""
+        self.assertTrue(server.DONAR_URL.startswith("https://paypal.me/"), server.DONAR_URL)
+        self.assertNotIn("@", server.DONAR_URL)
+        self.assertNotIn("%40", server.DONAR_URL.lower())
         raiz = os.path.dirname(APP)
         for n in ("README.md", "LEEME.txt", os.path.join("_app", "export", "LEEME.txt")):
             with open(os.path.join(raiz, n), encoding="utf-8") as f:
-                self.assertIn(server.DONAR_URL, f.read(), n)
+                texto = f.read()
+            self.assertIn(server.DONAR_URL, texto, n)
+            self.assertNotIn("donate?business=", texto, n)  # ni queda el enlace viejo, con el correo
         app = read("static", "app.js")
         ini = app.index("function openSettings(")
         fin = app.index("\nfunction ", ini + 1)

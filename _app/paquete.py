@@ -14,8 +14,8 @@ from rutas import APP_DIR, ROOT, STATIC_DIR, version_file
 
 
 REPO_URL = "https://github.com/bastegman/tenca"  # el repo se llamaba «chuleta» (GitHub redirige)
-# Acerca de > «invitar al autor a un café»: la pagina de donaciones de PayPal del autor (abre el navegador del sistema)
-DONAR_URL = "https://www.paypal.com/donate?business=bdo.st.f%40gmail.com&currency_code=EUR"
+# Acerca de > «invitar al autor a un café»: su pagina de PayPal.me, sin su correo (abre el navegador del sistema)
+DONAR_URL = "https://paypal.me/bernardosteg"
 PKG_ROOT = APP_NAME  # carpeta raiz del zip instalable (Tenca/INSTALAR.bat, Tenca/_app/...)
 
 # Acerca de > el tributo a la tenca (Mimus thenca): «Historia natural y biologia reproductiva de la Tenca (Mimus thenca)

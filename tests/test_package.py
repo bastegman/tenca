@@ -306,8 +306,9 @@ class NotasInternasTests(unittest.TestCase):
     def test_notas_internas_casa_y_respeta_las_exentas(self):
         """Los patrones casan con cada tipo de nota (también en mayúsculas, en un fichero CRLF, en el CHANGELOG y con la
         referencia partida por el ajuste de línea de un comentario, también en un .js de _app/static/) y dejan pasar lo
-        exento: LICENSE, el AppUserModelID y, solo en los ficheros del instalador y sus tests, el editor como valor
-        literal entero; el nombre completo entre comillas en un dato de prueba cualquiera sí sale."""
+        exento: LICENSE, el AppUserModelID, la página de PayPal.me del autor y, solo en los ficheros del instalador y
+        sus tests, el editor como valor literal entero; el nombre completo entre comillas en un dato de prueba
+        cualquiera sí sale, y otra página de PayPal.me con su nombre, también."""
         root = tempfile.mkdtemp(prefix="tenca-notas-")
         nombre, apellido = "Ber" + "nardo", "Stegm" + "aier"  # en trozos: el propio test se revisa a sí mismo
         asistente, sistema = "Clau" + "dia", "Open" + "Claude"
@@ -324,7 +325,8 @@ class NotasInternasTests(unittest.TestCase):
                                        f"VersionInfoCopyright={nombre} {apellido} (licencia MIT)\n",
             "tests/t1.py": f'yo = v.create("{nombre} {apellido}", es_usuario=True)\n',  # fuera de los del instalador
             "README.md": f"el daemon de {sistema}\nmsgs NNNN y una versión 2026.11 sin número de mensaje\n"
-                         f"notas en memory/proj{''}ects/x_IMPL.md y ~/Proj{''}ects/notas\n",
+                         f"notas en memory/proj{''}ects/x_IMPL.md y ~/Proj{''}ects/notas\n"
+                         f"[un café](https://paypal.me/{nombre.lower()}steg)\notra: paypal.me/{nombre.lower()}\n",
             "LICENSE": f"Copyright (c) 2026 {nombre} {apellido}\n",
             "_app/static/e.js": f"// ms{''}g 1242 de {nombre}\n",
         }
@@ -337,6 +339,7 @@ class NotasInternasTests(unittest.TestCase):
         self.assertEqual(hits, [("CHANGELOG.md", 2, "mensaje"), ("CHANGELOG.md", 3, "mensaje"),
                                 ("CHANGELOG.md", 3, "mensaje"), ("README.md", 1, "sistema de agentes"),
                                 ("README.md", 3, "ruta personal"), ("README.md", 3, "ruta personal"),
+                                ("README.md", 5, autor),
                                 ("_app/a.py", 1, autor), ("_app/a.py", 2, "asistente"), ("_app/a.py", 3, "mensaje"),
                                 ("_app/a.py", 5, "asistente")]
                          + [("_app/instalar.ps1", n, autor) for n in (4, 4, 5, 5, 6, 6)]
@@ -542,8 +545,10 @@ NOTAS_FICHEROS_EXENTOS = ("LICENSE",)
 # entero: justo detrás de una comilla o de un «=» y seguido de la comilla de cierre, del fin de la línea o de
 # «(licencia MIT)» (Publisher del registro, con el que desinstalar.ps1 reconoce sus entradas, y AppPublisher/VersionInfo
 # del Setup.exe), igual que en LICENSE. «x = "<nombre> lo validó"» no está exento, ni el nombre completo entre
-# comillas en otro fichero (un dato de prueba con la persona real).
-NOTAS_EXENTAS = re.compile(r"\bBer[n]ardo\\?\.(?:Chuleta|Notas)\b")
+# comillas en otro fichero (un dato de prueba con la persona real). También, en cualquier fichero, su página de
+# PayPal.me (paquete.DONAR_URL, en el README y en el LEEME): es la dirección de su cuenta de PayPal, y con otra la
+# invitación no le llegaría.
+NOTAS_EXENTAS = re.compile(r"\bBer[n]ardo\\?\.(?:Chuleta|Notas)\b|\bpaypal\.me/ber[n]ardosteg\b")
 NOTAS_EXENTAS_EDITOR = re.compile(r"(?<=[\"'=])Ber[n]ardo Stegm[a]ier(?=[\"']|[ \t]*$|[ \t]+\(licencia MIT\))", re.M)
 NOTAS_FICHEROS_EDITOR = ("_app/instalar.ps1", "_app/desinstalar.ps1", "scripts/setup/tenca.iss",
                          "scripts/e2e/lookfeel_e2e.ps1", "tests/test_desinstalar.py", "tests/test_tenca.py")

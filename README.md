@@ -648,7 +648,7 @@ la rejilla de su tamaño) con Chrome o Edge headless y escribe
 
 ## Invitar al autor a un café
 
-Tenca es gratis. Si te sirve, puedes [invitar al autor a un café por PayPal](https://www.paypal.com/donate?business=bdo.st.f%40gmail.com&currency_code=EUR). El mismo enlace está en
+Tenca es gratis. Si te sirve, puedes [invitar al autor a un café por PayPal](https://paypal.me/bernardosteg). El mismo enlace está en
 Ajustes › Ayuda › Acerca de; no hay ventanas emergentes ni recordatorios.
 
 ## Licencia
